@@ -28,6 +28,13 @@ a subnet legitimately needs to reach the agent front door.
 ''')
 param agentInboundAllowedCidrs array
 
+@description('''
+CIDR of the model-gateway spoke private-endpoint subnet that hosts the APIM inbound
+private endpoint. When non-empty, an outbound NSG rule is added so the agent subnet can
+reach the APIM gateway PE on 443. Empty = model gateway not deployed, so no rule is added.
+''')
+param modelGatewayPeCidr string = ''
+
 var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
@@ -133,7 +140,7 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
   name: '${vnetName}-agent-nsg'
   location: location
   properties: {
-    securityRules: [
+    securityRules: concat([
       // ---------------- Inbound ----------------
       {
         name: 'Allow-LoadBalancer-Probes-Inbound'
@@ -398,7 +405,22 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           description: 'Deny-by-default: everything not explicitly allowed above is blocked.'
         }
       }
-    ]
+    ], modelGatewayPeCidr == '' ? [] : [
+      {
+        name: 'Allow-ModelGatewayApim-Outbound'
+        properties: {
+          priority: 115
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: agentSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: modelGatewayPeCidr
+          destinationPortRange: '443'
+          description: 'Reach the APIM model-gateway inbound private endpoint (model-gateway spoke PE subnet) on HTTPS. Traffic is force-tunnelled via the firewall (UDR); NSG evaluates the real PE dest IP, so this explicit allow is required or Deny-All-Outbound blocks discovery/inference.'
+        }
+      }
+    ])
   }
 }
 

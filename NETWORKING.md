@@ -80,6 +80,7 @@ Defined in [`modules-network-secured/foundry-spoke-vnet.bicep`](./modules-networ
 |------|------|-----|------------|-----|
 | 100 | `Allow-IntraSubnet-Outbound` | agent subnet | `*` | ACA data-plane node/pod comms. |
 | 110 | `Allow-PrivateEndpoints-Outbound` | `pe-subnet` (`10.2.1.0/24`) | 443 / TCP | Reach private endpoints (AI account, Search, Storage, Cosmos, Key Vault, ACR). HTTPS only, PE subnet only. |
+| 115 | `Allow-ModelGatewayApim-Outbound` *(model gateway only)* | model-gateway PE subnet (`10.3.1.0/24`) | 443 / TCP | Reach the **APIM model-gateway inbound private endpoint** (dynamic model discovery + inference). Only added when `enableModelGateway=true`. **Without this, `Deny-All-Outbound` blocks the agent → APIM PE and Foundry finds zero models.** |
 | 120 | `Allow-DnsResolver-Udp-Outbound` | DNS resolver `/32` | 53 / UDP | DNS to the hub DNS Private Resolver over peering. |
 | 121 | `Allow-DnsResolver-Tcp-Outbound` | DNS resolver `/32` | 53 / TCP | DNS (TCP) to the hub resolver. |
 | 130 | `Allow-Firewall-Outbound` | firewall private IP `/32` | 443 / TCP | UDR next hop for internet-bound egress. HTTPS only, single host. |
@@ -328,6 +329,88 @@ is deployed at that resource group's scope.
 
 - VNet flow logs: <https://learn.microsoft.com/azure/network-watcher/vnet-flow-logs-overview>
 - NSG flow logs retirement: <https://learn.microsoft.com/azure/network-watcher/nsg-flow-logs-overview>
+
+> **⚠️ Gotcha — flow logs capture NOTHING if the storage account has
+> `publicNetworkAccess: Disabled`.** The Network Watcher writer is a Microsoft
+> service outside your VNet; with the public endpoint fully sealed, even the
+> `AzureServices` trusted-services *bypass is ignored* (documented behaviour), and
+> there is no private-endpoint fallback for the writer. Result: flow log
+> `provisioningState: Succeeded` but the `NTANetAnalytics` table stays empty.
+> This subscription's Azure Policy force-disables storage public access, which is
+> exactly how we ended up with empty flow logs. Fix:
+> `az storage account update -n <sa> -g <rg> --public-network-access Enabled --default-action Deny --bypass AzureServices`
+> (add a policy exemption or it will re-flip). If you can't, rely on **firewall
+> logs** instead — they were sufficient to diagnose the model-gateway issue.
+
+### App Insights / APIM gateway logs
+
+- **APIM gateway requests** land in `AzureDiagnostics` (`ResourceType == "SERVICE"`,
+  `Category == "GatewayLogs"`). Useful fields: `method_s`, `url_s`, `responseCode_d`,
+  `backendResponseCode_d`, `lastError_reason_s`. This shows every request that
+  *reaches* the APIM gateway (private or public) and its result.
+
+  ```kusto
+  AzureDiagnostics
+  | where ResourceType == "SERVICE" and Category == "GatewayLogs"
+  | where url_s contains "deployments"
+  | project TimeGenerated, method_s, url_s, responseCode_d, backendResponseCode_d, lastError_reason_s
+  | order by TimeGenerated desc
+  ```
+
+- **App Insights** request/dependency telemetry is in `AppRequests` / `AppDependencies`.
+- Mind the **ingestion lag** (~5–15 min) before judging "nothing in the logs".
+
+---
+
+## 🔧 Debugging playbook: model-gateway agent can't reach its model
+
+Hard-won lessons from a multi-hour "agent finds zero models" hunt. Check in this
+order — the earlier items are the ones that actually bit us.
+
+1. **Is it a NETWORK-PATH problem, not a config problem?** The deny-by-default
+   agent NSG blocks outbound to the APIM private endpoint unless explicitly
+   allowed. The fix that finally worked was the `Allow-ModelGatewayApim-Outbound`
+   rule (agent subnet → APIM PE CIDR :443) in
+   [`foundry-spoke-vnet.bicep`](./modules-network-secured/foundry-spoke-vnet.bicep).
+   **Verify the runtime path in the firewall** — you should see the agent subnet
+   reach the APIM PE IP:
+
+   ```kusto
+   AZFWNetworkRule
+   | where SourceIp startswith "10.2.0." and DestinationIp == "<apim-pe-ip>"   // e.g. 10.3.1.4
+   | project TimeGenerated, SourceIp, DestinationIp, DestinationPort, Action
+   | order by TimeGenerated desc
+   ```
+
+   A row like `10.2.0.x -> 10.3.1.4 443 Allow` = the runtime path is open. **No
+   row at all** = the agent never tried / was blocked before the firewall (check
+   the NSG). This single query is the fastest way to confirm the fix.
+
+2. **Don't trust the Foundry PORTAL's model list.** The portal's model-discovery
+   UI runs from a **control-plane origin that cannot reach a private-only APIM**,
+   so it shows **"no models" even when the agent runtime works perfectly**. We
+   confirmed the agent responds with `model-gateway/gpt-5.4-mini` while the portal
+   still listed zero models. Test the **agent**, not the portal, to judge success.
+
+3. **APIM reachable at all?** From the dev VM (which uses the hub resolver), the
+   APIM hostname resolves to the private PE IP and `GET
+   https://<apim>.azure-api.net/inference/deployments` returns `200` with the
+   model list. If the VM works but the agent doesn't, it's the agent-subnet NSG
+   (step 1), not APIM.
+
+4. **Auth (only if you get 401 in GatewayLogs).** Keyless `ProjectManagedIdentity`
+   requires the APIM inference API to be `subscriptionRequired=false` — a Foundry
+   connection can't send both an MI token and a subscription key. `401
+   SubscriptionKeyNotFound` in GatewayLogs = the API still requires a subscription
+   key.
+
+5. **APIM `publicNetworkAccess`.** APIM Standard v2 **cannot be created** with
+   `Disabled`; create Enabled, add the inbound PE, then flip to Disabled. Toggling
+   it takes several minutes (`provisioningState: Updating`). Enabling it does NOT
+   fix the agent (the runtime uses the private path); it only matters for
+   control-plane callers — useful as a one-off *diagnostic* to prove where a
+   caller originates, then revert.
+
 
 ---
 

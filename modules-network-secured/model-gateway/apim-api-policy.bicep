@@ -1,16 +1,17 @@
 /*
   Model-Gateway: APIM inference API + policy
   ------------------------------------------
-  Defines the inference API on APIM and its policy. Auth posture (stronger than
-  the foundry-samples guide's OR model — we enforce BOTH credentials):
+  Defines the inference API on APIM and its policy. Auth posture: keyless MI. The
+  Foundry connection authenticates with the project managed identity's Entra token
+  (no APIM subscription key), so:
 
-    * Platform: subscriptionRequired = true, so every call MUST carry the APIM
-      subscription key on the 'api-key' header (the Foundry connection sends it via
-      metadata.customHeaders on all requests, including discovery).
+    * Platform: subscriptionRequired = false. A Foundry ApiManagement connection cannot
+      present BOTH an MI token and an APIM subscription key, and the dynamic-discovery
+      probe carries no key — so requiring one would 401 discovery and surface no models.
+      The security boundary is the Entra JWT + xms_mirid pin + private networking instead.
     * Inbound (all operations that inherit <base/>): validate-azure-ad-token runs
       UNCONDITIONALLY — the caller MUST present a valid Entra token for the tenant +
-      audience 'https://cognitiveservices.azure.com'. There is deliberately no
-      <choose> around it: the api-key does NOT let a caller skip token validation.
+      audience 'https://cognitiveservices.azure.com'.
     * required-claims/xms_mirid — when callerProjectResourceId is supplied, the
       token is pinned to the CALLING Foundry project's managed identity (the
       xms_mirid claim equals the project's ARM resource ID). This is the guide's
@@ -23,9 +24,9 @@
       authenticates to it using its OWN managed identity.
 
   The discovery operations (GET /deployments, /deployments/{name}) intentionally do
-  NOT inherit <base/> (see below): they are authorised by the api-key alone (which
-  Foundry sends on discovery calls) + APIM's ARM managed identity, since the runtime
-  discovery probe does not carry the project JWT.
+  NOT inherit <base/> (see below): they are unauthenticated at the APIM edge (the runtime
+  discovery probe carries neither the project JWT nor a subscription key) and are secured by
+  the private network boundary + APIM's ARM managed identity to the control plane.
 
   The API is modelled on the foundry-samples byom-cross-region reference:
   operations are defined manually (no OpenAPI import); the deployment name is a
@@ -52,13 +53,6 @@ param projectMiClientId string = ''
 
 @description('ARM resource ID of the CALLING Foundry project. When supplied, the inbound JWT is pinned via the xms_mirid required-claim to this project MI (guide-recommended). Empty = validate tenant + audience only.')
 param callerProjectResourceId string = ''
-
-@description('Require an APIM subscription key (api-key header) IN ADDITION to the Entra JWT (defense in depth). The Foundry connection sends the key via customHeaders on all calls, including discovery.')
-param subscriptionRequired bool = true
-
-@description('Primary key for the APIM subscription. Empty = do not create a managed subscription (APIM autogenerates keys).')
-@secure()
-param apiSubscriptionKey string = ''
 
 @description('API version used for the ARM control-plane model-discovery calls (GET /deployments).')
 param deploymentDiscoveryApiVersion string = '2023-05-01'
@@ -196,17 +190,14 @@ resource inferenceApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
     protocols: [
       'https'
     ]
-    // Require an APIM subscription key IN ADDITION to the Entra JWT (defense in depth).
-    // Accept it on the 'api-key' header/query — the same name AOAI clients use, which is
-    // what the Foundry connection sends via the authConfig (authHeaderName/authHeaderFormat).
-    // subscriptionRequired enforces the APIM subscription key on EVERY operation (incl.
-    // discovery). serviceUrl points at the provider's Azure OpenAI v1 surface; the chat
-    // operation forwards model-in-body to /openai/v1/chat/completions.
-    subscriptionRequired: subscriptionRequired
-    subscriptionKeyParameterNames: {
-      header: 'api-key'
-      query: 'api-key'
-    }
+    // Keyless MI auth: subscriptionRequired=false. A Foundry ApiManagement connection
+    // authenticates with the project MI's Entra token and cannot also present an APIM
+    // subscription key, and the dynamic-discovery probe carries no key — so requiring one
+    // would 401 discovery and surface no models. The Entra JWT + xms_mirid pin + private
+    // network path are the security boundary. serviceUrl points at the provider's Azure
+    // OpenAI v1 surface; the chat operation forwards model-in-body to
+    // /openai/v1/chat/completions.
+    subscriptionRequired: false
     serviceUrl: '${backendBaseUrl}/v1'
   }
 }
@@ -300,23 +291,6 @@ resource getDeploymentPolicyResource 'Microsoft.ApiManagement/service/apis/opera
   dependsOn: [
     apiPolicy
   ]
-}
-
-// Managed subscription scoped to this API, with a caller-supplied primary key so the
-// Foundry connection can present the same 'api-key'. Created whenever a key is supplied.
-// Auth is AND / defense-in-depth: subscriptionRequired=true means the api-key is required
-// on every operation, and the API inbound also validates the Entra JWT + xms_mirid
-// unconditionally on data-plane calls. Discovery ops (no api base policy) are gated by the
-// api-key alone, which Foundry sends on discovery probes.
-resource apiSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = if (!empty(apiSubscriptionKey)) {
-  parent: apim
-  name: '${apiPath}-subscription'
-  properties: {
-    displayName: 'Model Gateway inference subscription'
-    scope: inferenceApi.id
-    state: 'active'
-    primaryKey: apiSubscriptionKey
-  }
 }
 
 output apiName string = inferenceApi.name

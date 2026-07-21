@@ -11,10 +11,12 @@ param firstProjectName = 'project'
 
 // ---- Optional model gateway (APIM Standard v2 + provider Foundry in a new spoke) ----
 // Default false to avoid cost. Set true to deploy the enterprise model gateway.
-param enableModelGateway = false
+param enableModelGateway = true
+
 param gatewayModelName = 'gpt-5.4-mini'
 param gatewayModelFormat = 'OpenAI'
-param gatewayModelVersion = '2026-03-05'
+param gatewayModelVersion = '2026-03-17'
+
 param gatewayModelSkuName = 'GlobalStandard'
 param gatewayModelCapacity = 30
 // Optional: pin the calling app/client ID in the APIM validate-azure-ad-token policy.

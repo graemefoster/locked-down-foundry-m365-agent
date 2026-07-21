@@ -75,10 +75,6 @@ param gatewayModelCapacity int = 30
 @description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
 param gatewayCallerAppId string = ''
 
-@description('Optional explicit APIM subscription key (api-key) for the gateway. Empty = a deterministic key is derived. Sent alongside the Entra JWT (defense in depth); the network boundary + JWT remain the primary controls.')
-@secure()
-param gatewayApiKey string = ''
-
 // Create a short, unique suffix, that will be unique to each resource group
 var uniqueSuffix = substring(uniqueString('${resourceGroup().id}'), 0, 4)
 var accountName = toLower('${aiServices}${uniqueSuffix}')
@@ -238,10 +234,6 @@ var providerAccountName = toLower('gwprovider${uniqueSuffix}')
 var apimName = 'apim-${uniqueSuffix}-modelgw'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
-// Subscription key sent to APIM alongside the Entra JWT. Deterministic (derivable) by
-// default — fine for a sample; the real controls are the private network path + JWT.
-// Override with the secure gatewayApiKey param for a non-derivable secret.
-var effectiveGatewayApiKey = empty(gatewayApiKey) ? guid(resourceGroup().id, apimName, 'model-gateway-apikey') : gatewayApiKey
 
 module firewall 'modules-network-secured/firewall.bicep' = {
   name: '${deployment().name}-fwall'
@@ -271,6 +263,7 @@ module foundrySpokeVnet 'modules-network-secured/foundry-spoke-vnet.bicep' = {
     firewallPrivateIp: firewall.outputs.firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: agentInboundAllowedCidrs
+    modelGatewayPeCidr: enableModelGateway ? modelGatewayPeSubnetCidr : ''
   }
 }
 
@@ -845,7 +838,6 @@ module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bice
     providerAccountResourceId: providerFoundry.outputs.accountId
     projectMiClientId: gatewayCallerAppId
     callerProjectResourceId: aiProject.outputs.projectId
-    apiSubscriptionKey: effectiveGatewayApiKey
   }
   dependsOn: [
     apimProviderRoleAssignment
@@ -862,7 +854,6 @@ module apimConnection 'modules-network-secured/model-gateway/apim-connection.bic
     apimGatewayUrl: apim.outputs.gatewayUrl
     apiPath: apimApiPolicy.outputs.apiPath
     exposedModelName: gatewayModelName
-    apiKey: effectiveGatewayApiKey
   }
   dependsOn: [
     addProjectCapabilityHost

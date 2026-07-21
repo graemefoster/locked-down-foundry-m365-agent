@@ -3,10 +3,19 @@
   -------------------------------------------------
   Advertises the APIM model gateway to the PRIMARY Foundry project as an
   ApiManagement connection (like apim-connection.bicep), authenticated with the
-  project's managed identity (ProjectManagedIdentity — keyless). Models are discovered
-  dynamically at runtime (no static `models` array); agents reference the exposed model as
+  project's managed identity (ProjectManagedIdentity — keyless). The hosted-agent runtime
+  reaches APIM directly and references the model as '<connectionName>/<exposedModelName>';
+  it does NOT rely on the Foundry portal's model-discovery list (which can show "no models"
+  for a private-only APIM — that is cosmetic, see the modelDiscovery note below). Agents
+  reference the exposed model as
   '<connectionName>/<exposedModelName>'. Inference uses the model-in-body (deploymentInPath
   = false) v1 API surface — the APIM API forwards to the provider's /openai/v1 endpoint.
+
+  Auth is keyless: the connection sends ONLY the project MI's Entra token (authType
+  ProjectManagedIdentity, credentials {}). No APIM subscription key ("api-key") is sent —
+  a Foundry connection cannot present both an MI token AND a subscription key, so the APIM
+  inference API must have subscriptionRequired=false (see apim-api-policy.bicep). The gateway
+  is secured by the unconditional Entra JWT + xms_mirid project pin + private networking.
 
   Modelled on foundry-samples 01-connections/apim/modules/apim-connection-common.bicep.
 */
@@ -32,45 +41,47 @@ param exposedModelName string
 @description('Inference API version the gateway expects. For the Azure OpenAI v1 API surface use "preview".')
 param inferenceAPIVersion string = 'preview'
 
-@description('Optional APIM subscription key. When set, it is sent to APIM as the "api-key" header alongside the project MI JWT (defense in depth).')
-@secure()
-param apiKey string = ''
+@description('APIM-relative endpoint Foundry calls to list models (enables dynamic discovery).')
+param listModelsEndpoint string = '/deployments'
+
+@description('APIM-relative endpoint Foundry calls to get a single model (enables dynamic discovery).')
+param getModelEndpoint string = '/deployments/{deploymentName}'
+
+@description('Provider format Foundry expects from the discovery endpoints.')
+param deploymentProvider string = 'AzureOpenAI'
 
 @description('Share the connection with all project users')
 param isSharedToAll bool = true
 
 var target = '${apimGatewayUrl}/${apiPath}'
 
-// Dynamic model discovery: no static `models` array is advertised. Foundry discovers
-// models at runtime by calling GET /deployments (list) and GET /deployments/{name}
-// (get) on the APIM API, which proxies the provider account's ARM deployments. Because
-// APIM exposes the default /deployments endpoints with AzureOpenAI-format responses, no
-// `modelDiscovery` override is needed. (Static and dynamic discovery are mutually
-// exclusive — omitting `models` triggers dynamic discovery via APIM defaults.)
-var baseMetadata = {
+// Dynamic model discovery config. `modelDiscovery` is the documented metadata for exposing
+// the APIM list/get endpoints (serialized as a JSON string; see foundry-samples
+// connection-apim.bicep, which requires either `modelDiscovery` OR a static `models` array).
+// Static and dynamic discovery are mutually exclusive — do not also set `models`.
+//
+// NOTE (learned the hard way): the Foundry PORTAL's model-discovery UI runs from a
+// control-plane origin that cannot reach a private-only APIM, so it may show "no models"
+// regardless of this metadata. That is cosmetic. The hosted-agent RUNTIME does NOT depend on
+// portal discovery — it reaches APIM directly and references the model as
+// '<connectionName>/<exposedModelName>'. The real prerequisite for the runtime to work is the
+// NETWORK PATH: the agent subnet must be allowed outbound to the APIM private endpoint (see
+// the Allow-ModelGatewayApim-Outbound NSG rule in foundry-spoke-vnet.bicep). If an agent
+// can't reach its model, check the NSG/firewall to the APIM PE first, not this metadata.
+//
+// Keyless auth: no authConfig / api-key is set — the connection authenticates with the
+// project MI token only (see file header), and the APIM inference API must be
+// subscriptionRequired=false so any keyless probe (which carries no subscription key) is
+// not rejected.
+var metadata = {
   deploymentInPath: 'false'
   inferenceAPIVersion: inferenceAPIVersion
+  modelDiscovery: string({
+    listModelsEndpoint: listModelsEndpoint
+    getModelEndpoint: getModelEndpoint
+    deploymentProvider: deploymentProvider
+  })
 }
-
-// The APIM subscription key is attached via the authConfig mechanism (authHeaderName +
-// authHeaderFormat) with the key stored in credentials.key and substituted for the
-// {api_key} placeholder. Unlike customHeaders (which Foundry applies to inference calls
-// ONLY, and expects as a serialized JSON string — not the object shape used previously),
-// authConfig headers are sent on ALL gateway calls INCLUDING model discovery. That is
-// required here because the APIM API sets subscriptionRequired=true on every operation,
-// so a discovery call without the key would 401 and no models would be found.
-// (Reverse-engineered from a portal-created ApiManagement connection: the portal emits
-// the flat authHeaderName/authHeaderFormat metadata keys.)
-var metadata = empty(apiKey)
-  ? baseMetadata
-  : union(baseMetadata, {
-      authHeaderName: 'api-key'
-      authHeaderFormat: '{api_key}'
-    })
-
-// The project MI JWT is the primary credential (ProjectManagedIdentity — keyless). When an
-// api-key is supplied it is stored here so the {api_key} placeholder above resolves to it.
-var credentials = empty(apiKey) ? {} : { key: apiKey }
 
 resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
   name: aiFoundryName
@@ -90,7 +101,7 @@ resource connection 'Microsoft.CognitiveServices/accounts/projects/connections@2
     authType: 'ProjectManagedIdentity'
     audience: 'https://cognitiveservices.azure.com'
     isSharedToAll: isSharedToAll
-    credentials: credentials
+    credentials: {}
     metadata: metadata
   }
 }
