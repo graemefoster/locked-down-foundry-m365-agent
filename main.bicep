@@ -872,6 +872,22 @@ module apimConnection 'modules-network-secured/model-gateway/apim-connection.bic
   ]
 }
 
+// Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
+// private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
+// and after the API/policy children so it never races their creation.
+module apimLockdown 'modules-network-secured/model-gateway/apim-lockdown.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apim.outputs.apimName
+    location: location
+    apimOutboundSubnetId: modelGatewaySpokeVnet.outputs.apimSubnetId
+  }
+  dependsOn: [
+    modelGatewayPrivateEndpoints
+    apimApiPolicy
+  ]
+}
+
 // ==================== SEED AGENTS ====================
 
 // Runs a deployment-script container inside the private VNet to call the Foundry

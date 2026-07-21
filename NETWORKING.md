@@ -254,8 +254,9 @@ Insights) force-tunnels through the firewall via `Net-ApimPlatformEgress`
 
 **Auth — defense in depth.** The APIM inbound API enforces **both**:
 1. **Entra JWT** (`validate-azure-ad-token`) — the primary project MI's token,
-   validated on tenant + audience (`https://cognitiveservices.azure.com/`), and
-   optionally pinned to a caller app/client ID (`gatewayCallerAppId`).
+   validated on tenant + audience `https://cognitiveservices.azure.com` (both the
+   trailing-slash and no-slash variants are accepted, since the connection sends the
+   no-slash form), and optionally pinned to a caller app/client ID (`gatewayCallerAppId`).
 2. **APIM subscription key** — the `api-key` header (AOAI-style). The Foundry
    connection sends it via `metadata.customHeaders`; the key is derived
    deterministically by default or overridden with the secure `gatewayApiKey`
@@ -265,6 +266,15 @@ APIM → provider Foundry uses APIM's own system-assigned MI
 (`authentication-managed-identity`), granted **Cognitive Services User** on the
 provider account. The provider account has `publicNetworkAccess: Disabled` and
 local auth disabled — reachable only over its private endpoint.
+
+**Two-phase APIM lockdown.** APIM Standard v2 **cannot be created** with
+`publicNetworkAccess: Disabled` (the control plane returns
+`ActivateServiceWithPrivateEndpointAccessNotAllowed`). So the deployment creates
+APIM with public access **Enabled**, provisions the inbound private endpoint, then
+re-applies the service via `apim-lockdown.bicep` (ordered after the PE) to flip
+`publicNetworkAccess` to **Disabled**. This is a property update, not a recreate;
+disabling public access affects only the gateway data plane, so ARM still manages
+the service afterward.
 
 **Observability.** APIM sends resource logs/metrics to the shared Log Analytics
 workspace (diagnostic settings) **and** gateway request/response telemetry to the

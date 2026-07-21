@@ -47,6 +47,13 @@ param appInsightsResourceId string
 @secure()
 param appInsightsConnectionString string
 
+@description('Inbound public network access. MUST be \'Enabled\' at creation — APIM rejects \'Disabled\' at create time (ActivateServiceWithPrivateEndpointAccessNotAllowed). It is flipped to \'Disabled\' by apim-lockdown.bicep AFTER the inbound private endpoint exists.')
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param publicNetworkAccess string = 'Enabled'
+
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
   name: apimName
   location: location
@@ -65,8 +72,9 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' = {
     virtualNetworkConfiguration: {
       subnetResourceId: apimOutboundSubnetId
     }
-    // Inbound is via a private endpoint only; block public gateway ingress.
-    publicNetworkAccess: 'Disabled'
+    // Created 'Enabled' (APIM forbids 'Disabled' at create time); locked down to
+    // 'Disabled' post-PE by apim-lockdown.bicep.
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 
