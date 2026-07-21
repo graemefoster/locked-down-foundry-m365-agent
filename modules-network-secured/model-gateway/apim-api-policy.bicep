@@ -1,19 +1,31 @@
 /*
   Model-Gateway: APIM inference API + policy
   ------------------------------------------
-  Defines the inference API on APIM and its policy:
+  Defines the inference API on APIM and its policy. Auth posture (stronger than
+  the foundry-samples guide's OR model — we enforce BOTH credentials):
 
-    * Inbound: validate-azure-ad-token — verifies the caller presents a valid
-      Entra token for the audience 'https://cognitiveservices.azure.com/' in this
-      tenant. Optionally restricts to a specific caller app/client ID
-      (projectMiClientId) when supplied. NOTE: a project's system-assigned MI does
-      not expose its client/app ID in ARM (only the object/principal ID), so this
-      is left optional — validate on tenant + audience by default, and pin to the
-      client-application-id only if the caller can supply it.
-    * set-backend-service — rewrites the upstream to the provider Foundry's private
-      OpenAI endpoint (reached over the private endpoint via VNet integration).
-    * authentication-managed-identity — APIM authenticates to the provider Foundry
-      backend using its own system-assigned managed identity.
+    * Platform: subscriptionRequired = true, so every call MUST carry the APIM
+      subscription key on the 'api-key' header (the Foundry connection sends it via
+      metadata.customHeaders on all requests, including discovery).
+    * Inbound (all operations that inherit <base/>): validate-azure-ad-token runs
+      UNCONDITIONALLY — the caller MUST present a valid Entra token for the tenant +
+      audience 'https://cognitiveservices.azure.com'. There is deliberately no
+      <choose> around it: the api-key does NOT let a caller skip token validation.
+    * required-claims/xms_mirid — when callerProjectResourceId is supplied, the
+      token is pinned to the CALLING Foundry project's managed identity (the
+      xms_mirid claim equals the project's ARM resource ID). This is the guide's
+      correct way to lock the gateway to a specific project MI (a project MI does
+      not expose an app/client ID in ARM). Because validation is unconditional, this
+      pin is always enforced. An optional client-app pin (projectMiClientId) is also
+      supported for callers that can supply one.
+    * set-backend-service + authentication-managed-identity — APIM forwards to the
+      provider Foundry's private OpenAI endpoint (over the private endpoint) and
+      authenticates to it using its OWN managed identity.
+
+  The discovery operations (GET /deployments, /deployments/{name}) intentionally do
+  NOT inherit <base/> (see below): they are authorised by the api-key alone (which
+  Foundry sends on discovery calls) + APIM's ARM managed identity, since the runtime
+  discovery probe does not carry the project JWT.
 
   The API is modelled on the foundry-samples byom-cross-region reference:
   operations are defined manually (no OpenAPI import); the deployment name is a
@@ -35,10 +47,13 @@ param providerAccountResourceId string
 @description('Audience for the inbound token and the backend managed-identity token. MUST match the audience the Foundry connection sends (no trailing slash).')
 param tokenAudience string = 'https://cognitiveservices.azure.com'
 
-@description('Optional caller app/client ID to restrict inbound callers (empty = validate tenant + audience only)')
+@description('Optional caller app/client ID to additionally restrict inbound callers (empty = do not pin on client-application-id)')
 param projectMiClientId string = ''
 
-@description('Require an APIM subscription key (api-key header) IN ADDITION to the Entra JWT.')
+@description('ARM resource ID of the CALLING Foundry project. When supplied, the inbound JWT is pinned via the xms_mirid required-claim to this project MI (guide-recommended). Empty = validate tenant + audience only.')
+param callerProjectResourceId string = ''
+
+@description('Require an APIM subscription key (api-key header) IN ADDITION to the Entra JWT (defense in depth). The Foundry connection sends the key via customHeaders on all calls, including discovery.')
 param subscriptionRequired bool = true
 
 @description('Primary key for the APIM subscription. Empty = do not create a managed subscription (APIM autogenerates keys).')
@@ -54,6 +69,18 @@ var clientAppRestriction = empty(projectMiClientId)
   ? ''
   : '<client-application-ids><application-id>@@CLIENTID@@</application-id></client-application-ids>'
 
+// xms_mirid pins the token to the calling project's managed identity. Azure MSI tokens
+// emit xms_mirid with the segment keyword 'resourcegroups' LOWERCASE while preserving the
+// casing of user-supplied names, whereas ARM resource IDs use 'resourceGroups'. Under
+// match="any" we therefore list: (1) the raw ARM ID, (2) the ARM ID with only the
+// '/resourceGroups/' segment lowercased (the common MSI-token form, names preserved), and
+// (3) a fully lowercased fallback — so the claim matches regardless of which form the
+// token emits.
+var callerIdResourceGroupsLowered = replace(callerProjectResourceId, '/resourceGroups/', '/resourcegroups/')
+var requiredClaims = empty(callerProjectResourceId)
+  ? ''
+  : '<required-claims><claim name="xms_mirid" match="any"><value>@@PROJID@@</value><value>@@PROJID_RGLOWER@@</value><value>@@PROJID_LOWER@@</value></claim></required-claims>'
+
 // NOTE: Bicep does NOT interpolate ${...} inside multi-line ('''...''') strings — the
 // tokens would be emitted literally. So the template uses inert @@TOKEN@@ placeholders
 // and replace() swaps in the resolved values (replace's arguments are single-line
@@ -67,6 +94,7 @@ var policyTemplate = '''<policies>
         <audience>@@AUDIENCE@@</audience>
         <audience>@@AUDIENCE@@/</audience>
       </audiences>
+      @@REQUIRED_CLAIMS@@
     </validate-azure-ad-token>
     <set-backend-service base-url="@@BACKEND@@" />
     <authentication-managed-identity resource="@@AUDIENCE@@" />
@@ -78,12 +106,29 @@ var policyTemplate = '''<policies>
 
 var clientAppRendered = replace(clientAppRestriction, '@@CLIENTID@@', projectMiClientId)
 
+// Replace longest tokens first: '@@PROJID@@' is a substring of the other two
+// placeholders, so replacing it first would corrupt the still-unreplaced
+// '@@PROJID_RGLOWER@@' / '@@PROJID_LOWER@@' tokens.
+var requiredClaimsRendered = replace(
+  replace(
+    replace(requiredClaims, '@@PROJID_RGLOWER@@', callerIdResourceGroupsLowered),
+    '@@PROJID_LOWER@@',
+    toLower(callerProjectResourceId)
+  ),
+  '@@PROJID@@',
+  callerProjectResourceId
+)
+
 var renderedPolicy = replace(
   replace(
     replace(
-      replace(policyTemplate, '@@TENANT@@', tenantId),
-      '@@CLIENT_APPS@@',
-      clientAppRendered
+      replace(
+        replace(policyTemplate, '@@TENANT@@', tenantId),
+        '@@CLIENT_APPS@@',
+        clientAppRendered
+      ),
+      '@@REQUIRED_CLAIMS@@',
+      requiredClaimsRendered
     ),
     '@@AUDIENCE@@',
     tokenAudience
@@ -97,10 +142,11 @@ var renderedPolicy = replace(
 // GET /deployments/{deploymentName} (get) on this API. Those calls are routed to
 // the Azure Resource Manager CONTROL plane for the provider account (not the
 // data-plane openai endpoint) because ARM returns the AzureOpenAI-format deployment
-// list Foundry expects. Each operation policy inherits the API-level inbound via
-// <base/> (so the project-MI JWT + api-key are still enforced), then overrides the
-// backend + managed-identity audience to ARM. Modelled on the foundry-samples
-// apim-setup-guide-for-agents "Dynamic Model Discovery via APIM" section.
+// list Foundry expects. Following the foundry-samples guide, these operation policies
+// do NOT include <base/> — they intentionally bypass the API-level caller auth (the
+// discovery probe may not carry the same subscription-key/JWT credentials) and only
+// attach APIM's managed identity for the ARM control plane. The private endpoint /
+// VNet is the network boundary for these operations.
 var armAudience = environment().resourceManager
 // environment().resourceManager ends with '/'; providerAccountResourceId starts with
 // '/subscriptions/...'. Drop the leading slash to avoid a double slash.
@@ -108,7 +154,6 @@ var armBackendBaseUrl = '${armAudience}${substring(providerAccountResourceId, 1)
 
 var discoveryPolicyTemplate = '''<policies>
   <inbound>
-    <base />
     <authentication-managed-identity resource="@@ARMAUD@@" />
     <rewrite-uri template="@@REWRITE@@" copy-unmatched-params="false" />
     <set-backend-service base-url="@@ARMBACKEND@@" />
@@ -259,8 +304,12 @@ resource getDeploymentPolicyResource 'Microsoft.ApiManagement/service/apis/opera
 }
 
 // Managed subscription scoped to this API, with a caller-supplied primary key so the
-// Foundry connection can present the same 'api-key'. Only created when a key is supplied.
-resource apiSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = if (subscriptionRequired && !empty(apiSubscriptionKey)) {
+// Foundry connection can present the same 'api-key'. Created whenever a key is supplied.
+// Auth is AND / defense-in-depth: subscriptionRequired=true means the api-key is required
+// on every operation, and the API inbound also validates the Entra JWT + xms_mirid
+// unconditionally on data-plane calls. Discovery ops (no api base policy) are gated by the
+// api-key alone, which Foundry sends on discovery probes.
+resource apiSubscription 'Microsoft.ApiManagement/service/subscriptions@2024-05-01' = if (!empty(apiSubscriptionKey)) {
   parent: apim
   name: '${apiPath}-subscription'
   properties: {

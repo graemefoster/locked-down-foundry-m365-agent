@@ -844,6 +844,7 @@ module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bice
     backendBaseUrl: providerBackendBaseUrl
     providerAccountResourceId: providerFoundry.outputs.accountId
     projectMiClientId: gatewayCallerAppId
+    callerProjectResourceId: aiProject.outputs.projectId
     apiSubscriptionKey: effectiveGatewayApiKey
   }
   dependsOn: [
