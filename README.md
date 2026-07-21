@@ -165,6 +165,38 @@ To use an existing Azure API Management service, set apiManagementResourceId par
 
 ---
 
+## Optional: Model Gateway (APIM + provider Foundry)
+
+Set `enableModelGateway=true` (default **false**) to deploy an optional,
+enterprise-grade model gateway in a **new spoke** (`10.3.0.0/16`):
+
+- **APIM Standard v2** with an inbound **private endpoint** and outbound **VNet
+  integration** — no public gateway access.
+- A minimal **provider AI Foundry** account (public access disabled, private
+  endpoint only) exposing a `gpt-5.4-mini` deployment behind APIM.
+- An `ApiManagement` connection advertising APIM to the primary Foundry project,
+  and a **second seeded agent** using the model `model-gateway/gpt-5.4-mini`.
+
+Auth is defense-in-depth: callers must present **both** a valid Entra JWT
+(`validate-azure-ad-token`) **and** an APIM subscription **`api-key`** (sent by the
+connection). APIM authenticates to the provider Foundry with its own managed
+identity. APIM logs to both Log Analytics and the shared **Application Insights**
+component. See [NETWORKING.md](./NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
+
+Key parameters (see `main.bicepparam`):
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `enableModelGateway` | `false` | Master switch for the whole gateway spoke. |
+| `gatewayModelName` | `gpt-5.4-mini` | Model deployed on the provider and exposed via APIM. |
+| `gatewayCallerAppId` | `''` | Optional caller app/client ID pinned in the JWT policy. |
+| `gatewayApiKey` | `''` (secure) | Optional explicit `api-key`; empty = deterministic derived key. |
+
+> **Note:** APIM Standard v2 provisioning is slow (~15–45 min), so enabling this
+> materially increases deployment time.
+
+---
+
 ## Deploy the bicep template
 
 Choose your deployment method: Use the "Deploy to Azure" button from the provided README for an guided experience in Azure Portal

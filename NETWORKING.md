@@ -29,6 +29,7 @@
 | Hub | `10.0.0.0/16` | Azure Firewall + DNS Private Resolver | n/a (shared services) |
 | Foundry spoke | `10.2.0.0/16` | Agent subnet + PE subnet + dev VM | **agent subnet only** |
 | App Service spoke | `10.1.0.0/16` | YARP reverse proxy (App Service) | unrestricted |
+| **Model-gateway spoke** (optional) | `10.3.0.0/16` | APIM Standard v2 + provider Foundry (only when `enableModelGateway=true`) | **both subnets routed via firewall** |
 
 Foundry spoke subnets:
 
@@ -218,6 +219,57 @@ control-plane surfaces plus the single A365 hostname.
 | Fine-tuning / sample-dataset FQDNs (`raw.githubusercontent.com`) | Not needed; kept out to stay maximally locked down. |
 | Broad `VirtualNetwork` egress | Replaced by explicit subnet/host-scoped rules (see NSG notes). |
 | Broad `AzureFrontDoor.Frontend` egress | Avoided everywhere **except** the one A365 telemetry exception documented above — [Known limitation](#known-limitation-agent-365-telemetry-egress). |
+
+---
+
+## Optional: Model Gateway spoke (APIM + provider Foundry)
+
+Enabled with `enableModelGateway=true` (default **false**, for cost). It adds a
+third spoke that fronts a "real" model provider Foundry behind Azure API
+Management, and advertises APIM to the primary Foundry project as a keyless
+`ApiManagement` connection. A second agent is seeded using the model
+`model-gateway/<exposedModelName>`.
+
+New spoke (`10.3.0.0/16`) subnets:
+
+| Subnet | CIDR | Notes |
+|--------|------|-------|
+| `apim-subnet` | `10.3.0.0/24` | Delegated to `Microsoft.Web/serverFarms` for APIM **Standard v2 outbound VNet integration**. UDR `0.0.0.0/0 → firewall`. |
+| `pe-subnet` | `10.3.1.0/24` | APIM **inbound** private endpoint + provider Foundry PE. `privateEndpointNetworkPolicies: Enabled` + UDR back to the firewall (avoids asymmetric routing). |
+
+There is **no spoke-to-spoke peering**. Request flow:
+
+```
+primary agent (10.2.0.0/24)
+  → UDR 0.0.0.0/0 → Azure Firewall            (Net-AgentToApimGateway allow)
+  → APIM inbound PE (10.3.1.x)
+  → APIM: validate-azure-ad-token (Entra JWT) + api-key subscription
+  → APIM outbound VNet integration → provider Foundry PE (intra-spoke)
+  → model
+```
+
+APIM platform egress (MI token to Entra, telemetry to Azure Monitor / App
+Insights) force-tunnels through the firewall via `Net-ApimPlatformEgress`
+(service tags `AzureActiveDirectory`, `AzureMonitor`, `Storage`, `KeyVault`).
+
+**Auth — defense in depth.** The APIM inbound API enforces **both**:
+1. **Entra JWT** (`validate-azure-ad-token`) — the primary project MI's token,
+   validated on tenant + audience (`https://cognitiveservices.azure.com/`), and
+   optionally pinned to a caller app/client ID (`gatewayCallerAppId`).
+2. **APIM subscription key** — the `api-key` header (AOAI-style). The Foundry
+   connection sends it via `metadata.customHeaders`; the key is derived
+   deterministically by default or overridden with the secure `gatewayApiKey`
+   param. The network boundary + JWT remain the primary controls.
+
+APIM → provider Foundry uses APIM's own system-assigned MI
+(`authentication-managed-identity`), granted **Cognitive Services User** on the
+provider account. The provider account has `publicNetworkAccess: Disabled` and
+local auth disabled — reachable only over its private endpoint.
+
+**Observability.** APIM sends resource logs/metrics to the shared Log Analytics
+workspace (diagnostic settings) **and** gateway request/response telemetry to the
+existing **Application Insights** component (an `applicationInsights` APIM logger +
+service-scoped `applicationinsights` diagnostic, W3C correlation, 100% sampling).
 
 ---
 

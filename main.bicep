@@ -53,6 +53,32 @@ param modelSkuName string = 'GlobalStandard'
 @description('The tokens per minute (TPM) of your model deployment')
 param modelCapacity int = 30
 
+// ==================== MODEL GATEWAY (optional) ====================
+@description('Deploy the optional enterprise model gateway: an APIM Standard v2 instance + a "real" provider AI Foundry in a NEW spoke, advertised to the primary Foundry project as an ApiManagement connection. Default false to avoid cost.')
+param enableModelGateway bool = false
+
+@description('Model exposed through the gateway (deployed on the provider Foundry and advertised on the connection).')
+param gatewayModelName string = 'gpt-5.4-mini'
+
+@description('Format of the gateway-exposed model.')
+param gatewayModelFormat string = 'OpenAI'
+
+@description('Version of the gateway-exposed model. Set to a valid version for gatewayModelName.')
+param gatewayModelVersion string = '2026-03-05'
+
+@description('SKU of the gateway-exposed model deployment.')
+param gatewayModelSkuName string = 'GlobalStandard'
+
+@description('Capacity (TPM) of the gateway-exposed model deployment.')
+param gatewayModelCapacity int = 30
+
+@description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
+param gatewayCallerAppId string = ''
+
+@description('Optional explicit APIM subscription key (api-key) for the gateway. Empty = a deterministic key is derived. Sent alongside the Entra JWT (defense in depth); the network boundary + JWT remain the primary controls.')
+@secure()
+param gatewayApiKey string = ''
+
 // Create a short, unique suffix, that will be unique to each resource group
 var uniqueSuffix = substring(uniqueString('${resourceGroup().id}'), 0, 4)
 var accountName = toLower('${aiServices}${uniqueSuffix}')
@@ -202,6 +228,21 @@ var firewallUnrestrictedSourceCidrs = [
   deploymentScriptsSubnetCidr
 ]
 
+// Model-gateway spoke (optional). CIDRs are deterministic so they can be passed to
+// the firewall without depending on the spoke VNet module (avoids a dependency cycle:
+// the spoke VNet needs the firewall private IP, the firewall needs these CIDRs).
+var modelGatewaySpokeAddressPrefix = '10.3.0.0/16'
+var modelGatewayApimSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 0)
+var modelGatewayPeSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 1)
+var providerAccountName = toLower('gwprovider${uniqueSuffix}')
+var apimName = 'apim-${uniqueSuffix}-modelgw'
+var modelGatewayConnectionName = 'model-gateway'
+var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
+// Subscription key sent to APIM alongside the Entra JWT. Deterministic (derivable) by
+// default — fine for a sample; the real controls are the private network path + JWT.
+// Override with the secure gatewayApiKey param for a non-derivable secret.
+var effectiveGatewayApiKey = empty(gatewayApiKey) ? guid(resourceGroup().id, apimName, 'model-gateway-apikey') : gatewayApiKey
+
 module firewall 'modules-network-secured/firewall.bicep' = {
   name: '${deployment().name}-fwall'
   params: {
@@ -216,6 +257,9 @@ module firewall 'modules-network-secured/firewall.bicep' = {
     yarpProxyFqdn: 'yarp-${appServicePlanName}.azurewebsites.net'
     agentSubnetCidr: agentSubnetCidr
     unrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
+    enableModelGateway: enableModelGateway
+    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
+    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
   }
 }
 
@@ -700,6 +744,134 @@ module vmModule 'modules-network-secured/vm.bicep' = {
   ]
 }
 
+// ==================== MODEL GATEWAY (optional spoke) ====================
+
+/*
+  Optional enterprise model gateway. When enableModelGateway is true this deploys,
+  in a NEW spoke (10.3.0.0/16) peered only to the hub:
+    - an APIM Standard v2 instance (inbound PE + outbound VNet integration),
+    - a locked-down "provider" AI Foundry that actually hosts the model,
+  then advertises APIM to the primary Foundry project as an ApiManagement
+  connection (ProjectManagedIdentity / keyless). A second agent is seeded that
+  uses the '<connection>/<model>' reference. The agent reaches APIM's inbound PE
+  by force-tunnelling through the Azure Firewall (no spoke-to-spoke peering).
+*/
+
+// Step 7: model-gateway spoke VNet
+module modelGatewaySpokeVnet 'modules-network-secured/model-gateway/model-gateway-spoke-vnet.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    vnetName: '${vnetName}-model-gateway-spoke'
+    vnetAddressPrefix: modelGatewaySpokeAddressPrefix
+    firewallPrivateIp: firewall.outputs.firewallPrivateIp
+    dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
+  }
+}
+
+// Step 8: peer hub <-> model-gateway spoke
+module hubToModelGatewayPeering 'modules-network-secured/vnet-peering.bicep' = if (enableModelGateway) {
+  name: 'hub-model-gateway-peering-${uniqueSuffix}'
+  params: {
+    hubVnetName: hubNetwork.outputs.hubVnetName
+    spokeVnetName: modelGatewaySpokeVnet.outputs.virtualNetworkName
+    hubVnetId: hubNetwork.outputs.hubVnetId
+    spokeVnetId: modelGatewaySpokeVnet.outputs.virtualNetworkId
+  }
+}
+
+// Provider AI Foundry (the "real" model provider) — minimal, locked-down.
+module providerFoundry 'modules-network-secured/model-gateway/provider-foundry.bicep' = if (enableModelGateway) {
+  name: 'provider-foundry-${uniqueSuffix}-deployment'
+  params: {
+    accountName: providerAccountName
+    location: location
+    modelName: gatewayModelName
+    modelFormat: gatewayModelFormat
+    modelVersion: gatewayModelVersion
+    modelSkuName: gatewayModelSkuName
+    modelCapacity: gatewayModelCapacity
+    logAnalyticsWorkspaceId: lanalytics.id
+  }
+}
+
+// APIM Standard v2 in the gateway spoke.
+module apim 'modules-network-secured/model-gateway/apim.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-apim-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apimName
+    location: location
+    apimOutboundSubnetId: modelGatewaySpokeVnet.outputs.apimSubnetId
+    logAnalyticsWorkspaceId: lanalytics.id
+    appInsightsResourceId: appInsights.id
+    appInsightsConnectionString: appInsights.properties.ConnectionString
+  }
+}
+
+// Private endpoints (APIM inbound + provider Foundry) + DNS in the gateway spoke.
+module modelGatewayPrivateEndpoints 'modules-network-secured/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-pe-${uniqueSuffix}-deployment'
+  params: {
+    location: location
+    suffix: uniqueSuffix
+    apimId: apim.outputs.apimId
+    apimName: apim.outputs.apimName
+    providerAccountId: providerFoundry.outputs.accountId
+    providerAccountName: providerFoundry.outputs.accountName
+    peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
+    hubVnetId: hubNetwork.outputs.hubVnetId
+    apimDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.azure-api.net') ? existingDnsZones['privatelink.azure-api.net'] : ''
+    aiServicesDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.services.ai.azure.com') ? existingDnsZones['privatelink.services.ai.azure.com'] : ''
+    openAiDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.openai.azure.com') ? existingDnsZones['privatelink.openai.azure.com'] : ''
+    cognitiveServicesDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.cognitiveservices.azure.com') ? existingDnsZones['privatelink.cognitiveservices.azure.com'] : ''
+  }
+  dependsOn: [
+    privateEndpointAndDNS
+  ]
+}
+
+// Grant APIM MI Cognitive Services User on the provider Foundry (backend MI auth).
+module apimProviderRoleAssignment 'modules-network-secured/model-gateway/apim-provider-role-assignment.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-apim-rbac-${uniqueSuffix}-deployment'
+  params: {
+    providerAccountName: providerFoundry.outputs.accountName
+    apimPrincipalId: apim.outputs.apimPrincipalId
+  }
+}
+
+// APIM inference API + policy (inbound token validation, backend + MI auth).
+module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apim.outputs.apimName
+    backendBaseUrl: providerBackendBaseUrl
+    projectMiClientId: gatewayCallerAppId
+    apiSubscriptionKey: effectiveGatewayApiKey
+  }
+  dependsOn: [
+    apimProviderRoleAssignment
+  ]
+}
+
+// Advertise APIM to the primary Foundry project as an ApiManagement connection.
+module apimConnection 'modules-network-secured/model-gateway/apim-connection.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-connection-${uniqueSuffix}-deployment'
+  params: {
+    aiFoundryName: aiAccount.outputs.accountName
+    projectName: aiProject.outputs.projectName
+    connectionName: modelGatewayConnectionName
+    apimGatewayUrl: apim.outputs.gatewayUrl
+    apiPath: apimApiPolicy.outputs.apiPath
+    exposedModelName: gatewayModelName
+    exposedModelFormat: gatewayModelFormat
+    exposedModelVersion: gatewayModelVersion
+    apiKey: effectiveGatewayApiKey
+  }
+  dependsOn: [
+    addProjectCapabilityHost
+  ]
+}
+
 // ==================== SEED AGENTS ====================
 
 // Runs a deployment-script container inside the private VNet to call the Foundry
@@ -715,6 +887,8 @@ module seedAgents 'modules-network-secured/seed-agents-script.bicep' = {
     vmPrincipalId: vmModule.outputs.vmPrincipalId
     accountName: aiAccount.outputs.accountName
     projectName: aiProject.outputs.projectName
+    enableSecondAgent: enableModelGateway
+    secondAgentModel: apimConnection.?outputs.agentModelReference ?? ''
   }
   dependsOn: [
     addProjectCapabilityHost

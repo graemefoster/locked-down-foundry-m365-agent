@@ -38,6 +38,12 @@ param accountName string
 @description('Name of the Foundry project.')
 param projectName string
 
+@description('Seed a second agent that uses the model-gateway (APIM) connection model reference.')
+param enableSecondAgent bool = false
+
+@description('Model reference for the second agent, e.g. "<apim-connection-name>/gpt-5.4-mini".')
+param secondAgentModel string = ''
+
 // ── Existing resources ───────────────────────────────────────────────────────
 
 resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
@@ -88,12 +94,16 @@ resource seedAgentsRunCommand 'Microsoft.Compute/virtualMachines/runCommands@202
     parameters: [
       { name: 'FoundryProjectEndpoint', value: foundryProjectEndpoint }
       { name: 'ModelDeploymentName',    value: modelDeploymentName    }
+      { name: 'EnableSecondAgent',      value: string(enableSecondAgent) }
+      { name: 'SecondAgentModel',       value: secondAgentModel       }
     ]
     source: {
       script: '''
 param(
   [string]$FoundryProjectEndpoint,
-  [string]$ModelDeploymentName
+  [string]$ModelDeploymentName,
+  [string]$EnableSecondAgent,
+  [string]$SecondAgentModel
 )
 $ErrorActionPreference = "Stop"
 
@@ -115,13 +125,13 @@ function Get-ExistingAgents {
 }
 
 function New-Agent {
-  param([string]$Token, [string]$Name, [string]$Instructions)
+  param([string]$Token, [string]$Name, [string]$Instructions, [string]$Model)
   $body = @{
     name        = $Name
     description = $Name
     definition  = @{
       kind         = "prompt"
-      model        = $ModelDeploymentName
+      model        = $Model
       instructions = $Instructions
     }
   } | ConvertTo-Json -Depth 10 -Compress
@@ -151,15 +161,27 @@ $existingNames = $existing | ForEach-Object { $_.name }
 $agentsToCreate = @(
   @{
     Name         = "hello-world-agent"
+    Model        = $ModelDeploymentName
     Instructions = "You are a helpful AI assistant. Answer questions clearly and concisely."
   }
 )
+
+# Optional second agent routed through the model-gateway (APIM) connection.
+# Its model is the "<apim-connection-name>/<exposed-model-name>" reference.
+if ($EnableSecondAgent -eq "true" -and -not [string]::IsNullOrWhiteSpace($SecondAgentModel)) {
+  $agentsToCreate += @{
+    Name         = "gateway-model-agent"
+    Model        = $SecondAgentModel
+    Instructions = "You are a helpful AI assistant served through the enterprise model gateway. Answer questions clearly and concisely."
+  }
+  Write-Host "[seed-agents] Second (gateway) agent enabled with model '$SecondAgentModel'."
+}
 
 foreach ($agentDef in $agentsToCreate) {
   if ($existingNames -contains $agentDef.Name) {
     Write-Host "[seed-agents] Agent '$($agentDef.Name)' already exists - skipping."
   } else {
-    $id = New-Agent -Token $token -Name $agentDef.Name -Instructions $agentDef.Instructions
+    $id = New-Agent -Token $token -Name $agentDef.Name -Instructions $agentDef.Instructions -Model $agentDef.Model
     Write-Host "[seed-agents] Created '$($agentDef.Name)' -> $id"
   }
 }

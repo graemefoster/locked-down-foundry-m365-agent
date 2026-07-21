@@ -1,0 +1,1 @@
+output myOut string = 'hello'
