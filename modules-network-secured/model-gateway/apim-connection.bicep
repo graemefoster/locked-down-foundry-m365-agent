@@ -25,14 +25,8 @@ param apimGatewayUrl string
 @description('API path on APIM, e.g. inference')
 param apiPath string
 
-@description('Exposed model / deployment name, e.g. gpt-5.4-mini')
+@description('Exposed model / deployment name, e.g. gpt-5.4-mini. Used only to build the agentModelReference output; models are discovered dynamically at runtime.')
 param exposedModelName string
-
-@description('Model format for the advertised model')
-param exposedModelFormat string = 'OpenAI'
-
-@description('Model version for the advertised model')
-param exposedModelVersion string
 
 @description('Inference API version the gateway expects')
 param inferenceAPIVersion string = '2025-03-01-preview'
@@ -46,26 +40,15 @@ param isSharedToAll bool = true
 
 var target = '${apimGatewayUrl}/${apiPath}'
 
-var staticModels = [
-  {
-    name: exposedModelName
-    properties: {
-      model: {
-        name: exposedModelName
-        version: exposedModelVersion
-        format: exposedModelFormat
-      }
-    }
-  }
-]
-
-// Base metadata always advertises the exposed model. When an api-key is supplied,
-// also send it as the 'api-key' custom header on every inference call — APIM enforces
-// this subscription key IN ADDITION to validating the project MI's Entra JWT.
+// Dynamic model discovery: no static `models` array is advertised. Foundry discovers
+// models at runtime by calling GET /deployments (list) and GET /deployments/{name}
+// (get) on the APIM API, which proxies the provider account's ARM deployments. Because
+// APIM exposes the default /deployments endpoints with AzureOpenAI-format responses, no
+// `modelDiscovery` override is needed. (Static and dynamic discovery are mutually
+// exclusive — omitting `models` triggers dynamic discovery via APIM defaults.)
 var baseMetadata = {
   deploymentInPath: 'true'
   inferenceAPIVersion: inferenceAPIVersion
-  models: string(staticModels)
 }
 
 var metadata = empty(apiKey)

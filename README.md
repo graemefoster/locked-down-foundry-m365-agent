@@ -177,11 +177,17 @@ enterprise-grade model gateway in a **new spoke** (`10.3.0.0/16`):
 - An `ApiManagement` connection advertising APIM to the primary Foundry project,
   and a **second seeded agent** using the model `model-gateway/gpt-5.4-mini`.
 
+Models are discovered **dynamically**: instead of a static list, APIM exposes
+`GET /deployments` and `GET /deployments/{name}`, which proxy the provider account's
+**Azure Resource Manager** deployments API and return the AzureOpenAI-format list the
+Foundry connection parses at runtime.
+
 Auth is defense-in-depth: callers must present **both** a valid Entra JWT
 (`validate-azure-ad-token`) **and** an APIM subscription **`api-key`** (sent by the
 connection). APIM authenticates to the provider Foundry with its own managed
-identity. APIM logs to both Log Analytics and the shared **Application Insights**
-component. See [NETWORKING.md](./NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
+identity — granted **Cognitive Services User** (data-plane inference) and **Reader**
+(ARM deployments read for discovery) on the provider account. APIM logs to both Log
+Analytics and the shared **Application Insights** component. See [NETWORKING.md](./NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
 
 Key parameters (see `main.bicepparam`):
 

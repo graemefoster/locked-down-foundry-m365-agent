@@ -29,9 +29,12 @@ param modelGatewayApimSubnetCidr string = ''
 
 // Service tags APIM v2 may reach for platform dependencies / MI token acquisition
 // when its outbound-integration subnet force-tunnels 0.0.0.0/0 through the firewall.
+// AzureResourceManager is required for the dynamic model-discovery operations
+// (GET /deployments), which call the provider account's ARM deployments API.
 // Scoped to 443; anything else falls through to the implicit deny.
 var apimEgressServiceTags = [
   'AzureActiveDirectory'
+  'AzureResourceManager'
   'AzureMonitor'
   'Storage'
   'AzureKeyVault'

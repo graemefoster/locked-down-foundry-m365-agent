@@ -29,6 +29,9 @@ param apiPath string = 'inference'
 @description('Base URL of the provider Foundry OpenAI endpoint, e.g. https://<account>.openai.azure.com/openai')
 param backendBaseUrl string
 
+@description('ARM resource ID of the provider Foundry (Cognitive Services) account. Used to back the dynamic model-discovery operations (GET /deployments) with the Azure Resource Manager control plane.')
+param providerAccountResourceId string
+
 @description('Audience for the inbound token and the backend managed-identity token. MUST match the audience the Foundry connection sends (no trailing slash).')
 param tokenAudience string = 'https://cognitiveservices.azure.com'
 
@@ -41,6 +44,9 @@ param subscriptionRequired bool = true
 @description('Primary key for the APIM subscription. Empty = do not create a managed subscription (APIM autogenerates keys).')
 @secure()
 param apiSubscriptionKey string = ''
+
+@description('API version used for the ARM control-plane model-discovery calls (GET /deployments).')
+param deploymentDiscoveryApiVersion string = '2023-05-01'
 
 var tenantId = subscription().tenantId
 
@@ -84,6 +90,52 @@ var renderedPolicy = replace(
   ),
   '@@BACKEND@@',
   backendBaseUrl
+)
+
+// -------------------- Dynamic model discovery --------------------
+// Foundry discovers models at runtime by calling GET /deployments (list) and
+// GET /deployments/{deploymentName} (get) on this API. Those calls are routed to
+// the Azure Resource Manager CONTROL plane for the provider account (not the
+// data-plane openai endpoint) because ARM returns the AzureOpenAI-format deployment
+// list Foundry expects. Each operation policy inherits the API-level inbound via
+// <base/> (so the project-MI JWT + api-key are still enforced), then overrides the
+// backend + managed-identity audience to ARM. Modelled on the foundry-samples
+// apim-setup-guide-for-agents "Dynamic Model Discovery via APIM" section.
+var armAudience = environment().resourceManager
+// environment().resourceManager ends with '/'; providerAccountResourceId starts with
+// '/subscriptions/...'. Drop the leading slash to avoid a double slash.
+var armBackendBaseUrl = '${armAudience}${substring(providerAccountResourceId, 1)}'
+
+var discoveryPolicyTemplate = '''<policies>
+  <inbound>
+    <base />
+    <authentication-managed-identity resource="@@ARMAUD@@" />
+    <rewrite-uri template="@@REWRITE@@" copy-unmatched-params="false" />
+    <set-backend-service base-url="@@ARMBACKEND@@" />
+  </inbound>
+  <backend><base /></backend>
+  <outbound><base /></outbound>
+  <on-error><base /></on-error>
+</policies>'''
+
+var listDeploymentsPolicy = replace(
+  replace(
+    replace(discoveryPolicyTemplate, '@@ARMAUD@@', armAudience),
+    '@@REWRITE@@',
+    '/deployments?api-version=${deploymentDiscoveryApiVersion}'
+  ),
+  '@@ARMBACKEND@@',
+  armBackendBaseUrl
+)
+
+var getDeploymentPolicy = replace(
+  replace(
+    replace(discoveryPolicyTemplate, '@@ARMAUD@@', armAudience),
+    '@@REWRITE@@',
+    '/deployments/{deploymentName}?api-version=${deploymentDiscoveryApiVersion}'
+  ),
+  '@@ARMBACKEND@@',
+  armBackendBaseUrl
 )
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
@@ -147,6 +199,62 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = 
   }
   dependsOn: [
     chatCompletionsOperation
+  ]
+}
+
+// -------------------- Dynamic discovery operations --------------------
+
+resource listDeploymentsOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  parent: inferenceApi
+  name: 'list-deployments'
+  properties: {
+    displayName: 'List Deployments'
+    method: 'GET'
+    urlTemplate: '/deployments'
+    description: 'Dynamic discovery: list the provider account model deployments (ARM control plane).'
+  }
+}
+
+resource listDeploymentsPolicyResource 'Microsoft.ApiManagement/service/apis/operations/policies@2024-05-01' = {
+  parent: listDeploymentsOperation
+  name: 'policy'
+  properties: {
+    format: 'rawxml'
+    value: listDeploymentsPolicy
+  }
+  dependsOn: [
+    apiPolicy
+  ]
+}
+
+resource getDeploymentOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
+  parent: inferenceApi
+  name: 'get-deployment-by-name'
+  properties: {
+    displayName: 'Get Deployment By Name'
+    method: 'GET'
+    urlTemplate: '/deployments/{deploymentName}'
+    templateParameters: [
+      {
+        name: 'deploymentName'
+        type: 'string'
+        description: 'Model deployment name on the provider Foundry account'
+        required: true
+      }
+    ]
+    description: 'Dynamic discovery: get a single provider account model deployment (ARM control plane).'
+  }
+}
+
+resource getDeploymentPolicyResource 'Microsoft.ApiManagement/service/apis/operations/policies@2024-05-01' = {
+  parent: getDeploymentOperation
+  name: 'policy'
+  properties: {
+    format: 'rawxml'
+    value: getDeploymentPolicy
+  }
+  dependsOn: [
+    apiPolicy
   ]
 }
 

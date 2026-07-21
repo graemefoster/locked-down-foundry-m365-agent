@@ -845,6 +845,7 @@ module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bice
   params: {
     apimName: apim.outputs.apimName
     backendBaseUrl: providerBackendBaseUrl
+    providerAccountResourceId: providerFoundry.outputs.accountId
     projectMiClientId: gatewayCallerAppId
     apiSubscriptionKey: effectiveGatewayApiKey
   }
@@ -863,8 +864,6 @@ module apimConnection 'modules-network-secured/model-gateway/apim-connection.bic
     apimGatewayUrl: apim.outputs.gatewayUrl
     apiPath: apimApiPolicy.outputs.apiPath
     exposedModelName: gatewayModelName
-    exposedModelFormat: gatewayModelFormat
-    exposedModelVersion: gatewayModelVersion
     apiKey: effectiveGatewayApiKey
   }
   dependsOn: [

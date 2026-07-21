@@ -248,9 +248,17 @@ primary agent (10.2.0.0/24)
   → model
 ```
 
-APIM platform egress (MI token to Entra, telemetry to Azure Monitor / App
-Insights) force-tunnels through the firewall via `Net-ApimPlatformEgress`
-(service tags `AzureActiveDirectory`, `AzureMonitor`, `Storage`, `KeyVault`).
+The API exposes three operations, all inheriting the inbound JWT + api-key checks:
+`POST /deployments/{name}/chat/completions` (inference), plus **dynamic model
+discovery** — `GET /deployments` (list) and `GET /deployments/{name}` (get). The
+discovery operations override the backend to the provider account's **Azure Resource
+Manager** deployments API (`management.azure.com/.../accounts/{provider}/deployments?api-version=2023-05-01`),
+which returns the AzureOpenAI-format list the Foundry connection's dynamic discovery
+parses (no static `models` array is advertised).
+
+APIM platform egress (MI token to Entra, ARM discovery calls, telemetry to Azure
+Monitor / App Insights) force-tunnels through the firewall via `Net-ApimPlatformEgress`
+(service tags `AzureActiveDirectory`, `AzureResourceManager`, `AzureMonitor`, `Storage`, `KeyVault`).
 
 **Auth — defense in depth.** The APIM inbound API enforces **both**:
 1. **Entra JWT** (`validate-azure-ad-token`) — the primary project MI's token,
