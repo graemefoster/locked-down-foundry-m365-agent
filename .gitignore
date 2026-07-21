@@ -1,0 +1,30 @@
+# Compiled ARM templates (generated from bicep — do not commit)
+*.json
+
+# Bicep param files may contain secrets or deployment-specific values.
+# Commit *.bicepparam only if all secrets have been removed.
+# run-seed-agents.bicepparam contains deployment-specific GUIDs.
+run-seed-agents.bicepparam
+
+# Local settings
+*.local.bicepparam
+local.settings.json
+
+# Azure Functions
+test-agents/azure-functions/__pycache__/
+test-agents/azure-functions/.python_packages/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# .NET build output
+**/bin/
+**/obj/
+
+# OS
+.DS_Store
+Thumbs.db
