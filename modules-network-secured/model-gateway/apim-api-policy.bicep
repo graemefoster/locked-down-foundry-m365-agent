@@ -134,7 +134,7 @@ var renderedPolicy = replace(
     tokenAudience
   ),
   '@@BACKEND@@',
-  backendBaseUrl
+  '${backendBaseUrl}/v1'
 )
 
 // -------------------- Dynamic model discovery --------------------
@@ -198,13 +198,16 @@ resource inferenceApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
     ]
     // Require an APIM subscription key IN ADDITION to the Entra JWT (defense in depth).
     // Accept it on the 'api-key' header/query — the same name AOAI clients use, which is
-    // what the Foundry connection sends via metadata.customHeaders.
+    // what the Foundry connection sends via the authConfig (authHeaderName/authHeaderFormat).
+    // subscriptionRequired enforces the APIM subscription key on EVERY operation (incl.
+    // discovery). serviceUrl points at the provider's Azure OpenAI v1 surface; the chat
+    // operation forwards model-in-body to /openai/v1/chat/completions.
     subscriptionRequired: subscriptionRequired
     subscriptionKeyParameterNames: {
       header: 'api-key'
       query: 'api-key'
     }
-    serviceUrl: backendBaseUrl
+    serviceUrl: '${backendBaseUrl}/v1'
   }
 }
 
@@ -214,15 +217,11 @@ resource chatCompletionsOperation 'Microsoft.ApiManagement/service/apis/operatio
   properties: {
     displayName: 'Chat Completions'
     method: 'POST'
-    urlTemplate: '/deployments/{deploymentName}/chat/completions'
-    templateParameters: [
-      {
-        name: 'deploymentName'
-        type: 'string'
-        description: 'Model deployment name on the provider Foundry account'
-        required: true
-      }
-    ]
+    // Model-in-body (deploymentInPath=false): Foundry POSTs {"model":"<deployment>",...} to
+    // {target}/chat/completions. This op inherits the API-level <base/> policy (JWT + xms_mirid
+    // + set-backend-service to /openai/v1 + backend MI auth), forwarding to the provider's
+    // /openai/v1/chat/completions endpoint. No deploymentName path parameter is used.
+    urlTemplate: '/chat/completions'
     request: {
       queryParameters: [
         {

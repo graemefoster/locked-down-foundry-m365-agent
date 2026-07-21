@@ -3,9 +3,10 @@
   -------------------------------------------------
   Advertises the APIM model gateway to the PRIMARY Foundry project as an
   ApiManagement connection (like apim-connection.bicep), authenticated with the
-  project's managed identity (ProjectManagedIdentity — keyless). The exposed model
-  is advertised via the static-models metadata; agents reference it as
-  '<connectionName>/<exposedModelName>'.
+  project's managed identity (ProjectManagedIdentity — keyless). Models are discovered
+  dynamically at runtime (no static `models` array); agents reference the exposed model as
+  '<connectionName>/<exposedModelName>'. Inference uses the model-in-body (deploymentInPath
+  = false) v1 API surface — the APIM API forwards to the provider's /openai/v1 endpoint.
 
   Modelled on foundry-samples 01-connections/apim/modules/apim-connection-common.bicep.
 */
@@ -28,8 +29,8 @@ param apiPath string
 @description('Exposed model / deployment name, e.g. gpt-5.4-mini. Used only to build the agentModelReference output; models are discovered dynamically at runtime.')
 param exposedModelName string
 
-@description('Inference API version the gateway expects')
-param inferenceAPIVersion string = '2025-03-01-preview'
+@description('Inference API version the gateway expects. For the Azure OpenAI v1 API surface use "preview".')
+param inferenceAPIVersion string = 'preview'
 
 @description('Optional APIM subscription key. When set, it is sent to APIM as the "api-key" header alongside the project MI JWT (defense in depth).')
 @secure()
@@ -47,22 +48,28 @@ var target = '${apimGatewayUrl}/${apiPath}'
 // `modelDiscovery` override is needed. (Static and dynamic discovery are mutually
 // exclusive — omitting `models` triggers dynamic discovery via APIM defaults.)
 var baseMetadata = {
-  deploymentInPath: 'true'
+  deploymentInPath: 'false'
   inferenceAPIVersion: inferenceAPIVersion
 }
 
+// The APIM subscription key is attached via the authConfig mechanism (authHeaderName +
+// authHeaderFormat) with the key stored in credentials.key and substituted for the
+// {api_key} placeholder. Unlike customHeaders (which Foundry applies to inference calls
+// ONLY, and expects as a serialized JSON string — not the object shape used previously),
+// authConfig headers are sent on ALL gateway calls INCLUDING model discovery. That is
+// required here because the APIM API sets subscriptionRequired=true on every operation,
+// so a discovery call without the key would 401 and no models would be found.
+// (Reverse-engineered from a portal-created ApiManagement connection: the portal emits
+// the flat authHeaderName/authHeaderFormat metadata keys.)
 var metadata = empty(apiKey)
   ? baseMetadata
   : union(baseMetadata, {
-      customHeaders: {
-        value: {
-          'api-key': apiKey
-        }
-      }
+      authHeaderName: 'api-key'
+      authHeaderFormat: '{api_key}'
     })
 
-// Keyless (Entra) auth. When an api-key is supplied it is ALSO stored so the gateway
-// can present it — the JWT remains the primary credential (ProjectManagedIdentity).
+// The project MI JWT is the primary credential (ProjectManagedIdentity — keyless). When an
+// api-key is supplied it is stored here so the {api_key} placeholder above resolves to it.
 var credentials = empty(apiKey) ? {} : { key: apiKey }
 
 resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
@@ -74,7 +81,7 @@ resource aiProject 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-pre
   parent: aiFoundry
 }
 
-resource connection 'Microsoft.CognitiveServices/accounts/projects/connections@2025-04-01-preview' = {
+resource connection 'Microsoft.CognitiveServices/accounts/projects/connections@2026-05-15-preview' = {
   name: connectionName
   parent: aiProject
   properties: {
