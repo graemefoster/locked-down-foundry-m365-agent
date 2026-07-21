@@ -257,9 +257,6 @@ module firewall 'modules-network-secured/firewall.bicep' = {
     yarpProxyFqdn: 'yarp-${appServicePlanName}.azurewebsites.net'
     agentSubnetCidr: agentSubnetCidr
     unrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
-    enableModelGateway: enableModelGateway
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
   }
 }
 
@@ -884,6 +881,26 @@ module apimLockdown 'modules-network-secured/model-gateway/apim-lockdown.bicep' 
   dependsOn: [
     modelGatewayPrivateEndpoints
     apimApiPolicy
+  ]
+}
+
+// Model-gateway firewall rules (agent -> APIM inbound PE, APIM subnet platform egress).
+// Deliberately sequenced AFTER the APIM deployment: APIM Standard v2 takes ~15-45 min to
+// provision, which leaves the firewall long-idle after firewall.bicep's defaultRuleGroup
+// PUT before this second rule-collection-group PUT lands on the same policy. This avoids
+// the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
+// rule-collection-group PUTs arrive back-to-back.
+module modelGatewayFirewallRules 'modules-network-secured/model-gateway/model-gateway-firewall-rules.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-fwall-rules-${uniqueSuffix}-deployment'
+  params: {
+    firewallPolicyName: firewallPolicyName
+    agentSubnetCidr: agentSubnetCidr
+    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
+    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
+  }
+  dependsOn: [
+    firewall
+    apim
   ]
 }
 

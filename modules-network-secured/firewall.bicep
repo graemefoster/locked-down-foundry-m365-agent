@@ -18,27 +18,10 @@ App Service spoke keep general outbound so day-to-day work is unaffected.
 ''')
 param unrestrictedSourceCidrs array
 
-@description('Enable the optional model-gateway firewall rules (agent -> APIM inbound PE, and APIM subnet platform egress).')
-param enableModelGateway bool = false
-
-@description('CIDR of the gateway spoke pe-subnet (APIM inbound PE). The agent subnet is allowed to reach this on 443.')
-param modelGatewayPeSubnetCidr string = ''
-
-@description('CIDR of the gateway spoke apim-subnet (APIM v2 outbound VNet integration). Allowed platform egress on 443.')
-param modelGatewayApimSubnetCidr string = ''
-
-// Service tags APIM v2 may reach for platform dependencies / MI token acquisition
-// when its outbound-integration subnet force-tunnels 0.0.0.0/0 through the firewall.
-// AzureResourceManager is required for the dynamic model-discovery operations
-// (GET /deployments), which call the provider account's ARM deployments API.
-// Scoped to 443; anything else falls through to the implicit deny.
-var apimEgressServiceTags = [
-  'AzureActiveDirectory'
-  'AzureResourceManager'
-  'AzureMonitor'
-  'Storage'
-  'AzureKeyVault'
-]
+// The optional model-gateway rule collection group lives in its own module
+// (model-gateway/model-gateway-firewall-rules.bicep) so main.bicep can sequence
+// it AFTER the APIM deployment, giving the firewall a long settle window between
+// the two rule-collection-group PUTs on this policy.
 
 // Service tags the agent subnet is permitted to reach on 443 (network rules). No FQDNs, no wildcards.
 var agentEgressServiceTags = [
@@ -294,80 +277,6 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
       }
     ]
   }
-}
-
-/*
-  ==========================================================================
-  OPTIONAL: model-gateway rule collection group (only when enableModelGateway).
-  ==========================================================================
-  Kept in a SEPARATE rule-collection group (distinct priority) so the core
-  locked-down rules above are untouched when the gateway is disabled.
-
-    * Net-AgentToApimGateway: the agent subnet may reach the APIM inbound
-      private endpoint (in the gateway spoke pe-subnet) on 443/TCP. This is the
-      only cross-spoke path — the agent force-tunnels here via its 0.0.0.0/0 UDR
-      and returns symmetrically (pe-subnet has a UDR back to the firewall).
-    * Net-ApimPlatformEgress: the APIM v2 outbound-integration subnet force-tunnels
-      0.0.0.0/0 to the firewall, so allow its platform dependencies / MI token
-      egress to the approved service tags on 443. Backend calls to the provider
-      Foundry PE stay intra-VNet and never reach the firewall.
-  ==========================================================================
-*/
-resource modelGatewayRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleCollectionGroups@2025-01-01' = if (enableModelGateway) {
-  parent: fwallPolicy
-  name: 'modelGatewayRuleGroup'
-  properties: {
-    priority: 200
-    ruleCollections: [
-      {
-        name: 'Net-AgentToApimGateway'
-        ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
-        priority: 320
-        action: {
-          type: 'Allow'
-        }
-        rules: [
-          {
-            ruleType: 'NetworkRule'
-            name: 'AllowAgentToApimInboundPE'
-            description: 'Agent subnet: reach the APIM inbound private endpoint in the gateway spoke pe-subnet on 443/TCP.'
-            sourceAddresses: [
-              agentSubnetCidr
-            ]
-            destinationAddresses: [
-              modelGatewayPeSubnetCidr
-            ]
-            destinationPorts: ['443']
-            ipProtocols: ['TCP']
-          }
-        ]
-      }
-      {
-        name: 'Net-ApimPlatformEgress'
-        ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
-        priority: 330
-        action: {
-          type: 'Allow'
-        }
-        rules: [
-          {
-            ruleType: 'NetworkRule'
-            name: 'AllowApimPlatformEgress'
-            description: 'APIM v2 outbound-integration subnet: allow platform dependency + MI token egress to approved service tags on 443/TCP.'
-            sourceAddresses: [
-              modelGatewayApimSubnetCidr
-            ]
-            destinationAddresses: apimEgressServiceTags
-            destinationPorts: ['443']
-            ipProtocols: ['TCP']
-          }
-        ]
-      }
-    ]
-  }
-  dependsOn: [
-    policyRuleCollectionGroup
-  ]
 }
 
 output publicIpV4 string = firewallPip.properties.ipAddress
