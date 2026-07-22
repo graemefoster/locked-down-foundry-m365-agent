@@ -6,14 +6,31 @@ param aspName string
 param storageName string
 param foundryName string
 
-@description('When true, the YARP proxy is flipped PUBLIC (Teams/M365 inbound entry point), reverse-proxies to the APIM Teams API instead of Foundry directly, and inbound is IP-restricted to the AzureBotService service tag.')
+@description('When true, the YARP proxy is flipped PUBLIC (Teams/M365 inbound entry point), reverse-proxies to the APIM Teams API instead of Foundry directly, and inbound is IP-restricted to the Microsoft Teams "Required" published IP ranges.')
 param enableTeamsPublish bool = false
 
 @description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to. Only used when enableTeamsPublish=true.')
 param apimGatewayUrl string = ''
 
-@description('App Service access-restriction service tag allowed to reach the public YARP proxy inbound (Bot Channel Adapter).')
-param botChannelServiceTag string = 'AzureBotService'
+// Microsoft Teams "Required" published IP ranges — the source ranges the Bot Channel Adapter
+// uses to POST activities to the messaging endpoint. From the Microsoft 365 URLs & IP address
+// ranges list, service area "Skype" / display name "Microsoft Teams" (endpoint sets 11-12).
+// NOT the AzureBotService service tag: that tag covers DirectLine + the Bot Service token
+// cache, which this Teams-channel delivery path does not use, and it does NOT include the
+// 52.112.0.0/14 / 52.122.0.0/15 ranges the adapter actually connects from.
+// Source: https://learn.microsoft.com/microsoft-365/enterprise/urls-and-ip-address-ranges
+// (refresh via https://endpoints.office.com/endpoints/worldwide — serviceArea == 'Skype', required == true)
+var teamsInboundIpRanges = [
+  '52.112.0.0/14'
+  '52.122.0.0/15'
+  '2603:1027::/48'
+  '2603:1037::/48'
+  '2603:1047::/48'
+  '2603:1057::/48'
+  '2603:1063::/38'
+  '2620:1ec:40::/42'
+  '2620:1ec:6::/48'
+]
 
 // Teams inbound: YARP is the public messaging entry point and forwards to the APIM Teams
 // API (which validates the Bot Framework JWT and forwards to the agent activityProtocol
@@ -22,18 +39,16 @@ var yarpPublicNetworkAccess = enableTeamsPublish ? 'Enabled' : 'Disabled'
 var yarpReverseProxyAddress = enableTeamsPublish
   ? '${apimGatewayUrl}/'
   : 'https://${foundryName}.services.ai.azure.com/'
-var yarpIpRestrictions = enableTeamsPublish
-  ? [
-      {
-        ipAddress: botChannelServiceTag
-        tag: 'ServiceTag'
-        action: 'Allow'
-        priority: 100
-        name: 'AllowAzureBotService'
-        description: 'Azure Bot Service channel adapters only (public YARP endpoint).'
-      }
-    ]
-  : []
+var teamsInboundIpRules = [
+  for (cidr, i) in teamsInboundIpRanges: {
+    ipAddress: cidr
+    action: 'Allow'
+    priority: 100 + i
+    name: 'AllowTeamsInbound-${i}'
+    description: 'Microsoft Teams Required inbound range (Bot Channel Adapter -> public YARP).'
+  }
+]
+var yarpIpRestrictions = enableTeamsPublish ? teamsInboundIpRules : []
 
 resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' existing = {
   name: storageName

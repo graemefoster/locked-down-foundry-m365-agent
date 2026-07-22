@@ -84,6 +84,15 @@ var apimPkiFqdns = [
 var apimTelemetryFqdns = [
   'mobile.events.data.microsoft.com'
 ]
+// APIM validate-jwt (Teams inbound API) fetches the Bot Framework IdP's OpenID Connect
+// metadata + signing keys from this host to cryptographically verify the Bot Channel
+// Adapter JWT. APIM outbound is force-tunnelled through the firewall, so without this
+// application rule the metadata fetch is denied and validate-jwt returns 401 for every
+// inbound Teams activity (observed: 10.3.0.x -> login.botframework.com Deny). The bot IdP's
+// openid-configuration keeps jwks_uri on the same host, so this single FQDN is sufficient.
+var apimBotFrameworkFqdns = [
+  'login.botframework.com'
+]
 
 resource fwallPolicy 'Microsoft.Network/firewallPolicies@2025-01-01' existing = {
   name: firewallPolicyName
@@ -194,6 +203,18 @@ resource gatewayRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColl
               { protocolType: 'Https', port: 443 }
             ]
             targetFqdns: apimTelemetryFqdns
+          }
+          {
+            ruleType: 'ApplicationRule'
+            name: 'AllowApimBotFrameworkOidc'
+            description: 'Teams inbound JWT validation: APIM validate-jwt fetches the Bot Framework IdP OpenID Connect metadata + signing keys over HTTPS:443. Without this the metadata fetch is denied and every inbound Teams activity fails validation with 401.'
+            sourceAddresses: [
+              modelGatewayApimSubnetCidr
+            ]
+            protocols: [
+              { protocolType: 'Https', port: 443 }
+            ]
+            targetFqdns: apimBotFrameworkFqdns
           }
         ]
       }
