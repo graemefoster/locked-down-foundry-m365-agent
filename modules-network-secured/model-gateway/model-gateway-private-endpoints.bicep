@@ -48,36 +48,22 @@ param peSubnetId string
 @description('Resource ID of the Hub VNet (privatelink.azure-api.net is linked here for the resolver)')
 param hubVnetId string
 
-@description('Resource group of an existing privatelink.azure-api.net zone. Empty = create it here.')
-param apimDnsZoneResourceGroup string = ''
-
-@description('Resource group of the existing privatelink.services.ai.azure.com zone. Empty = same resource group.')
-param aiServicesDnsZoneResourceGroup string = ''
-
-@description('Resource group of the existing privatelink.openai.azure.com zone. Empty = same resource group.')
-param openAiDnsZoneResourceGroup string = ''
-
-@description('Resource group of the existing privatelink.cognitiveservices.azure.com zone. Empty = same resource group.')
-param cognitiveServicesDnsZoneResourceGroup string = ''
-
 var apimDnsZoneName = 'privatelink.azure-api.net'
 var aiServicesDnsZoneName = 'privatelink.services.ai.azure.com'
 var openAiDnsZoneName = 'privatelink.openai.azure.com'
 var cognitiveServicesDnsZoneName = 'privatelink.cognitiveservices.azure.com'
 
-/* ----------------------------- APIM DNS zone (create or reference) ----------------------------- */
+/* ----------------------------- APIM DNS zone ----------------------------- */
 
-resource apimDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = if (empty(apimDnsZoneResourceGroup)) {
+resource apimDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
   name: apimDnsZoneName
   location: 'global'
 }
 
-var apimDnsZoneId = empty(apimDnsZoneResourceGroup)
-  ? apimDnsZone.id
-  : resourceId(subscription().subscriptionId, apimDnsZoneResourceGroup, 'Microsoft.Network/privateDnsZones', apimDnsZoneName)
+var apimDnsZoneId = apimDnsZone.id
 
 // Link the APIM zone to the Hub VNet (DNS resolver lives there) so every spoke resolves it.
-resource apimDnsZoneHubLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (empty(apimDnsZoneResourceGroup)) {
+resource apimDnsZoneHubLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
   parent: apimDnsZone
   location: 'global'
   name: 'apim-${suffix}-hub-link'
@@ -88,17 +74,12 @@ resource apimDnsZoneHubLink 'Microsoft.Network/privateDnsZones/virtualNetworkLin
 }
 
 /* --------------------- Cognitive Services zones (reference existing by ID) --------------------- */
-// These zones are already created + hub-linked by the core private-endpoint-and-dns.bicep,
-// so we only need their resource IDs (a privateDnsZoneGroup takes an ID string). Computing
-// the ID with resourceId() avoids an 'existing' declaration whose scope would be a ternary
-// (unsupported). Defaults to the current resource group unless a zone lives elsewhere.
-var aiServicesDnsZoneRgName = empty(aiServicesDnsZoneResourceGroup) ? resourceGroup().name : aiServicesDnsZoneResourceGroup
-var openAiDnsZoneRgName = empty(openAiDnsZoneResourceGroup) ? resourceGroup().name : openAiDnsZoneResourceGroup
-var cognitiveServicesDnsZoneRgName = empty(cognitiveServicesDnsZoneResourceGroup) ? resourceGroup().name : cognitiveServicesDnsZoneResourceGroup
-
-var aiServicesDnsZoneId = resourceId(subscription().subscriptionId, aiServicesDnsZoneRgName, 'Microsoft.Network/privateDnsZones', aiServicesDnsZoneName)
-var openAiDnsZoneId = resourceId(subscription().subscriptionId, openAiDnsZoneRgName, 'Microsoft.Network/privateDnsZones', openAiDnsZoneName)
-var cognitiveServicesDnsZoneId = resourceId(subscription().subscriptionId, cognitiveServicesDnsZoneRgName, 'Microsoft.Network/privateDnsZones', cognitiveServicesDnsZoneName)
+// These zones are already created + hub-linked by the core private-endpoint-and-dns.bicep in the
+// current resource group, so we only need their resource IDs (a privateDnsZoneGroup takes an ID
+// string). Computing the ID with resourceId() avoids an 'existing' declaration.
+var aiServicesDnsZoneId = resourceId(subscription().subscriptionId, resourceGroup().name, 'Microsoft.Network/privateDnsZones', aiServicesDnsZoneName)
+var openAiDnsZoneId = resourceId(subscription().subscriptionId, resourceGroup().name, 'Microsoft.Network/privateDnsZones', openAiDnsZoneName)
+var cognitiveServicesDnsZoneId = resourceId(subscription().subscriptionId, resourceGroup().name, 'Microsoft.Network/privateDnsZones', cognitiveServicesDnsZoneName)
 
 /* -------------------------------------- Private Endpoints -------------------------------------- */
 

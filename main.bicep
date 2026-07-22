@@ -43,11 +43,11 @@ param aiServices string = 'aiservices'
 
 // Model deployment parameters
 @description('The name of the model you want to deploy')
-param modelName string = 'gpt-4o'
+param modelName string = 'gpt-5.4'
 @description('The provider of your model')
 param modelFormat string = 'OpenAI'
 @description('The version of your model')
-param modelVersion string = '2024-11-20'
+param modelVersion string = '2026-03-05'
 @description('The sku of your model deployment')
 param modelSkuName string = 'GlobalStandard'
 @description('The tokens per minute (TPM) of your model deployment')
@@ -98,64 +98,17 @@ param agentSubnetName string = 'agent-subnet'
 @description('The name of Private Endpoint subnet')
 param peSubnetName string = 'pe-subnet'
 
-//Existing standard Agent required resources
-@description('The AI Search Service full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
-param aiSearchResourceId string = ''
-@description('The AI Storage Account full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
-param azureStorageAccountResourceId string = ''
-@description('The Cosmos DB Account full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
-param azureCosmosDBAccountResourceId string = ''
-
 @secure()
 @minLength(15)
 param vmAdminPassword string
 
 param vmAdminUsername string
 
-@description('Object mapping DNS zone names to their resource group, or empty string to indicate creation')
-param existingDnsZones object = {
-  'privatelink.services.ai.azure.com': ''
-  'privatelink.openai.azure.com': ''
-  'privatelink.cognitiveservices.azure.com': ''
-  'privatelink.search.windows.net': ''
-  'privatelink.blob.${environment().suffixes.storage}': ''
-  'privatelink.documents.azure.com': ''
-  'privatelink.vaultcore.azure.net': ''
-}
-
-@description('Zone Names for Validation of existing Private Dns Zones')
-param dnsZoneNames array = [
-  'privatelink.services.ai.azure.com'
-  'privatelink.openai.azure.com'
-  'privatelink.cognitiveservices.azure.com'
-  'privatelink.search.windows.net'
-  'privatelink.blob.${environment().suffixes.storage}'
-  'privatelink.documents.azure.com'
-  'privatelink.vaultcore.azure.net'
-]
-
 var projectName = toLower('${firstProjectName}${uniqueSuffix}')
 var cosmosDBName = toLower('${aiServices}${uniqueSuffix}cosmosdb')
 var aiSearchName = toLower('${aiServices}${uniqueSuffix}search')
 var azureStorageName = toLower('${aiServices}${uniqueSuffix}stg')
 var keyVaultName = toLower('${aiServices}${uniqueSuffix}kv')
-
-// Check if existing resources have been passed in
-var storagePassedIn = azureStorageAccountResourceId != ''
-var searchPassedIn = aiSearchResourceId != ''
-var cosmosPassedIn = azureCosmosDBAccountResourceId != ''
-
-var acsParts = split(aiSearchResourceId, '/')
-var aiSearchServiceSubscriptionId = searchPassedIn ? acsParts[2] : subscription().subscriptionId
-var aiSearchServiceResourceGroupName = searchPassedIn ? acsParts[4] : resourceGroup().name
-
-var cosmosParts = split(azureCosmosDBAccountResourceId, '/')
-var cosmosDBSubscriptionId = cosmosPassedIn ? cosmosParts[2] : subscription().subscriptionId
-var cosmosDBResourceGroupName = cosmosPassedIn ? cosmosParts[4] : resourceGroup().name
-
-var storageParts = split(azureStorageAccountResourceId, '/')
-var azureStorageSubscriptionId = storagePassedIn ? storageParts[2] : subscription().subscriptionId
-var azureStorageResourceGroupName = storagePassedIn ? storageParts[4] : resourceGroup().name
 
 @description('The name of the project capability host to be created')
 param projectCapHost string = 'caphostproj'
@@ -361,19 +314,6 @@ module aiAccount 'modules-network-secured/ai-account-identity.bicep' = {
     keyVaultName: keyVaultName
   }
 }
-/*
-  Validate existing resources
-*/
-module validateExistingResources 'modules-network-secured/validate-existing-resources.bicep' = {
-  name: 'validate-existing-resources-${uniqueSuffix}-deployment'
-  params: {
-    aiSearchResourceId: aiSearchResourceId
-    azureStorageAccountResourceId: azureStorageAccountResourceId
-    azureCosmosDBAccountResourceId: azureCosmosDBAccountResourceId
-    existingDnsZones: existingDnsZones
-    dnsZoneNames: dnsZoneNames
-  }
-}
 
 // ==================== KEY VAULT (CMK) ====================
 
@@ -386,7 +326,7 @@ module keyVault 'modules-network-secured/keyvault.bicep' = {
   }
 }
 
-// Create new agent dependent resources (Storage, CosmosDB, AI Search, App Service)
+// Create agent dependent resources (Storage, CosmosDB, AI Search, App Service)
 module aiDependencies 'modules-network-secured/standard-dependent-resources.bicep' = {
   name: 'dependencies-${uniqueSuffix}-deployment'
   params: {
@@ -394,18 +334,6 @@ module aiDependencies 'modules-network-secured/standard-dependent-resources.bice
     azureStorageName: azureStorageName
     aiSearchName: aiSearchName
     cosmosDBName: cosmosDBName
-
-    // AI Search Service parameters
-    aiSearchResourceId: aiSearchResourceId
-    aiSearchExists: validateExistingResources.outputs.aiSearchExists
-
-    // Storage Account
-    azureStorageAccountResourceId: azureStorageAccountResourceId
-    azureStorageExists: validateExistingResources.outputs.azureStorageExists
-
-    // Cosmos DB Account
-    cosmosDBResourceId: azureCosmosDBAccountResourceId
-    cosmosDBExists: validateExistingResources.outputs.cosmosDBExists
 
     logAnalyticsId: lanalytics.id
     appServicePlanName: appServicePlanName
@@ -421,20 +349,14 @@ module aiDependencies 'modules-network-secured/standard-dependent-resources.bice
 
 resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
   name: aiDependencies.outputs.azureStorageName
-  scope: resourceGroup(azureStorageSubscriptionId, azureStorageResourceGroupName)
 }
 
 resource aiSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
   name: aiDependencies.outputs.aiSearchName
-  scope: resourceGroup(
-    aiDependencies.outputs.aiSearchServiceSubscriptionId,
-    aiDependencies.outputs.aiSearchServiceResourceGroupName
-  )
 }
 
 resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = {
   name: aiDependencies.outputs.cosmosDBName
-  scope: resourceGroup(cosmosDBSubscriptionId, cosmosDBResourceGroupName)
 }
 
 module acr './modules-network-secured/acr.bicep' = {
@@ -481,7 +403,7 @@ module aiAccountEncryption 'modules-network-secured/ai-account-encryption.bicep'
 var noZRSRegions = ['southindia', 'westus', 'northcentralus']
 var storageSkuName = contains(noZRSRegions, location) ? 'Standard_GRS' : 'Standard_ZRS'
 
-module storageEncryption 'modules-network-secured/storage-encryption.bicep' = if (!storagePassedIn) {
+module storageEncryption 'modules-network-secured/storage-encryption.bicep' = {
   name: 'storage-encryption-${uniqueSuffix}-deployment'
   params: {
     storageName: aiDependencies.outputs.azureStorageName
@@ -517,13 +439,6 @@ module privateEndpointAndDNS 'modules-network-secured/private-endpoint-and-dns.b
     appServicePeSubnetName: appServiceSpokeVnet.outputs.peSubnetName
 
     suffix: uniqueSuffix
-    cosmosDBSubscriptionId: cosmosDBSubscriptionId
-    cosmosDBResourceGroupName: cosmosDBResourceGroupName
-    aiSearchSubscriptionId: aiSearchServiceSubscriptionId
-    aiSearchResourceGroupName: aiSearchServiceResourceGroupName
-    storageAccountResourceGroupName: azureStorageResourceGroupName
-    storageAccountSubscriptionId: azureStorageSubscriptionId
-    existingDnsZones: existingDnsZones
     appServiceWebAppNames: [aiDependencies.outputs.yarpWebAppName, aiDependencies.outputs.mcpWebAppName]
     acrName: acr.outputs.acrName
     keyVaultName: keyVault.outputs.keyVaultName
@@ -591,7 +506,6 @@ module formatProjectWorkspaceId 'modules-network-secured/format-project-workspac
 */
 module storageAccountRoleAssignment 'modules-network-secured/azure-storage-account-role-assignment.bicep' = {
   name: 'storage-ra-${uniqueSuffix}-deployment'
-  scope: resourceGroup(azureStorageSubscriptionId, azureStorageResourceGroupName)
   params: {
     azureStorageName: aiDependencies.outputs.azureStorageName
     projectPrincipalId: aiProject.outputs.projectPrincipalId
@@ -641,7 +555,6 @@ module foundryProjectRoleAssignment 'modules-network-secured/foundry-project-rol
 // The Comos DB Operator role must be assigned before the caphost is created
 module cosmosAccountRoleAssignments 'modules-network-secured/cosmosdb-account-role-assignment.bicep' = {
   name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
-  scope: resourceGroup(cosmosDBSubscriptionId, cosmosDBResourceGroupName)
   params: {
     cosmosDBName: aiDependencies.outputs.cosmosDBName
     projectPrincipalId: aiProject.outputs.projectPrincipalId
@@ -655,7 +568,6 @@ module cosmosAccountRoleAssignments 'modules-network-secured/cosmosdb-account-ro
 // This role can be assigned before or after the caphost is created
 module aiSearchRoleAssignments 'modules-network-secured/ai-search-role-assignments.bicep' = {
   name: 'ai-search-ra-${uniqueSuffix}-deployment'
-  scope: resourceGroup(aiSearchServiceSubscriptionId, aiSearchServiceResourceGroupName)
   params: {
     aiSearchName: aiDependencies.outputs.aiSearchName
     projectPrincipalId: aiProject.outputs.projectPrincipalId
@@ -691,7 +603,6 @@ module addProjectCapabilityHost 'modules-network-secured/add-project-capability-
 // The Storage Blob Data Owner role must be assigned after the caphost is created
 module storageContainersRoleAssignment 'modules-network-secured/blob-storage-container-role-assignments.bicep' = {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
-  scope: resourceGroup(azureStorageSubscriptionId, azureStorageResourceGroupName)
   params: {
     aiProjectPrincipalId: aiProject.outputs.projectPrincipalId
     storageName: aiDependencies.outputs.azureStorageName
@@ -705,7 +616,6 @@ module storageContainersRoleAssignment 'modules-network-secured/blob-storage-con
 // The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
 module cosmosContainerRoleAssignments 'modules-network-secured/cosmos-container-role-assignments.bicep' = {
   name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
-  scope: resourceGroup(cosmosDBSubscriptionId, cosmosDBResourceGroupName)
   params: {
     cosmosAccountName: aiDependencies.outputs.cosmosDBName
     projectWorkspaceId: formatProjectWorkspaceId.outputs.projectWorkspaceIdGuid
@@ -810,10 +720,6 @@ module modelGatewayPrivateEndpoints 'modules-network-secured/model-gateway/model
     providerAccountName: providerFoundry.outputs.accountName
     peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
     hubVnetId: hubNetwork.outputs.hubVnetId
-    apimDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.azure-api.net') ? existingDnsZones['privatelink.azure-api.net'] : ''
-    aiServicesDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.services.ai.azure.com') ? existingDnsZones['privatelink.services.ai.azure.com'] : ''
-    openAiDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.openai.azure.com') ? existingDnsZones['privatelink.openai.azure.com'] : ''
-    cognitiveServicesDnsZoneResourceGroup: contains(existingDnsZones, 'privatelink.cognitiveservices.azure.com') ? existingDnsZones['privatelink.cognitiveservices.azure.com'] : ''
   }
   dependsOn: [
     privateEndpointAndDNS

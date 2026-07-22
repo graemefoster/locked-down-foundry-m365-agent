@@ -30,7 +30,7 @@ This infrastructure-as-code (IaC) solution deploys a network-secured Azure AI ag
 > 🔒 **Network lockdown reference:** for the full, rule-by-rule breakdown of the deny-by-default firewall and agent-subnet NSG (service-tag allow-list, flow logs, and validation steps), see **[NETWORKING.md](./NETWORKING.md)**.
 
 
-Standard setup supports private network isolation through utilizing **Bring Your Own Virtual Network (BYO VNet)** approach, also known as **custom VNet support with subnet delegation.** 
+Standard setup provides private network isolation through a **dedicated virtual network with subnet delegation** that the template creates and manages for you.
 
 This implementation gives you full control over the inbound and outbound communication paths for your agent. You can restrict access to only the resources explicitly required by your agent, such as storage accounts, databases, or APIs, while blocking all other traffic by default. This approach ensures that your agent operates within a tightly scoped network boundary, reducing the risk of data leakage or unauthorized access. By default, this setup simplifies security configuration while enforcing strong isolation guarantees, ensuring that each agent deployment remains secure, compliant, and aligned with enterprise networking policies. 
 
@@ -114,54 +114,20 @@ If you intend to retain the account but remove the capability host, you can use 
 
 ### Template Customization
 
-Note: If not provided, the following resources will be created automatically for you:
+This template always provisions a fresh, fully isolated set of resources in the target
+resource group:
+
 - VNet and two subnets
-- Azure Cosmos DB for NoSQL  
+- Azure Cosmos DB for NoSQL
 - Azure AI Search
 - Azure Storage
+- Azure Key Vault
+- Azure Container Registry
+- Private DNS zones and private endpoints for all of the above
 
-**Optional Integration:** API Management services can be integrated by providing an existing API Management service resource ID.
-
-#### Parameters
-
-1. **Use Existing Virtual Network and Subnets**
-
-To use an existing VNet and subnets, set the existingVnetResourceId parameter to the full Azure Resource ID of the target VNet and its address range, and provide the names of the two required subnets.  If the existing VNet is associated with private DNS zones, set the existingDnsZones parameter to the resource group name in which the zones are located. For example:
-- param existingVnetResourceId = "/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.Network/virtualNetworks/<vnet-name>"
-- param agentSubnetName string = 'agent-subnet' //optional, default is 'agent-subnet'
-- param agentSubnetPrefix string = '192.168.0.0/24' //optional, default is '192.168.0.0/24'
-- param peSubnetName string = 'pe-subnet' //optional, default is 'pe-subnet'
-- param peSubnetPrefix string = '192.168.1.0/24' //optional, default is '192.168.1.0/24'
-- param existingDnsZones = {
-       
-         'privatelink.services.ai.azure.com': 'privzoneRG' //add resource group name where your private DNS zone is located
-       
-         'privatelink.openai.azure.com': '' //Leave empty to create new private dns zone... }
-
-💡 If subnets information is provided then make sure it exist within the specified VNet to avoid deployment errors. If subnet information is not provided, the template will create subnets with the default address space.
-
-
-2. **Use an existing Azure Cosmos DB for NoSQL**
-
-To use an existing Cosmos DB for NoSQL resource, set cosmosDBResourceId parameter to the full Azure Resource ID of the target Cosmos DB.
-- param azureCosmosDBAccountResourceId string =  /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DocumentDB/databaseAccounts/{cosmosDbAccountName}
-
-
-3. **Use an existing Azure AI Search resource**
-
-To use an existing Azure AI Search resource, set aiSearchServiceResourceId parameter to the full Azure resource Id of the target Azure AI Search resource. 
- - param aiSearchResourceId string = /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Search/searchServices/{searchServiceName}
-
-
-4. **Use an existing Azure Storage account**
-
-To use an existing Azure Storage account, set aiStorageAccountResourceId parameter to the full Azure resource Id of the target Azure Storage account resource. 
-- param aiStorageAccountResourceId string = /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.Storage/storageAccounts/{storageAccountName}
-
-5. **Use an existing Azure API Management service**
-
-To use an existing Azure API Management service, set apiManagementResourceId parameter to the full Azure resource Id of the target Azure API Management service.
-- param apiManagementResourceId string = /subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.ApiManagement/service/{apiManagementServiceName}
+Bringing your own (pre-existing) Search, Storage, Cosmos DB, DNS zones, or VNet is **not**
+supported — the template creates everything itself to keep the deployment simple and
+self-contained.
 
 ---
 
@@ -311,7 +277,7 @@ Cosmos DB Account
   - Single region deployment 
 
 ### Network Security Design
-This implementation utilizes a BYO VNet (Bring Your Own Virtual Network) approach, also known as custom VNet support with subnet delegation. Within your existing virtual network, one delegated subnet will be created.
+This implementation uses a dedicated virtual network with subnet delegation. The template creates the virtual network and one delegated subnet for the agent.
 
 Network Security
 - Public network access disabled
@@ -384,17 +350,15 @@ modules-network-secured/
 ├── blob-storage-container-role-assignments.bicep   # Blob Storage Container RBAC configuration
 ├── cosmos-container-role-assignments.bicep         # CosmosDB container Account RBAC configuration
 ├── cosmosdb-account-role-assignment.bicep          # CosmosDB Account RBAC configuration
-├── existing-vnet.bicep                             # Bring your existing virtual network to template deployment
 ├── format-project-workspace-id.bicep               # Formatting the project workspace ID
-├── network-agent-vnet.bicep                        # Logic for routing virtual network set-up if existing virtual network is selected
+├── network-agent-vnet.bicep                        # Hub VNet orchestrator (firewall + DNS resolver subnets)
 ├── private-endpoint-and-dns.bicep                  # Creating virtual networks and DNS zones. 
 ├── standard-dependent-resources.bicep              # Deploying CosmosDB, Storage, and Search
 ├── subnet.bicep                                    # Setting the subnet for Agent network injection
-├── validate-existing-resources.bicep               # Validate existing CosmosDB, Storage, and Search to template deployment
 └── vnet.bicep                                      # Deploying a new virtual network
 ```
 
-> **Note:** If you bring your own VNET for this template, ensure the subnet for Agents has the correct subnet delegation to `Microsoft.App/environments`. If you have not specified the delegated subnet, the template will complete this for you.
+> **Note:** The template always creates the VNet and delegates the Agents subnet to `Microsoft.App/environments` for you.
 
 ## Maintenance
 
