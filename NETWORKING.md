@@ -225,7 +225,8 @@ control-plane surfaces plus the single A365 hostname.
 
 ## Optional: Model Gateway spoke (APIM + provider Foundry)
 
-Enabled with `enableModelGateway=true` (default **false**, for cost). It adds a
+Controlled by `enableModelGateway`, which is **on by default** (`azd` sets
+`ENABLE_MODEL_GATEWAY=true`); set it to `false` to skip this spoke. It adds a
 third spoke that fronts a "real" model provider Foundry behind Azure API
 Management, and advertises APIM to the primary Foundry project as a keyless
 `ApiManagement` connection. A second agent is seeded using the model

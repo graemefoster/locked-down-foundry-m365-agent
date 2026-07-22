@@ -65,7 +65,7 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
   agent to Microsoft Teams even though Foundry is private, via a public YARP proxy →
   private APIM → the agent's activityProtocol endpoint, with Bot Framework JWT validation
   and single-tenant lockdown. **[docs/teams-m365.md](./docs/teams-m365.md)**.
-- **Model gateway (APIM + provider Foundry)** *(off by default)* — front models with APIM
+- **Model gateway (APIM + provider Foundry)** *(on by default)* — front models with APIM
   Standard v2 (private), dynamic model discovery, and defense-in-depth auth.
   **[docs/model-gateway.md](./docs/model-gateway.md)** ·
   [deep dive](./apim-model-gateway.md).

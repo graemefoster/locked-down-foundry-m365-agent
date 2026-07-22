@@ -9,7 +9,8 @@
 > `enableModelGateway` now only gates the **provider Foundry** account, the APIM
 > inference API/connection, and the second seeded agent.
 
-Set `enableModelGateway=true` (default **false**) to deploy an optional,
+`enableModelGateway` is **on by default** (`azd` sets `ENABLE_MODEL_GATEWAY=true` in
+`infra/main.parameters.json`); set it to `false` to skip it. It deploys an
 enterprise-grade model gateway in the shared gateway spoke (`10.3.0.0/16`):
 
 - **APIM Standard v2** with an inbound **private endpoint** and outbound **VNet

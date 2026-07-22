@@ -18,9 +18,10 @@ plus a **"real" model-provider AI Foundry** in a **new spoke VNet**, then advert
 to the **primary** Foundry project as an `ApiManagement` connection so a seeded agent can
 use a model referenced as `<connection-name>/<model-name>` (e.g. `model-gateway/gpt-5.4-mini`).
 
-Everything is gated behind `enableModelGateway` (default **false**) so there is zero cost
-impact unless explicitly enabled. Goal: hit as many enterprise features as possible
-(private APIM, VNet integration, keyless Entra auth to the gateway, dynamic model discovery).
+Everything is gated behind `enableModelGateway`, which is **on by default** (`azd` sets
+`ENABLE_MODEL_GATEWAY=true`); set it to `false` to skip it. Goal: hit as many enterprise
+features as possible (private APIM, VNet integration, keyless Entra auth to the gateway,
+dynamic model discovery).
 
 ## 2. Topology (when enabled)
 
