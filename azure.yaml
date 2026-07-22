@@ -13,3 +13,8 @@ hooks:
     run: ./hooks/predeploy.ps1
     continueOnError: false
     interactive: false
+  predown:
+    shell: pwsh
+    run: ./hooks/predown.ps1
+    continueOnError: false
+    interactive: false

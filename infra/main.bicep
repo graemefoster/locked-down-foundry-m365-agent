@@ -832,6 +832,12 @@ output SEED_AGENTS_VM_NAME string = vmModule.outputs.vmName
 @description('Foundry project endpoint the seeded agents are created against.')
 output AZURE_AI_PROJECT_ENDPOINT string = aiProject.outputs.projectEndpoint
 
+@description('Foundry (Cognitive Services) account name. Used by the predown hook to delete capability hosts before teardown.')
+output AZURE_AI_ACCOUNT_NAME string = aiAccount.outputs.accountName
+
+@description('Foundry project name. Used by the predown hook to delete capability hosts before teardown.')
+output AZURE_AI_PROJECT_NAME string = aiProject.outputs.projectName
+
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
 
