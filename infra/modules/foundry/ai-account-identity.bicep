@@ -32,11 +32,7 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
     networkAcls: {
       defaultAction: 'Allow'
       virtualNetworkRules: []
-      ipRules: [
-        {
-          value: '49.192.23.85'
-        }
-      ]
+      ipRules: []
       bypass: 'AzureServices'
     }
     publicNetworkAccess: 'Disabled'

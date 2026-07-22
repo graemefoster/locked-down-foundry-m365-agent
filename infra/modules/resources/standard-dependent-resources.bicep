@@ -44,9 +44,6 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
     enableFreeTier: false
     ipRules: [
       {
-        ipAddressOrRange: '49.192.23.85' //Graeme's IP!
-      }
-      {
         ipAddressOrRange: '4.210.172.107' //azure portal
       }
       {
