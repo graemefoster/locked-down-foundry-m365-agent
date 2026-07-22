@@ -802,29 +802,41 @@ module modelGatewayFirewallRules 'modules-network-secured/model-gateway/model-ga
   ]
 }
 
-// ==================== SEED AGENTS ====================
+// ==================== SEED AGENTS: VM RBAC ====================
 
-// Runs a deployment-script container inside the private VNet to call the Foundry
-// Agents API and provision the initial set of agents. The container is ephemeral —
-// it runs once, seeds the agents, then ARM cleans it up after retentionInterval.
-module seedAgents 'modules-network-secured/seed-agents-script.bicep' = {
-  name: 'seed-agents-${uniqueSuffix}'
+// Agent seeding now runs from the azd `predeploy` hook (hooks/predeploy.ps1), which uses
+// `az vm run-command` to execute scripts/seed-agents.ps1 on the private VM (the only host
+// that can reach the Foundry private endpoint). The VM's system-assigned identity still
+// needs Foundry User on the project so the on-VM script can acquire a token and call the
+// Agents API — that RBAC is provisioned here.
+module vmFoundryRole 'modules-network-secured/vm-foundry-role.bicep' = {
+  name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
-    location: location
-    foundryProjectEndpoint: '${aiProject.outputs.projectEndpoint}/'
-    modelDeploymentName: modelName
-    vmName: vmModule.outputs.vmName
-    vmPrincipalId: vmModule.outputs.vmPrincipalId
     accountName: aiAccount.outputs.accountName
     projectName: aiProject.outputs.projectName
-    enableSecondAgent: enableModelGateway
-    secondAgentModel: apimConnection.?outputs.agentModelReference ?? ''
+    vmPrincipalId: vmModule.outputs.vmPrincipalId
   }
   dependsOn: [
     addProjectCapabilityHost
-    cosmosContainerRoleAssignments
-    storageContainersRoleAssignment
-    privateEndpointAndDNS
-    vmModule
   ]
 }
+
+// ==================== OUTPUTS (consumed by the azd predeploy hook) ====================
+
+@description('Resource group the deployment targets.')
+output AZURE_RESOURCE_GROUP string = resourceGroup().name
+
+@description('Name of the private VM the seed-agents hook runs its script on.')
+output SEED_AGENTS_VM_NAME string = vmModule.outputs.vmName
+
+@description('Foundry project endpoint the seeded agents are created against.')
+output AZURE_AI_PROJECT_ENDPOINT string = aiProject.outputs.projectEndpoint
+
+@description('Model deployment name assigned to the default seeded agent.')
+output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
+
+@description('Whether to seed the second (model-gateway) agent.')
+output SEED_ENABLE_SECOND_AGENT bool = enableModelGateway
+
+@description('Model reference for the second (model-gateway) agent.')
+output SEED_SECOND_AGENT_MODEL string = apimConnection.?outputs.agentModelReference ?? ''

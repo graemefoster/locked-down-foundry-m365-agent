@@ -117,8 +117,8 @@ Modified core:
   (`'model-gateway'`), `effectiveGatewayApiKey` (deterministic guid, never empty).
   Consuming conditional-module outputs from always-deployed resources uses safe-access
   (`mod.?outputs.x ?? default`) to avoid BCP318 hard-reference failures.
-- `modules-network-secured/seed-agents-script.bicep` — VM run-command seeding agents; optional
-  2nd agent uses `model-gateway/<model>`.
+- `scripts/seed-agents.ps1` — on-VM agent seeding (run via `azd hooks run predeploy` →
+  `hooks/predeploy.ps1` → `az vm run-command`); optional 2nd agent uses `model-gateway/<model>`.
 - `main.bicepparam` — `enableModelGateway`, gateway params. **DO NOT COMMIT (real password).**
 
 ## 7. Live environment (current deployment)
@@ -214,12 +214,11 @@ response with no auth error → confirms discovery + v1 inference through APIM e
 ## 11. Open follow-ups
 
 1. **Run the §10 end-to-end test** to confirm the v1 patch actually serves inference (not just structurally correct).
-2. **`seed-agents-script.bicep` bugs** (committed, not yet fixed):
-   - `Get-ExistingAgents` reads `$response.value` but the API returns `.data` → idempotency
-     check never matches → re-runs bump agent versions. **Fix: `.data`.**
+2. **`scripts/seed-agents.ps1` — remaining hardening** (idempotency `.data` bug now fixed):
    - No retry/backoff on the first `GET /agents`; a cold deploy hits a capability-host/RBAC
      propagation race (~1 min) returning transient `400` and failing the whole seed.
-     **Fix: retry loop.** Consider a `forceUpdateTag: utcNow()` so redeploys actually re-run.
+     **Fix: retry loop.** The seed now runs from the azd `predeploy` hook, so re-running
+     `azd hooks run predeploy` is the redeploy path (no `forceUpdateTag` needed).
 3. **Collapse the 3 `xms_mirid` casings** to the one the live token actually emits (after a real call confirms it).
 4. **App Insights `requests` empty over 2h** — likely just because failed discovery meant no
    Foundry-origin traffic reached APIM; re-check once real traffic flows. Rule out a separate

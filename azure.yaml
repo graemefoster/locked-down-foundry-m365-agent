@@ -1,3 +1,15 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
 
 name: locked-down-foundry-m365-agent
+
+infra:
+  provider: bicep
+  path: .
+  module: main
+
+hooks:
+  predeploy:
+    shell: pwsh
+    run: ./hooks/predeploy.ps1
+    continueOnError: false
+    interactive: false

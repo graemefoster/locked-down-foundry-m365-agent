@@ -175,7 +175,7 @@ Choose your deployment method: Use the "Deploy to Azure" button from the provide
 
 **Option 1: Automatic deployment** 
 Click the deploy to Azure button above to open the Azure portal and deploy the template directly. 
-- Fill in the parameters as needed, including the existing VNet and subnets if applicable. 
+- Fill in the parameters as needed. 
 
 
 **Option 2: Manually deploy the bicep template**
@@ -185,13 +185,54 @@ Click the deploy to Azure button above to open the Azure portal and deploy the t
    az group create --name <new-rg-name> --location <your-rg-region>
    ```
 - Deploy the main.bicep file
-  - Edit the main.bicepparams file to use an existing Virtual Network & subnets, Azure Cosmos DB, Azure Storage, and Azure AI Search.
 
    ```bash
       az deployment group create --resource-group <your-resource-group> --template-file main.bicep --parameters main.bicepparam
    ```
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
+
+> **Note:** The Bicep/portal deployment provisions all infrastructure but **does not seed
+> agents**. Seed them separately (see below).
+
+---
+
+## Seeding agents
+
+The Foundry endpoint is private, so agents are created by running
+[`scripts/seed-agents.ps1`](./scripts/seed-agents.ps1) **on the locked-down VM** (the only
+host inside the VNet that can reach the private endpoint). This is wired as an
+[Azure Developer CLI](https://aka.ms/azd) **`predeploy` hook**
+([`hooks/predeploy.ps1`](./hooks/predeploy.ps1)), which uses `az vm run-command` to execute
+the script on the VM.
+
+Once infrastructure is provisioned (so the Bicep outputs are in the azd environment):
+
+```bash
+# Iterate on agents without re-provisioning:
+azd hooks run predeploy
+
+# Or, as part of a full deploy (runs the predeploy hook first):
+azd deploy
+```
+
+To change which agents are created, edit the `$agentsToCreate` array in
+`scripts/seed-agents.ps1`. The script is **idempotent** — agents that already exist (matched
+by name) are skipped, so re-running is safe.
+
+**Requirements:**
+- `az` CLI and PowerShell (`pwsh`) on the machine running the hook.
+- The caller needs permission to invoke VM run-commands
+  (`Microsoft.Compute/virtualMachines/runCommands/*`, e.g. **Virtual Machine Contributor**
+  on the VM/resource group). The VM's own managed identity already holds **Foundry User** on
+  the project (granted by the template) so the on-VM script can call the Agents API.
+- `azd deploy` only triggers the hook once a service is defined in `azure.yaml`;
+  `azd hooks run predeploy` works regardless and is the quickest way to (re)seed.
+
+If you deploy via the portal or raw `az deployment group create` (no azd), run the seeding
+script yourself, e.g. `az vm run-command invoke --command-id RunPowerShellScript --name
+<vm-name> -g <rg> --scripts @scripts/seed-agents.ps1 --parameters
+"FoundryProjectEndpoint=<endpoint>" "ModelDeploymentName=<model>"`.
 
 ---
 
