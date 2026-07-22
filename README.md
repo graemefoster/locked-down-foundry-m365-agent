@@ -181,23 +181,33 @@ The Teams / M365 publish path is **on by default** (`enableTeamsPublish=true`; s
 **Microsoft Teams and Microsoft 365 Copilot**, even
 though the Foundry endpoint has public network access disabled. This follows the
 Learn article
-[Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network).
+[Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network),
+with the corporate-firewall specifics from
+[Foundry agents and custom engine agents through the corporate firewall](https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/foundry-agents-and-custom-engine-agents-through-the-corporate-firewall/4502218).
 
 ### Inbound path
 
 Because the Foundry agent lives behind a private endpoint, Microsoft's Bot Channel
 Adapter (which runs on the public internet) can't reach it directly. Traffic flows:
 
+```mermaid
+flowchart LR
+    T["Teams / M365 Copilot"] --> BCA["Bot Channel Adapter<br/>(Microsoft, public)"]
+    BCA --> BOT["Azure Bot Service<br/>endpoint = YARP FQDN + /teams"]
+    BOT -->|"from Teams IP ranges<br/>52.112.0.0/14, 52.122.0.0/15"| YARP["YARP App Service<br/>PUBLIC · managed TLS<br/>IP-restricted · VNet-integrated out"]
+    YARP -->|private endpoint| APIM["APIM Teams API<br/>validate-jwt"]
+    APIM -->|"set-backend + rewrite-uri<br/>via firewall"| FDRY["Foundry agent<br/>activityProtocol endpoint<br/>(private endpoint)"]
+    FDRY -.->|reply over MS backbone| T
 ```
-Teams / M365 Copilot
-  → Bot Channel Adapter (Microsoft, public)
-  → Azure Bot Service (messaging endpoint = YARP public FQDN + /teams)
-  → YARP proxy App Service   (PUBLIC; App Service managed TLS; IP-restricted to the
-                              AzureBotService service tag; VNet-integrated outbound)
-  → APIM Teams API           (validate-jwt: Bot Framework issuer [+ audience];
-                              reached over APIM's inbound private endpoint)
-  → primary Foundry agent activityProtocol endpoint (private endpoint)
-```
+
+Two firewall dependencies make this work:
+- **APIM → `login.botframework.com` (HTTPS:443)** so `validate-jwt` can fetch the Bot
+  Framework IdP's OpenID Connect metadata + signing keys. APIM is force-tunnelled
+  through the firewall, so **without this rule every inbound activity fails with a
+  `401`** (the signing-key fetch is denied). See
+  [`gateway-firewall-rules.bicep`](./infra/modules/model-gateway/gateway-firewall-rules.bicep).
+- **APIM → primary Foundry private endpoint** (a cross-spoke network rule) to reach the
+  activityProtocol endpoint.
 
 The agent's reply travels back to the caller over the Microsoft backbone (not out
 through your firewall), so no additional agent-subnet outbound rules are required.
@@ -213,11 +223,18 @@ custom DNS or cert is needed. YARP forwards to APIM, which rewrites to the priva
 activityProtocol endpoint.
 
 > This is **not the ideal production perimeter** — it exposes the YARP App Service
-> publicly (hardened only by an `AzureBotService` service-tag IP restriction + the
+> publicly (hardened only by an inbound IP allow-list of the **Microsoft Teams
+> published IP ranges** [`52.112.0.0/14`, `52.122.0.0/15` + IPv6, default-Deny] + the
 > APIM `validate-jwt` token check). The article-recommended alternative is an
 > **Azure Application Gateway** (public IP + managed cert + WAF) fronting the private
 > path. This template demonstrates the simpler pattern; swap in App Gateway for a
 > stronger perimeter.
+>
+> ⚠️ **Note:** the `AzureBotService` service tag is **not** the right allow-list — it
+> covers DirectLine + the Bot Service token cache, not the Teams channel adapter's
+> source IPs. Use the Teams *Required* ranges from the
+> [M365 endpoints service](https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges)
+> (service area `Skype`), as this template does.
 
 ### Hook-driven publish
 
@@ -238,6 +255,14 @@ ARM / Bicep / APIM control-plane action runs host-side, outside the VNet.
 4. **Publish** *(on the VM — Foundry REST)* — the VM script enables the `activity`
    protocol + `BotServiceRbac` scheme (keeping `responses` + `Entra`), then calls the
    Microsoft 365 publish API.
+
+> **Publish needs a delegated *user* token (OBO), not the VM managed identity.**
+> Foundry's `microsoft365/publish` API performs an on-behalf-of exchange with the
+> caller's token to submit to the M365 catalog, so an app-only / MSI token fails
+> server-side with a bare `502`. The hook acquires a **host-side user token**
+> (`az account get-access-token --resource https://ai.azure.com`) and passes it to the
+> publish call only; the earlier PATCH steps still run under the VM MSI. This preserves
+> the boundary — the VM never handles ARM/control-plane, only Foundry REST.
 
 The hook is idempotent — re-running skips an already-published `appVersion`. Bump
 `TEAMS_APP_VERSION` (via `azd env set`) to roll out user-facing metadata changes.

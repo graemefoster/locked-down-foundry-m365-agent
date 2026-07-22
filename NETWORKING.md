@@ -304,17 +304,28 @@ Reuses the (now always-on) shared APIM gateway spoke.
 ```
 Bot Channel Adapter (Microsoft, public)
   → Azure Bot Service (endpoint = https://<yarp-public-fqdn>/teams)
-  → YARP App Service   (PUBLIC; managed TLS; ipSecurityRestrictions = AzureBotService
-                        service tag, default Deny; VNet-integrated outbound)
+  → YARP App Service   (PUBLIC; managed TLS; ipSecurityRestrictions = Microsoft Teams
+                        published IP ranges [52.112.0.0/14, 52.122.0.0/15 + IPv6],
+                        default Deny; VNet-integrated outbound)
   → firewall (App Service spoke is unrestricted; 443 egress via the wildcard
               APPLICATION rule — no new firewall rule needed for YARP → APIM)
   → APIM inbound PE (10.3.1.x) → APIM Teams API
         validate-jwt (openid-config login.botframework.com,
                       issuer https://api.botframework.com, [audience = bot App ID])
+          ↳ APIM → login.botframework.com (HTTPS:443, via firewall APP rule) to fetch
+            the Bot Framework IdP OIDC metadata + signing keys — REQUIRED or 401
         rewrite-uri → /api/projects/<proj>/agents/<agent>/endpoint/protocols/activityProtocol
   → APIM outbound VNet integration → firewall (Net-ApimToFoundryPe allow)
   → primary Foundry account private endpoint (10.2.1.x) → agent activityProtocol
 ```
+
+> **The `401` trap.** APIM outbound is force-tunnelled through the firewall. `validate-jwt`
+> must fetch the Bot Framework IdP's OpenID Connect metadata + signing keys from
+> `login.botframework.com`; if the firewall lacks an application rule for that FQDN, the
+> fetch is **denied** and *every* inbound Teams activity fails with `401` at APIM — even
+> though the token itself is valid. Confirm via
+> `AZFWApplicationRule | where SourceIp startswith '10.3.0.' | where Action=='Deny'`.
+> `gateway-firewall-rules.bicep` ships the `AllowApimBotFrameworkOidc` rule for this.
 
 The original Bot Framework JWT is **forwarded unchanged** to Foundry (Foundry
 re-validates it and authorizes the end user); the APIM `validate-jwt` is
@@ -325,8 +336,19 @@ exists after seeding, so the audience is pinned live by the postdeploy hook.
 
 - **YARP loses its private endpoint** and flips `publicNetworkAccess` to Enabled.
   It stays VNet-integrated for outbound so it can still reach the APIM inbound PE.
-  MCP keeps its private endpoint. Inbound is restricted to the `AzureBotService`
-  service tag (self-maintaining) with a default-Deny rule.
+  MCP keeps its private endpoint. Inbound is restricted to the **Microsoft Teams
+  published IP ranges** (`52.112.0.0/14`, `52.122.0.0/15` + IPv6, from the M365
+  endpoints service, service area `Skype`) with a default-Deny rule.
+  > ⚠️ The `AzureBotService` service tag is the wrong allow-list here — it covers
+  > DirectLine + the Bot Service token cache, **not** the Teams channel adapter's
+  > source IPs, so using it silently blocks all Teams traffic.
+  > ⚠️ **Orphan-PE trap:** flipping `enableTeamsPublish` on an *already-provisioned*
+  > environment leaves the pre-flag YARP private endpoint behind, unmanaged by azd. It
+  > keeps YARP effectively private (PNA Disabled) and blocks inbound. Delete the PE and
+  > set `publicNetworkAccess=Enabled` manually (the Bicep is correct for fresh deploys).
+- **APIM → Bot Framework IdP** (`login.botframework.com`, HTTPS:443) — a new firewall
+  **application rule** (`AllowApimBotFrameworkOidc`, source apim-subnet) so `validate-jwt`
+  can fetch the OIDC signing keys. Without it, inbound activities 401 (see the trap above).
 - **APIM → primary Foundry PE** is a new **cross-spoke** path (gateway `apim-subnet`
   `10.3.0.0/24` → foundry `pe-subnet` `10.2.1.0/24` via the firewall). It requires:
   - a firewall **network rule** `Net-ApimToFoundryPe` (apim-subnet → foundry-pe:443), and
@@ -359,8 +381,8 @@ The article's happy path keeps the bot endpoint on the private
 `*.services.ai.azure.com` hostname and uses **custom DNS + firewall DNAT + a TLS
 cert** for that name. This template instead sets the bot endpoint to the **YARP App
 Service public FQDN** with an App Service **managed certificate** — no DNS/cert to
-manage. The cost is a publicly exposed App Service (hardened by the `AzureBotService`
-IP restriction + APIM token validation). For a production perimeter, front the
+manage. The cost is a publicly exposed App Service (hardened by the Teams published-IP
+allow-list + APIM token validation). For a production perimeter, front the
 private path with **Azure Application Gateway** (public IP + managed cert + WAF)
 instead.
 
