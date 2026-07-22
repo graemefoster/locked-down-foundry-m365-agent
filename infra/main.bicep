@@ -812,6 +812,7 @@ module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTea
     projectName: aiProject.outputs.projectName
     agentName: teamsAgentName
     botAppId: teamsBotAppId
+    expectedTenantId: tenant().tenantId
   }
 }
 

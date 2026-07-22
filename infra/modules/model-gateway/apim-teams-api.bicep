@@ -50,6 +50,9 @@ param activityApiVersion string = '2025-05-15-preview'
 @description('Bot Microsoft App ID (= agent identity principal_id) to pin as the validate-jwt audience. Empty = validate issuer only (the publish hook pins the audience live once the agent is seeded).')
 param botAppId string = ''
 
+@description('Expected Entra tenant GUID. When set, the policy asserts the Bot Framework token serviceurl is scoped to this tenant (the GUID appears in the serviceurl path, e.g. smba.trafficmanager.net/amer/<tenantId>/) and rejects anything else with 403 — single-tenant lockdown. Empty = skip the assertion.')
+param expectedTenantId string = ''
+
 // Backend = the primary Foundry account private endpoint (services.ai.azure.com),
 // reached by APIM outbound VNet integration force-tunnelled through the firewall.
 // Modelled as a first-class APIM `backend` entity (not a hardwired base-url) so
@@ -62,16 +65,26 @@ var audienceBlock = empty(botAppId)
   ? ''
   : '<audiences><audience>@@BOTAPPID@@</audience></audiences>'
 
+// Single-tenant lockdown: the Bot Framework token has no `tid` claim, but its
+// serviceurl path embeds the caller's tenant GUID (smba.trafficmanager.net/<region>/<tenantId>/).
+// serviceurl is signed by Bot Framework (validated above), so asserting the tenant GUID is
+// present in it rejects activities from any other tenant with 403. Region-agnostic (matches
+// the GUID, not the full URL). Inner string literals use &quot; so the XML attribute stays valid.
+var serviceUrlAssertBlock = empty(expectedTenantId)
+  ? ''
+  : '<choose><when condition="@{ var c = ((Jwt)context.Variables[&quot;jwt&quot;]).Claims; var s = c.ContainsKey(&quot;serviceurl&quot;) ? c[&quot;serviceurl&quot;].FirstOrDefault() : &quot;&quot;; return string.IsNullOrEmpty(s) || !s.Contains(&quot;@@TENANTID@@&quot;); }"><return-response><set-status code="403" reason="Forbidden" /><set-body>Unauthorized: Bot Framework serviceurl is not scoped to the expected tenant.</set-body></return-response></when></choose>'
+
 var policyTemplate = '''<policies>
   <inbound>
     <base />
-    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: Bot Framework token failed validation.">
+    <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: Bot Framework token failed validation." output-token-variable-name="jwt">
       <openid-config url="https://login.botframework.com/v1/.well-known/openidconfiguration" />
       @@AUDIENCES@@
       <issuers>
         <issuer>https://api.botframework.com</issuer>
       </issuers>
     </validate-jwt>
+    @@SERVICEURLASSERT@@
     <set-backend-service backend-id="@@BACKENDID@@" />
     <rewrite-uri template="@@REWRITE@@" copy-unmatched-params="false" />
   </inbound>
@@ -81,10 +94,15 @@ var policyTemplate = '''<policies>
 </policies>'''
 
 var audienceRendered = replace(audienceBlock, '@@BOTAPPID@@', botAppId)
+var serviceUrlAssertRendered = replace(serviceUrlAssertBlock, '@@TENANTID@@', expectedTenantId)
 
 var renderedPolicy = replace(
   replace(
-    replace(policyTemplate, '@@AUDIENCES@@', audienceRendered),
+    replace(
+      replace(policyTemplate, '@@AUDIENCES@@', audienceRendered),
+      '@@SERVICEURLASSERT@@',
+      serviceUrlAssertRendered
+    ),
     '@@BACKENDID@@',
     backendId
   ),

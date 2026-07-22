@@ -212,6 +212,12 @@ Two firewall dependencies make this work:
 The agent's reply travels back to the caller over the Microsoft backbone (not out
 through your firewall), so no additional agent-subnet outbound rules are required.
 
+**Single-tenant lockdown:** the token has no `tid` claim, but its signed `serviceurl`
+embeds the caller's tenant GUID (`smba.trafficmanager.net/<region>/<tenantId>/`). The
+APIM policy asserts that GUID equals the deployment tenant (`expectedTenantId`, wired
+from `tenant().tenantId`) and returns `403` otherwise — so only your own tenant's
+activities are accepted, on top of the `aud`/`iss`/signature checks.
+
 ### The firewall / DNS tradeoff
 
 The Learn article's happy path keeps the bot's messaging endpoint set to the agent's

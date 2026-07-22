@@ -332,6 +332,14 @@ re-validates it and authorizes the end user); the APIM `validate-jwt` is
 defense-in-depth. The bot App ID = the agent identity `principal_id`, which only
 exists after seeding, so the audience is pinned live by the postdeploy hook.
 
+> **Single-tenant lockdown via `serviceurl`.** The Bot Framework token has **no `tid`
+> claim**, but its signed `serviceurl` embeds the caller's tenant GUID
+> (`smba.trafficmanager.net/<region>/<tenantId>/`). The Teams API policy asserts that
+> GUID equals the deployment tenant (`expectedTenantId`, wired from `tenant().tenantId`)
+> and returns `403` otherwise — so only activities from your own tenant are accepted,
+> on top of the `aud` (bot App ID) + `iss` + signature checks. Region-agnostic (matches
+> the GUID, not the full URL). Set `expectedTenantId=''` to disable.
+
 ### New network paths (vs. the model-gateway-only topology)
 
 - **YARP loses its private endpoint** and flips `publicNetworkAccess` to Enabled.
