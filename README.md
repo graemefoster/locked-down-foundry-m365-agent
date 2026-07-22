@@ -9,17 +9,18 @@ languages:
 - bicep
 - json
 ---
-# Azure AI Agent Service: Standard Agent Setup with E2E Network Isolation
+# Locked-down Azure AI Foundry agent, published to Microsoft Teams / M365 Copilot
+
+A network-isolated Azure AI Foundry agent — private VNet, private endpoints on every
+dependency, deny-by-default firewall egress, CMK encryption, and RBAC — that can still be
+**published to Microsoft Teams / M365 Copilot** and optionally front its models through a
+private APIM model gateway.
 
 ## Overview
 
-Infrastructure-as-code for a **network-secured Azure AI Foundry agent**: a dedicated
-virtual network, private endpoints for every dependency, customer-managed-key encryption,
-and RBAC — public network access disabled by default. [`azd`](https://aka.ms/azd) is the
-only supported deployment path.
-
-Optionally, it can front models with an **APIM model gateway** and **publish an agent to
-Microsoft Teams / M365 Copilot** — all while staying inside the private network.
+Infrastructure-as-code, deployed with [`azd`](https://aka.ms/azd) (the only supported
+path). Public network access is disabled by default — everything talks over private
+endpoints inside the VNet, with egress forced through a deny-by-default Azure Firewall.
 
 ## What gets deployed
 
@@ -28,8 +29,10 @@ Microsoft Teams / M365 Copilot** — all while staying inside the private networ
   (files) — all private-endpoint only.
 - **Networking:** hub + spoke VNets, Azure Firewall (deny-by-default egress), private DNS
   zones, a locked-down VM for in-VNet access, and VNet flow logs.
-- **Always-on shared APIM** (Standard v2, private) used by the optional model-gateway and
-  Teams paths.
+- **Always-on shared APIM** (Standard v2, private) fronting the Teams and model-gateway paths.
+- **Teams / M365 publish path** *(on by default):* a public YARP proxy (App Service, VNet
+  integrated, Teams-IP restricted), an MCP web app, and an Azure Bot Service registration
+  that points the Teams channel at the agent.
 - Key Vault + Container Registry (private), and all supporting role assignments.
 
 See **[docs/architecture.md](./docs/architecture.md)** for the resource-by-resource detail
