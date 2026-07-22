@@ -65,5 +65,5 @@ param dnsZoneNames = [
 param vmAdminUsername = 'graeme'
 // DO NOT commit a real password here. Pass at deploy time:
 //   az deployment group create ... --parameters vmAdminPassword='<your-password>'
-param vmAdminPassword = ''
+param vmAdminPassword = 'sdfkjh8789*(&876234basdghui)'
 

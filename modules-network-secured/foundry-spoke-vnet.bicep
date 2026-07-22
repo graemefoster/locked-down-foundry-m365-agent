@@ -417,7 +417,7 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           sourcePortRange: '*'
           destinationAddressPrefix: modelGatewayPeCidr
           destinationPortRange: '443'
-          description: 'Reach the APIM model-gateway inbound private endpoint (model-gateway spoke PE subnet) on HTTPS. Traffic is force-tunnelled via the firewall (UDR); NSG evaluates the real PE dest IP, so this explicit allow is required or Deny-All-Outbound blocks discovery/inference.'
+          description: 'HTTPS to APIM model-gateway PE subnet. Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so this explicit allow is required.'
         }
       }
     ])
