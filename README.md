@@ -190,6 +190,28 @@ Click the deploy to Azure button above to open the Azure portal and deploy the t
       az deployment group create --resource-group <your-resource-group> --template-file main.bicep --parameters main.bicepparam
    ```
 
+**Option 3: Deploy with `azd`**
+
+```bash
+azd up            # provision + (once a service is defined) predeploy hook
+# or just provision:
+azd provision
+```
+
+`azd` **does not read `main.bicepparam`** — it reads `main.parameters.json`, which maps
+each Bicep parameter to an `azd` environment variable with an inline default
+(`${VAR=default}`). The defaults there mirror the intended values, so a fresh `azd up`
+uses them without extra setup. Override any value per environment before provisioning:
+
+```bash
+azd env set ENABLE_MODEL_GATEWAY false
+azd env set AZURE_LOCATION eastus2
+```
+
+`vmAdminPassword` is intentionally **not** in `main.parameters.json`; because it has no
+Bicep default, `azd` prompts for it interactively (and stores it in the environment).
+`main.bicepparam` is retained only for the manual `az deployment group create` path above.
+
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
 > **Note:** The Bicep/portal deployment provisions all infrastructure but **does not seed

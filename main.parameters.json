@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "value": "${AZURE_LOCATION=australiaeast}" },
+    "aiServices": { "value": "${AI_SERVICES=aiservices}" },
+    "modelName": { "value": "${MODEL_NAME=gpt-5.4}" },
+    "modelFormat": { "value": "${MODEL_FORMAT=OpenAI}" },
+    "modelVersion": { "value": "${MODEL_VERSION=2026-03-05}" },
+    "modelSkuName": { "value": "${MODEL_SKU_NAME=GlobalStandard}" },
+    "modelCapacity": { "value": "${MODEL_CAPACITY=30}" },
+    "enableModelGateway": { "value": "${ENABLE_MODEL_GATEWAY=true}" },
+    "gatewayModelName": { "value": "${GATEWAY_MODEL_NAME=gpt-5.4-mini}" },
+    "gatewayModelFormat": { "value": "${GATEWAY_MODEL_FORMAT=OpenAI}" },
+    "gatewayModelVersion": { "value": "${GATEWAY_MODEL_VERSION=2026-03-17}" },
+    "gatewayModelSkuName": { "value": "${GATEWAY_MODEL_SKU_NAME=GlobalStandard}" },
+    "gatewayModelCapacity": { "value": "${GATEWAY_MODEL_CAPACITY=30}" },
+    "gatewayCallerAppId": { "value": "${GATEWAY_CALLER_APP_ID=}" },
+    "firstProjectName": { "value": "${FIRST_PROJECT_NAME=project}" },
+    "projectDescription": { "value": "${PROJECT_DESCRIPTION=A project for the AI Foundry account with network secured deployed Agent}" },
+    "displayName": { "value": "${DISPLAY_NAME=project}" },
+    "vnetName": { "value": "${VNET_NAME=agent-vnet-test}" },
+    "agentSubnetName": { "value": "${AGENT_SUBNET_NAME=agent-subnet}" },
+    "peSubnetName": { "value": "${PE_SUBNET_NAME=pe-subnet}" },
+    "projectCapHost": { "value": "${PROJECT_CAP_HOST=caphostproj}" },
+    "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" }
+  }
+}
