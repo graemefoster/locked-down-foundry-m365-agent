@@ -198,6 +198,15 @@ never stored in the repo.
 > **Note:** `azd provision` creates all infrastructure but **does not seed agents**. Seed
 > them separately (see below).
 
+> **Note — CMK / Key Vault propagation:** provisioning may occasionally fail the first time
+> with `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`
+> ("managed identity is forbidden ... to wrap & unwrap"). This is an Azure RBAC
+> **role-assignment propagation delay** — the Key Vault Crypto role granted to the AI Services
+> and Storage identities can take 1–5 minutes to become effective in the Key Vault data plane,
+> and the customer-managed-key (CMK) enablement step sometimes runs before it propagates. The
+> deployment is **idempotent**: simply re-run `azd provision` (or `azd up`). The already-created
+> resources are skipped and the CMK step succeeds once the roles have propagated.
+
 ---
 
 ## Seeding agents
@@ -417,6 +426,12 @@ infra/
 2. Check DNS resolution
 3. Validate role assignments
 4. Review network security groups
+
+**`KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault` during provisioning**
+— an RBAC role-assignment propagation delay, not a misconfiguration. The CMK enablement step
+occasionally runs before the Key Vault Crypto role (granted to the AI Services / Storage
+identities) becomes effective in the Key Vault data plane (1–5 min). Re-run `azd provision` —
+the deployment is idempotent and succeeds on the retry.
 
 ---
 
