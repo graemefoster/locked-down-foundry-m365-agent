@@ -18,6 +18,12 @@ param appInsightsName string
 param appServiceDelegationSubnetId string
 param foundryName string
 
+@description('When true, flip the YARP proxy public + repoint it to the APIM Teams API (Teams/M365 inbound path).')
+param enableTeamsPublish bool = false
+
+@description('APIM gateway base URL the YARP proxy forwards Teams traffic to (only used when enableTeamsPublish=true).')
+param apimGatewayUrl string = ''
+
 // CosmosDB creation
 
 var canaryRegions = ['eastus2euap', 'centraluseuap']
@@ -223,6 +229,8 @@ module appService './app-service.bicep' = {
     appServiceDelegationSubnetId: appServiceDelegationSubnetId
     storageName: storage.name
     foundryName: foundryName
+    enableTeamsPublish: enableTeamsPublish
+    apimGatewayUrl: apimGatewayUrl
   }
 }
 

@@ -131,8 +131,15 @@ self-contained.
 
 ## Optional: Model Gateway (APIM + provider Foundry)
 
+> **APIM is now always deployed.** The APIM Standard v2 instance, its gateway
+> spoke (`10.3.0.0/16`), inbound private endpoint and `privatelink.azure-api.net`
+> DNS zone are **shared infrastructure** — provisioned unconditionally because both
+> the model gateway *and* the Teams / M365 publish path route through them.
+> `enableModelGateway` now only gates the **provider Foundry** account, the APIM
+> inference API/connection, and the second seeded agent.
+
 Set `enableModelGateway=true` (default **false**) to deploy an optional,
-enterprise-grade model gateway in a **new spoke** (`10.3.0.0/16`):
+enterprise-grade model gateway in the shared gateway spoke (`10.3.0.0/16`):
 
 - **APIM Standard v2** with an inbound **private endpoint** and outbound **VNet
   integration** — no public gateway access.
@@ -164,6 +171,96 @@ Key parameters (see [`infra/main.parameters.json`](./infra/main.parameters.json)
 
 > **Note:** APIM Standard v2 provisioning is slow (~15–45 min), so enabling this
 > materially increases deployment time.
+
+---
+
+## Optional: Publish an agent to Teams / M365 Copilot
+
+The Teams / M365 publish path is **on by default** (`enableTeamsPublish=true`; set it
+`false` to opt out). It publishes the primary seeded agent (`hello-world-agent`) to
+**Microsoft Teams and Microsoft 365 Copilot**, even
+though the Foundry endpoint has public network access disabled. This follows the
+Learn article
+[Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network).
+
+### Inbound path
+
+Because the Foundry agent lives behind a private endpoint, Microsoft's Bot Channel
+Adapter (which runs on the public internet) can't reach it directly. Traffic flows:
+
+```
+Teams / M365 Copilot
+  → Bot Channel Adapter (Microsoft, public)
+  → Azure Bot Service (messaging endpoint = YARP public FQDN + /teams)
+  → YARP proxy App Service   (PUBLIC; App Service managed TLS; IP-restricted to the
+                              AzureBotService service tag; VNet-integrated outbound)
+  → APIM Teams API           (validate-jwt: Bot Framework issuer [+ audience];
+                              reached over APIM's inbound private endpoint)
+  → primary Foundry agent activityProtocol endpoint (private endpoint)
+```
+
+The agent's reply travels back to the caller over the Microsoft backbone (not out
+through your firewall), so no additional agent-subnet outbound rules are required.
+
+### The firewall / DNS tradeoff
+
+The Learn article's happy path keeps the bot's messaging endpoint set to the agent's
+private `*.services.ai.azure.com` activityProtocol URL and relies on **custom DNS +
+firewall DNAT + a TLS certificate** for that hostname so the adapter resolves it to
+your perimeter. **We deliberately skip that**: the bot's messaging endpoint is the
+YARP App Service's own public FQDN with an App Service **managed certificate**, so no
+custom DNS or cert is needed. YARP forwards to APIM, which rewrites to the private
+activityProtocol endpoint.
+
+> This is **not the ideal production perimeter** — it exposes the YARP App Service
+> publicly (hardened only by an `AzureBotService` service-tag IP restriction + the
+> APIM `validate-jwt` token check). The article-recommended alternative is an
+> **Azure Application Gateway** (public IP + managed cert + WAF) fronting the private
+> path. This template demonstrates the simpler pattern; swap in App Gateway for a
+> stronger perimeter.
+
+### Hook-driven publish
+
+Steps 2–4 need values that only exist **after** the agent is seeded (the agent
+identity `principal_id` = the bot Microsoft App ID), so publishing is driven by the
+azd **postdeploy** hook ([`hooks/postdeploy.ps1`](./hooks/postdeploy.ps1)) rather than
+Bicep. **Strict boundary:** the private VM only ever calls Foundry REST APIs; every
+ARM / Bicep / APIM control-plane action runs host-side, outside the VNet.
+
+1. **Get identity** *(on the VM — Foundry REST)* — runs
+   [`scripts/publish-teams.ps1`](./scripts/publish-teams.ps1) on the private VM (via
+   `az vm run-command`) to read `instance_identity.principal_id`.
+2. **Create the Azure Bot Service** *(host-side)* — `az deployment group create` of
+   [`hooks/bot-service.bicep`](./hooks/bot-service.bicep) (azurebot, PNA disabled,
+   single-tenant, MsTeams channel; endpoint = YARP public FQDN + `/teams`).
+3. **Pin the APIM `validate-jwt` audience** *(host-side)* to the bot App ID
+   (best-effort; issuer validation + IP restriction stay active if it fails).
+4. **Publish** *(on the VM — Foundry REST)* — the VM script enables the `activity`
+   protocol + `BotServiceRbac` scheme (keeping `responses` + `Entra`), then calls the
+   Microsoft 365 publish API.
+
+The hook is idempotent — re-running skips an already-published `appVersion`. Bump
+`TEAMS_APP_VERSION` (via `azd env set`) to roll out user-facing metadata changes.
+
+Key parameters:
+
+| Parameter | Default | Purpose |
+|-----------|---------|---------|
+| `enableTeamsPublish` | `true` | Master switch: Teams APIM API + public YARP flip + the postdeploy publish hook. Set `false` to opt out. |
+| `teamsAgentName` | `hello-world-agent` | Seeded agent to publish (its activityProtocol endpoint is the APIM backend). |
+| `teamsBotAppId` | `''` | Optional pre-known bot App ID for the APIM `validate-jwt` audience; empty = issuer-only at provision, pinned live by the hook. |
+
+Optional publish metadata is read from env by the hook (`azd env set`):
+`TEAMS_BOT_DISPLAY_NAME`, `TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,
+`TEAMS_SHORT_DESCRIPTION`, `TEAMS_FULL_DESCRIPTION`, `TEAMS_DEVELOPER_NAME`,
+`TEAMS_DEVELOPER_WEBSITE_URL`, `TEAMS_PRIVACY_URL`, `TEAMS_TERMS_OF_USE_URL`.
+
+> **Caller RBAC:** VM run-command invoke (e.g. *Virtual Machine Contributor*) +
+> *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.
+> The `Microsoft.BotService` resource provider is registered by the hook.
+
+See [NETWORKING.md](./NETWORKING.md#optional-teams--m365-publish-inbound-path) for
+the inbound/return firewall and routing details.
 
 ---
 

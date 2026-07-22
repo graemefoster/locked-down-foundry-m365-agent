@@ -292,6 +292,80 @@ service-scoped `applicationinsights` diagnostic, W3C correlation, 100% sampling)
 
 ---
 
+## Optional: Teams / M365 publish inbound path
+
+Enabled by default (`enableTeamsPublish=true`; set `false` to opt out). Publishes the primary
+agent to Microsoft Teams / M365 Copilot per the Learn article
+[Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network).
+Reuses the (now always-on) shared APIM gateway spoke.
+
+### Inbound flow
+
+```
+Bot Channel Adapter (Microsoft, public)
+  → Azure Bot Service (endpoint = https://<yarp-public-fqdn>/teams)
+  → YARP App Service   (PUBLIC; managed TLS; ipSecurityRestrictions = AzureBotService
+                        service tag, default Deny; VNet-integrated outbound)
+  → firewall (App Service spoke is unrestricted; 443 egress via the wildcard
+              APPLICATION rule — no new firewall rule needed for YARP → APIM)
+  → APIM inbound PE (10.3.1.x) → APIM Teams API
+        validate-jwt (openid-config login.botframework.com,
+                      issuer https://api.botframework.com, [audience = bot App ID])
+        rewrite-uri → /api/projects/<proj>/agents/<agent>/endpoint/protocols/activityProtocol
+  → APIM outbound VNet integration → firewall (Net-ApimToFoundryPe allow)
+  → primary Foundry account private endpoint (10.2.1.x) → agent activityProtocol
+```
+
+The original Bot Framework JWT is **forwarded unchanged** to Foundry (Foundry
+re-validates it and authorizes the end user); the APIM `validate-jwt` is
+defense-in-depth. The bot App ID = the agent identity `principal_id`, which only
+exists after seeding, so the audience is pinned live by the postdeploy hook.
+
+### New network paths (vs. the model-gateway-only topology)
+
+- **YARP loses its private endpoint** and flips `publicNetworkAccess` to Enabled.
+  It stays VNet-integrated for outbound so it can still reach the APIM inbound PE.
+  MCP keeps its private endpoint. Inbound is restricted to the `AzureBotService`
+  service tag (self-maintaining) with a default-Deny rule.
+- **APIM → primary Foundry PE** is a new **cross-spoke** path (gateway `apim-subnet`
+  `10.3.0.0/24` → foundry `pe-subnet` `10.2.1.0/24` via the firewall). It requires:
+  - a firewall **network rule** `Net-ApimToFoundryPe` (apim-subnet → foundry-pe:443), and
+  - **symmetric return routing**: the foundry `pe-subnet` gets
+    `privateEndpointNetworkPolicies: Enabled` + a UDR for `10.3.0.0/24 → firewall`
+    (Azure Firewall does **not** SNAT private ranges, so the PE's replies must be
+    routed back through it). Scoped to `/24` so intra-VNet `10.2.x` traffic (agent ↔
+    PE) stays on system routes.
+- **Reply path**: the agent's reply is returned to the caller over the **Microsoft
+  backbone**, not egressed from the agent subnet through your firewall — so **no
+  additional agent-subnet outbound rules are needed** for the Teams path.
+
+### APIM backends
+
+Both the Teams API and the model-gateway inference API express their Foundry targets
+as first-class APIM **`backend`** entities (not hardwired `base-url`s), so topology
+tooling can render the APIM → Foundry edges:
+
+| Backend ID | API | Target |
+|---|---|---|
+| `foundry-<account>` | Teams | Primary Foundry account (activityProtocol via rewrite-uri). |
+| `model-gateway-openai` | Model gateway | Provider Foundry OpenAI v1 data plane. |
+| `model-gateway-arm` | Model gateway | ARM control plane (dynamic model discovery). |
+
+The policies route via `<set-backend-service backend-id="…" />`.
+
+### The DNS / firewall tradeoff
+
+The article's happy path keeps the bot endpoint on the private
+`*.services.ai.azure.com` hostname and uses **custom DNS + firewall DNAT + a TLS
+cert** for that name. This template instead sets the bot endpoint to the **YARP App
+Service public FQDN** with an App Service **managed certificate** — no DNS/cert to
+manage. The cost is a publicly exposed App Service (hardened by the `AzureBotService`
+IP restriction + APIM token validation). For a production perimeter, front the
+private path with **Azure Application Gateway** (public IP + managed cert + WAF)
+instead.
+
+---
+
 ## Observability
 
 ### Firewall diagnostics → resource-specific tables

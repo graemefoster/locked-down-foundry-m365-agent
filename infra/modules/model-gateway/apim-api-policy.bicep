@@ -75,6 +75,12 @@ var requiredClaims = empty(callerProjectResourceId)
   ? ''
   : '<required-claims><claim name="xms_mirid" match="any"><value>@@PROJID@@</value><value>@@PROJID_RGLOWER@@</value><value>@@PROJID_LOWER@@</value></claim></required-claims>'
 
+// APIM backend IDs. Both Foundry edges are expressed as first-class APIM `backend`
+// entities (not hardwired base-urls) so tooling can discover the APIM -> provider edges;
+// the policies reference them by ID.
+var dataPlaneBackendId = 'model-gateway-openai'
+var armBackendId = 'model-gateway-arm'
+
 // NOTE: Bicep does NOT interpolate ${...} inside multi-line ('''...''') strings — the
 // tokens would be emitted literally. So the template uses inert @@TOKEN@@ placeholders
 // and replace() swaps in the resolved values (replace's arguments are single-line
@@ -90,7 +96,7 @@ var policyTemplate = '''<policies>
       </audiences>
       @@REQUIRED_CLAIMS@@
     </validate-azure-ad-token>
-    <set-backend-service base-url="@@BACKEND@@" />
+    <set-backend-service backend-id="@@BACKENDID@@" />
     <authentication-managed-identity resource="@@AUDIENCE@@" />
   </inbound>
   <backend><base /></backend>
@@ -127,8 +133,8 @@ var renderedPolicy = replace(
     '@@AUDIENCE@@',
     tokenAudience
   ),
-  '@@BACKEND@@',
-  '${backendBaseUrl}/v1'
+  '@@BACKENDID@@',
+  dataPlaneBackendId
 )
 
 // -------------------- Dynamic model discovery --------------------
@@ -150,7 +156,7 @@ var discoveryPolicyTemplate = '''<policies>
   <inbound>
     <authentication-managed-identity resource="@@ARMAUD@@" />
     <rewrite-uri template="@@REWRITE@@" copy-unmatched-params="false" />
-    <set-backend-service base-url="@@ARMBACKEND@@" />
+    <set-backend-service backend-id="@@ARMBACKENDID@@" />
   </inbound>
   <backend><base /></backend>
   <outbound><base /></outbound>
@@ -163,8 +169,8 @@ var listDeploymentsPolicy = replace(
     '@@REWRITE@@',
     '/deployments?api-version=${deploymentDiscoveryApiVersion}'
   ),
-  '@@ARMBACKEND@@',
-  armBackendBaseUrl
+  '@@ARMBACKENDID@@',
+  armBackendId
 )
 
 var getDeploymentPolicy = replace(
@@ -173,12 +179,36 @@ var getDeploymentPolicy = replace(
     '@@REWRITE@@',
     '/deployments/{deploymentName}?api-version=${deploymentDiscoveryApiVersion}'
   ),
-  '@@ARMBACKEND@@',
-  armBackendBaseUrl
+  '@@ARMBACKENDID@@',
+  armBackendId
 )
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
+}
+
+// First-class backends — the provider Foundry data-plane (OpenAI v1) and the ARM
+// control-plane used for dynamic model discovery. Policies target these by ID.
+resource dataPlaneBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
+  parent: apim
+  name: dataPlaneBackendId
+  properties: {
+    title: 'Provider Foundry (OpenAI v1)'
+    description: 'Provider Foundry account OpenAI v1 surface (private endpoint). Chat completions forward here with APIM MI auth.'
+    protocol: 'http'
+    url: '${backendBaseUrl}/v1'
+  }
+}
+
+resource armBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
+  parent: apim
+  name: armBackendId
+  properties: {
+    title: 'Provider Foundry (ARM control plane)'
+    description: 'Azure Resource Manager deployments API for the provider account, backing dynamic model discovery (GET /deployments).'
+    protocol: 'http'
+    url: armBackendBaseUrl
+  }
 }
 
 resource inferenceApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
@@ -194,11 +224,9 @@ resource inferenceApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
     // authenticates with the project MI's Entra token and cannot also present an APIM
     // subscription key, and the dynamic-discovery probe carries no key — so requiring one
     // would 401 discovery and surface no models. The Entra JWT + xms_mirid pin + private
-    // network path are the security boundary. serviceUrl points at the provider's Azure
-    // OpenAI v1 surface; the chat operation forwards model-in-body to
-    // /openai/v1/chat/completions.
+    // network path are the security boundary. No serviceUrl: the chat operation routes to
+    // the `dataPlaneBackend` backend by ID (model-in-body -> /openai/v1/chat/completions).
     subscriptionRequired: false
-    serviceUrl: '${backendBaseUrl}/v1'
   }
 }
 
@@ -234,6 +262,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = 
   }
   dependsOn: [
     chatCompletionsOperation
+    dataPlaneBackend
   ]
 }
 
@@ -259,6 +288,7 @@ resource listDeploymentsPolicyResource 'Microsoft.ApiManagement/service/apis/ope
   }
   dependsOn: [
     apiPolicy
+    armBackend
   ]
 }
 
@@ -290,6 +320,7 @@ resource getDeploymentPolicyResource 'Microsoft.ApiManagement/service/apis/opera
   }
   dependsOn: [
     apiPolicy
+    armBackend
   ]
 }
 

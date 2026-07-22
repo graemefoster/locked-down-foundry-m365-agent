@@ -6,6 +6,35 @@ param aspName string
 param storageName string
 param foundryName string
 
+@description('When true, the YARP proxy is flipped PUBLIC (Teams/M365 inbound entry point), reverse-proxies to the APIM Teams API instead of Foundry directly, and inbound is IP-restricted to the AzureBotService service tag.')
+param enableTeamsPublish bool = false
+
+@description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to. Only used when enableTeamsPublish=true.')
+param apimGatewayUrl string = ''
+
+@description('App Service access-restriction service tag allowed to reach the public YARP proxy inbound (Bot Channel Adapter).')
+param botChannelServiceTag string = 'AzureBotService'
+
+// Teams inbound: YARP is the public messaging entry point and forwards to the APIM Teams
+// API (which validates the Bot Framework JWT and forwards to the agent activityProtocol
+// endpoint). Otherwise it stays private and reverse-proxies to Foundry directly (legacy).
+var yarpPublicNetworkAccess = enableTeamsPublish ? 'Enabled' : 'Disabled'
+var yarpReverseProxyAddress = enableTeamsPublish
+  ? '${apimGatewayUrl}/'
+  : 'https://${foundryName}.services.ai.azure.com/'
+var yarpIpRestrictions = enableTeamsPublish
+  ? [
+      {
+        ipAddress: botChannelServiceTag
+        tag: 'ServiceTag'
+        action: 'Allow'
+        priority: 100
+        name: 'AllowAzureBotService'
+        description: 'Azure Bot Service channel adapters only (public YARP endpoint).'
+      }
+    ]
+  : []
+
 resource storage 'Microsoft.Storage/storageAccounts@2025-06-01' existing = {
   name: storageName
 }
@@ -37,7 +66,9 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
     serverFarmId: aspTest.id
     siteConfig: {
       linuxFxVersion: 'DOCKER|docker.io/graemefoster/teams-proxy:0.3'
-      publicNetworkAccess: 'Disabled'
+      publicNetworkAccess: yarpPublicNetworkAccess
+      ipSecurityRestrictionsDefaultAction: enableTeamsPublish ? 'Deny' : 'Allow'
+      ipSecurityRestrictions: yarpIpRestrictions
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -45,7 +76,7 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
         }
         {
           name: 'ReverseProxy__Clusters__cluster1__Destinations__destination1__Address'
-          value: 'https://${foundryName}.services.ai.azure.com/'
+          value: yarpReverseProxyAddress
         }
       ]
     }

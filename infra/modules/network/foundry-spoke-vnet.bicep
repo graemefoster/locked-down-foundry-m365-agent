@@ -35,6 +35,16 @@ reach the APIM gateway PE on 443. Empty = model gateway not deployed, so no rule
 ''')
 param modelGatewayPeCidr string = ''
 
+@description('''
+CIDR of the gateway spoke apim-subnet (APIM v2 outbound VNet integration). When non-empty,
+the Foundry pe-subnet gets privateEndpointNetworkPolicies=Enabled + a UDR routing return
+traffic to this CIDR back through the Azure Firewall — required for the Teams inbound path,
+where APIM (in the gateway spoke) forwards to the primary Foundry account private endpoint
+(which lands in this pe-subnet). Scoped to the apim-subnet CIDR only, so intra-VNet flows
+(agent <-> PEs, 10.2.x) stay on system routes. Empty = no route table / policy change.
+''')
+param apimSubnetCidr string = ''
+
 var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
@@ -43,6 +53,28 @@ var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
 // never be denied. See https://learn.microsoft.com/azure/container-apps/firewall-integration
 var azureDnsVirtualIp = '168.63.129.16'
+
+// Return-path route table for the pe-subnet (Teams inbound path only). When apimSubnetCidr
+// is supplied, traffic from the Foundry account PE back to the APIM outbound subnet (in the
+// gateway spoke) is force-tunnelled through the Azure Firewall so the flow is symmetric
+// (APIM force-tunnels the forward path too). Scoped to the apim-subnet /24; all other
+// pe-subnet traffic (including intra-VNet agent<->PE) stays on system routes.
+resource peRouteTable 'Microsoft.Network/routeTables@2022-11-01' = if (!empty(apimSubnetCidr)) {
+  name: '${vnetName}-pe-rt'
+  location: location
+  properties: {
+    routes: [
+      {
+        name: 'ApimReturnViaFirewall'
+        properties: {
+          nextHopType: 'VirtualAppliance'
+          addressPrefix: apimSubnetCidr
+          nextHopIpAddress: firewallPrivateIp
+        }
+      }
+    ]
+  }
+}
 
 resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
   name: '${vnetName}-rt'
@@ -463,6 +495,10 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         name: peSubnetName
         properties: {
           addressPrefix: peSubnet
+          // Teams inbound path: honor the return-path UDR for PE traffic so APIM<->Foundry PE
+          // routing is symmetric through the firewall. No-op when apimSubnetCidr is empty.
+          privateEndpointNetworkPolicies: empty(apimSubnetCidr) ? null : 'Enabled'
+          routeTable: empty(apimSubnetCidr) ? null : { id: peRouteTable.id }
         }
       }
       {

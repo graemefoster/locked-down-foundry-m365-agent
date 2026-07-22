@@ -23,6 +23,9 @@
     "agentSubnetName": { "value": "${AGENT_SUBNET_NAME=agent-subnet}" },
     "peSubnetName": { "value": "${PE_SUBNET_NAME=pe-subnet}" },
     "projectCapHost": { "value": "${PROJECT_CAP_HOST=caphostproj}" },
-    "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" }
+    "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" },
+    "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" },
+    "teamsAgentName": { "value": "${TEAMS_AGENT_NAME=hello-world-agent}" },
+    "teamsBotAppId": { "value": "${TEAMS_BOT_APP_ID=}" }
   }
 }

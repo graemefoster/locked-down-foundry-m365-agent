@@ -75,6 +75,16 @@ param gatewayModelCapacity int = 30
 @description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
 param gatewayCallerAppId string = ''
 
+// ==================== TEAMS / M365 PUBLISH (optional) ====================
+@description('Deploy the Teams / M365 Copilot inbound publish path: a new APIM API that forwards to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by the postdeploy hook (scripts/publish-teams.ps1). Default true.')
+param enableTeamsPublish bool = true
+
+@description('Name of the seeded agent to publish to Teams / M365 (its activityProtocol endpoint is the APIM backend).')
+param teamsAgentName string = 'hello-world-agent'
+
+@description('Bot Microsoft App ID (= agent identity principal_id) pinned as the APIM validate-jwt audience. Empty = validate the Bot Framework issuer only; the publish hook pins the audience live once the agent is seeded.')
+param teamsBotAppId string = ''
+
 // Create a short, unique suffix, that will be unique to each resource group
 var uniqueSuffix = substring(uniqueString('${resourceGroup().id}'), 0, 4)
 var accountName = toLower('${aiServices}${uniqueSuffix}')
@@ -169,6 +179,7 @@ var agentInboundAllowedCidrs = [
 // firewall; the dev VM subnet stays unrestricted alongside the App Service spoke.
 var foundrySpokeAddressPrefix = '10.2.0.0/16'
 var agentSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 0)
+var foundryPeSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 1)
 var vmSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 2)
 var deploymentScriptsSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 3)
 var firewallUnrestrictedSourceCidrs = [
@@ -185,6 +196,10 @@ var modelGatewayApimSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 
 var modelGatewayPeSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 1)
 var providerAccountName = toLower('gwprovider${uniqueSuffix}')
 var apimName = 'apim-${uniqueSuffix}-modelgw'
+// APIM Standard v2 gateway URL is deterministic from the name. Derived (not read from the
+// apim module output) so the YARP proxy — which is provisioned BEFORE APIM in the graph —
+// can be pointed at it without a dependency cycle.
+var apimGatewayUrl = 'https://${apimName}.azure-api.net'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
 
@@ -217,6 +232,7 @@ module foundrySpokeVnet 'modules/network/foundry-spoke-vnet.bicep' = {
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: agentInboundAllowedCidrs
     modelGatewayPeCidr: enableModelGateway ? modelGatewayPeSubnetCidr : ''
+    apimSubnetCidr: enableTeamsPublish ? modelGatewayApimSubnetCidr : ''
   }
 }
 
@@ -343,6 +359,8 @@ module aiDependencies 'modules/resources/standard-dependent-resources.bicep' = {
 
     //wire up the YARP proxy
     foundryName: aiAccount.outputs.accountName
+    enableTeamsPublish: enableTeamsPublish
+    apimGatewayUrl: apimGatewayUrl
 
   }
 }
@@ -439,7 +457,12 @@ module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = 
     appServicePeSubnetName: appServiceSpokeVnet.outputs.peSubnetName
 
     suffix: uniqueSuffix
-    appServiceWebAppNames: [aiDependencies.outputs.yarpWebAppName, aiDependencies.outputs.mcpWebAppName]
+    // When Teams publish is enabled the YARP proxy is public (its own FQDN + managed cert is
+    // the Bot Channel Adapter entry point), so it gets NO private endpoint — only the MCP web
+    // app does. Otherwise both get private endpoints (legacy private-only posture).
+    appServiceWebAppNames: enableTeamsPublish
+      ? [aiDependencies.outputs.mcpWebAppName]
+      : [aiDependencies.outputs.yarpWebAppName, aiDependencies.outputs.mcpWebAppName]
     acrName: acr.outputs.acrName
     keyVaultName: keyVault.outputs.keyVaultName
   }
@@ -657,8 +680,10 @@ module vmModule 'modules/resources/vm.bicep' = {
   by force-tunnelling through the Azure Firewall (no spoke-to-spoke peering).
 */
 
-// Step 7: model-gateway spoke VNet
-module modelGatewaySpokeVnet 'modules/model-gateway/model-gateway-spoke-vnet.bicep' = if (enableModelGateway) {
+// Step 7: model-gateway spoke VNet.
+// ALWAYS deployed: APIM (which lives in this spoke) is now shared by the optional
+// model gateway AND the optional Teams/M365 publish inbound path.
+module modelGatewaySpokeVnet 'modules/model-gateway/model-gateway-spoke-vnet.bicep' = {
   name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -669,8 +694,8 @@ module modelGatewaySpokeVnet 'modules/model-gateway/model-gateway-spoke-vnet.bic
   }
 }
 
-// Step 8: peer hub <-> model-gateway spoke
-module hubToModelGatewayPeering 'modules/network/vnet-peering.bicep' = if (enableModelGateway) {
+// Step 8: peer hub <-> model-gateway spoke (always, alongside the spoke VNet)
+module hubToModelGatewayPeering 'modules/network/vnet-peering.bicep' = {
   name: 'hub-model-gateway-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -695,8 +720,8 @@ module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = if (enab
   }
 }
 
-// APIM Standard v2 in the gateway spoke.
-module apim 'modules/model-gateway/apim.bicep' = if (enableModelGateway) {
+// APIM Standard v2 in the gateway spoke. ALWAYS deployed (shared gateway).
+module apim 'modules/model-gateway/apim.bicep' = {
   name: 'model-gateway-apim-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -708,18 +733,29 @@ module apim 'modules/model-gateway/apim.bicep' = if (enableModelGateway) {
   }
 }
 
-// Private endpoints (APIM inbound + provider Foundry) + DNS in the gateway spoke.
-module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
-  name: 'model-gateway-pe-${uniqueSuffix}-deployment'
+// APIM inbound private endpoint + privatelink.azure-api.net DNS. ALWAYS deployed:
+// callers (model-gateway connection AND the Teams inbound YARP path) reach APIM only
+// through this PE once apim-lockdown flips publicNetworkAccess to 'Disabled'.
+module apimPrivateEndpoint 'modules/model-gateway/apim-private-endpoint.bicep' = {
+  name: 'apim-pe-${uniqueSuffix}-deployment'
   params: {
     location: location
     suffix: uniqueSuffix
     apimId: apim.outputs.apimId
     apimName: apim.outputs.apimName
+    peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
+    hubVnetId: hubNetwork.outputs.hubVnetId
+  }
+}
+
+// Provider Foundry private endpoint + DNS in the gateway spoke (model gateway only).
+module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
+  name: 'model-gateway-pe-${uniqueSuffix}-deployment'
+  params: {
+    location: location
     providerAccountId: providerFoundry.outputs.accountId
     providerAccountName: providerFoundry.outputs.accountName
     peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
-    hubVnetId: hubNetwork.outputs.hubVnetId
   }
   dependsOn: [
     privateEndpointAndDNS
@@ -766,10 +802,23 @@ module apimConnection 'modules/model-gateway/apim-connection.bicep' = if (enable
   ]
 }
 
+// APIM Teams / M365 inbound API + policy (validate Bot Framework JWT, forward to the
+// agent activityProtocol endpoint on the primary Foundry PE). Teams path only.
+module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTeamsPublish) {
+  name: 'teams-apim-api-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apim.outputs.apimName
+    foundryAccountName: aiAccount.outputs.accountName
+    projectName: aiProject.outputs.projectName
+    agentName: teamsAgentName
+    botAppId: teamsBotAppId
+  }
+}
+
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
 // private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
 // and after the API/policy children so it never races their creation.
-module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = if (enableModelGateway) {
+module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
   name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
@@ -777,24 +826,27 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = if (enableMode
     apimOutboundSubnetId: modelGatewaySpokeVnet.outputs.apimSubnetId
   }
   dependsOn: [
-    modelGatewayPrivateEndpoints
+    apimPrivateEndpoint
     apimApiPolicy
+    apimTeamsApi
   ]
 }
 
-// Model-gateway firewall rules (agent -> APIM inbound PE, APIM subnet platform egress).
+// Gateway firewall rules (ALWAYS on — APIM is always-on): APIM platform egress, plus the
+// model-gateway (agent -> APIM PE) and Teams (APIM -> Foundry PE) cross-spoke allows.
 // Deliberately sequenced AFTER the APIM deployment: APIM Standard v2 takes ~15-45 min to
 // provision, which leaves the firewall long-idle after firewall.bicep's defaultRuleGroup
 // PUT before this second rule-collection-group PUT lands on the same policy. This avoids
 // the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
 // rule-collection-group PUTs arrive back-to-back.
-module modelGatewayFirewallRules 'modules/model-gateway/model-gateway-firewall-rules.bicep' = if (enableModelGateway) {
-  name: 'model-gateway-fwall-rules-${uniqueSuffix}-deployment'
+module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep' = {
+  name: 'gateway-fwall-rules-${uniqueSuffix}-deployment'
   params: {
     firewallPolicyName: firewallPolicyName
     agentSubnetCidr: agentSubnetCidr
     modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
+    foundryPeSubnetCidr: foundryPeSubnetCidr
   }
   dependsOn: [
     firewall
@@ -846,3 +898,29 @@ output SEED_ENABLE_SECOND_AGENT bool = enableModelGateway
 
 @description('Model reference for the second (model-gateway) agent.')
 output SEED_SECOND_AGENT_MODEL string = apimConnection.?outputs.agentModelReference ?? ''
+
+// ---- Teams / M365 publish (consumed by the postdeploy hook) ----
+
+@description('Whether the Teams / M365 publish path was deployed (gates the postdeploy hook).')
+output SEED_ENABLE_TEAMS_PUBLISH bool = enableTeamsPublish
+
+@description('Name of the seeded agent to publish to Teams / M365.')
+output TEAMS_AGENT_NAME string = teamsAgentName
+
+@description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
+output TEAMS_YARP_FQDN string = aiDependencies.outputs.yarpWebAppFqdn
+
+@description('APIM instance name (hook pins the Teams API validate-jwt audience live once the bot App ID is known).')
+output TEAMS_APIM_NAME string = apimName
+
+@description('Name of the APIM Teams inbound API (== its path).')
+output TEAMS_APIM_API_NAME string = apimTeamsApi.?outputs.apiName ?? 'teams'
+
+@description('Entra tenant the single-tenant bot registration lives in.')
+output TEAMS_TENANT_ID string = tenant().tenantId
+
+@description('Suggested Azure Bot Service resource name the postdeploy hook creates (stable per environment).')
+output TEAMS_BOT_NAME string = 'bot-${uniqueSuffix}'
+
+@description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
+output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
