@@ -301,9 +301,16 @@ Reuses the (now always-on) shared APIM gateway spoke.
 
 ### Inbound flow
 
+The **Azure Bot Service is a registration only** — not a hop in the data path. It holds
+the bot identity + messaging endpoint and connects the **Teams channel** to that
+endpoint (YARP here). Microsoft's public **Bot Connector** reads it, then POSTs
+activities directly to YARP:
+
 ```
-Bot Channel Adapter (Microsoft, public)
-  → Azure Bot Service (endpoint = https://<yarp-public-fqdn>/teams)
+Teams / M365 Copilot
+  → Bot Connector / Channel Adapter (Microsoft, public)
+        (delivers to the messaging endpoint the Azure Bot Service registration
+         declares for the Teams channel = https://<yarp-public-fqdn>/teams)
   → YARP App Service   (PUBLIC; managed TLS; ipSecurityRestrictions = Microsoft Teams
                         published IP ranges [52.112.0.0/14, 52.122.0.0/15 + IPv6],
                         default Deny; VNet-integrated outbound)
