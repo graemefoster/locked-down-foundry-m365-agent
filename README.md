@@ -43,8 +43,6 @@ This implementation gives you full control over the inbound and outbound communi
   - **Note:** Your Virtual Network can be in a different resource group than your Foundry workspace resources
 
 
-[![Deploy To Azure](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/deploytoazure.svg?sanitize=true)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2Fazure-ai-foundry%2Ffoundry-samples%2Frefs%2Fheads%2Fmain%2Fsamples%2Fmicrosoft%2Finfrastructure-setup%2F16-private-network-standard-agent-apim-setup-preview%2Fazuredeploy.json)
-
 ---
 
 ## Prerequisites
@@ -155,7 +153,7 @@ identity — granted **Cognitive Services User** (data-plane inference) and **Re
 (ARM deployments read for discovery) on the provider account. APIM logs to both Log
 Analytics and the shared **Application Insights** component. See [NETWORKING.md](./NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
 
-Key parameters (see `main.bicepparam`):
+Key parameters (see [`infra/main.parameters.json`](./infra/main.parameters.json)):
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
@@ -169,53 +167,36 @@ Key parameters (see `main.bicepparam`):
 
 ---
 
-## Deploy the bicep template
+## Deploy with `azd`
 
-Choose your deployment method: Use the "Deploy to Azure" button from the provided README for an guided experience in Azure Portal
-
-**Option 1: Automatic deployment** 
-Click the deploy to Azure button above to open the Azure portal and deploy the template directly. 
-- Fill in the parameters as needed. 
-
-
-**Option 2: Manually deploy the bicep template**
-- **Create a New (or Use Existing) Resource Group**
-
-   ```bash
-   az group create --name <new-rg-name> --location <your-rg-region>
-   ```
-- Deploy the main.bicep file
-
-   ```bash
-      az deployment group create --resource-group <your-resource-group> --template-file main.bicep --parameters main.bicepparam
-   ```
-
-**Option 3: Deploy with `azd`**
+[Azure Developer CLI](https://aka.ms/azd) (`azd`) is the only supported deployment path.
+All infrastructure lives under [`infra/`](./infra) and is wired through
+[`azure.yaml`](./azure.yaml).
 
 ```bash
-azd up            # provision + (once a service is defined) predeploy hook
-# or just provision:
+azd up          # provision infrastructure (+ predeploy hook once a service is defined)
+# or, to provision only:
 azd provision
 ```
 
-`azd` **does not read `main.bicepparam`** — it reads `main.parameters.json`, which maps
-each Bicep parameter to an `azd` environment variable with an inline default
-(`${VAR=default}`). The defaults there mirror the intended values, so a fresh `azd up`
-uses them without extra setup. Override any value per environment before provisioning:
+`azd` reads [`infra/main.parameters.json`](./infra/main.parameters.json), which maps each
+Bicep parameter to an `azd` environment variable with an inline default (`${VAR=default}`).
+A fresh `azd up` uses those defaults with no extra setup. Override any value per environment
+before provisioning:
 
 ```bash
 azd env set ENABLE_MODEL_GATEWAY false
 azd env set AZURE_LOCATION eastus2
 ```
 
-`vmAdminPassword` is intentionally **not** in `main.parameters.json`; because it has no
-Bicep default, `azd` prompts for it interactively (and stores it in the environment).
-`main.bicepparam` is retained only for the manual `az deployment group create` path above.
+`vmAdminPassword` has no Bicep default and is deliberately **omitted** from
+`main.parameters.json`, so `azd` prompts for it interactively at provision time — it is
+never stored in the repo.
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
-> **Note:** The Bicep/portal deployment provisions all infrastructure but **does not seed
-> agents**. Seed them separately (see below).
+> **Note:** `azd provision` creates all infrastructure but **does not seed agents**. Seed
+> them separately (see below).
 
 ---
 
@@ -251,9 +232,9 @@ by name) are skipped, so re-running is safe.
 - `azd deploy` only triggers the hook once a service is defined in `azure.yaml`;
   `azd hooks run predeploy` works regardless and is the quickest way to (re)seed.
 
-If you deploy via the portal or raw `az deployment group create` (no azd), run the seeding
-script yourself, e.g. `az vm run-command invoke --command-id RunPowerShellScript --name
-<vm-name> -g <rg> --scripts @scripts/seed-agents.ps1 --parameters
+To (re)seed agents manually — for example outside the hook or from another host inside the
+VNet — run the seeding script yourself, e.g. `az vm run-command invoke --command-id
+RunPowerShellScript --name <vm-name> -g <rg> --scripts @scripts/seed-agents.ps1 --parameters
 "FoundryProjectEndpoint=<endpoint>" "ModelDeploymentName=<model>"`.
 
 ---
@@ -404,21 +385,19 @@ Private endpoints ensure secure, internal-only connectivity. Private endpoints a
 ## Module Structure
 
 ```text
-modules-network-secured/
-├── add-project-capability-host.bicep               # Configuring the project's capability host
-├── ai-account-identity.bicep                       # Azure AI Foundry deployment and configuration
-├── ai-project-identity.bicep                       # Foundry project deployment and connection configuration           
-├── ai-search-role-assignments.bicep                # AI Search RBAC configuration
-├── azure-storage-account-role-assignments.bicep    # Storage Account RBAC configuration  
-├── blob-storage-container-role-assignments.bicep   # Blob Storage Container RBAC configuration
-├── cosmos-container-role-assignments.bicep         # CosmosDB container Account RBAC configuration
-├── cosmosdb-account-role-assignment.bicep          # CosmosDB Account RBAC configuration
-├── format-project-workspace-id.bicep               # Formatting the project workspace ID
-├── network-agent-vnet.bicep                        # Hub VNet orchestrator (firewall + DNS resolver subnets)
-├── private-endpoint-and-dns.bicep                  # Creating virtual networks and DNS zones. 
-├── standard-dependent-resources.bicep              # Deploying CosmosDB, Storage, and Search
-├── subnet.bicep                                    # Setting the subnet for Agent network injection
-└── vnet.bicep                                      # Deploying a new virtual network
+infra/
+├── main.bicep                  # Orchestrator: wires all modules + emits azd outputs
+├── main.parameters.json        # azd parameter file (${VAR=default} env bindings)
+└── modules/
+    ├── network/                # VNets (hub + spokes), subnets, peering, DNS resolver,
+    │                           #   firewall, private endpoints, flow logs
+    ├── foundry/                # AI account/project identity, capability host,
+    │                           #   workspace-id formatting
+    ├── resources/              # ACR, Key Vault, VM, App Service, dependent resources
+    │                           #   (Cosmos/Storage/Search)
+    ├── encryption/             # CMK encryption for ACR, AI account, Storage
+    ├── rbac/                   # All role assignments (incl. VM → Foundry User)
+    └── model-gateway/          # Optional APIM Standard v2 + provider Foundry spoke
 ```
 
 > **Note:** The template always creates the VNet and delegates the Agents subnet to `Microsoft.App/environments` for you.

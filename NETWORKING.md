@@ -63,7 +63,7 @@ tags** — the tightest option that still works without breaking the platform.
 ## Agent subnet NSG (`<vnet>-agent-nsg`)
 
 Attached to `agent-subnet` only. Deny-by-default in **both** directions.
-Defined in [`modules-network-secured/foundry-spoke-vnet.bicep`](./modules-network-secured/foundry-spoke-vnet.bicep).
+Defined in [`infra/modules/network/foundry-spoke-vnet.bicep`](./infra/modules/network/foundry-spoke-vnet.bicep).
 
 ### Inbound
 
@@ -178,7 +178,7 @@ subnet must reach the A365 observability service.
 
 ## Azure Firewall — deny-by-default for the agent subnet
 
-Basic tier, defined in [`modules-network-secured/firewall.bicep`](./modules-network-secured/firewall.bicep).
+Basic tier, defined in [`infra/modules/network/firewall.bicep`](./infra/modules/network/firewall.bicep).
 Azure Firewall has an **implicit final DENY**: anything not matched by an Allow
 rule is dropped. We exploit that to lock the agent subnet while leaving the dev
 VM and App Service spoke on their existing general egress.
@@ -316,7 +316,7 @@ AZFWNetworkRule
 NSG flow logs are **retired** (no new logs after **2025-06-30**, full retirement
 **2027-09-30**), so this sample uses the successor **VNet flow logs** on the
 agent subnet, defined in
-[`modules-network-secured/agent-flow-logs.bicep`](./modules-network-secured/agent-flow-logs.bicep):
+[`infra/modules/network/agent-flow-logs.bicep`](./infra/modules/network/agent-flow-logs.bicep):
 
 - Target: the agent subnet.
 - Storage: a dedicated locked-down account (no anonymous blob access, HTTPS
@@ -371,7 +371,7 @@ order — the earlier items are the ones that actually bit us.
    agent NSG blocks outbound to the APIM private endpoint unless explicitly
    allowed. The fix that finally worked was the `Allow-ModelGatewayApim-Outbound`
    rule (agent subnet → APIM PE CIDR :443) in
-   [`foundry-spoke-vnet.bicep`](./modules-network-secured/foundry-spoke-vnet.bicep).
+   [`foundry-spoke-vnet.bicep`](./infra/modules/network/foundry-spoke-vnet.bicep).
    **Verify the runtime path in the firewall** — you should see the agent subnet
    reach the APIM PE IP:
 
@@ -418,10 +418,10 @@ order — the earlier items are the ones that actually bit us.
 
 ```bash
 # From this folder
-az bicep build --file main.bicep         # regenerate main.json after edits
+az bicep build --file infra/main.bicep         # regenerate main.json after edits
 az deployment group create \
   --resource-group <rg> \
-  --template-file main.bicep \
+  --template-file infra/main.bicep \
   --parameters <your params>
 ```
 

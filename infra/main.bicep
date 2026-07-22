@@ -144,7 +144,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
 // ==================== NETWORKING (Hub-Spoke) ====================
 
 // Step 1: Deploy Hub VNet + DNS Resolver
-module hubNetwork 'modules-network-secured/network-agent-vnet.bicep' = {
+module hubNetwork 'modules/network/network-agent-vnet.bicep' = {
   name: 'hub-network-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -188,7 +188,7 @@ var apimName = 'apim-${uniqueSuffix}-modelgw'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
 
-module firewall 'modules-network-secured/firewall.bicep' = {
+module firewall 'modules/network/firewall.bicep' = {
   name: '${deployment().name}-fwall'
   params: {
     firewallPipName: '${uniqueSuffix}-fwall-pip'
@@ -206,7 +206,7 @@ module firewall 'modules-network-secured/firewall.bicep' = {
 }
 
 // Step 3: Deploy Foundry Spoke VNet (needs firewall IP + DNS resolver IP)
-module foundrySpokeVnet 'modules-network-secured/foundry-spoke-vnet.bicep' = {
+module foundrySpokeVnet 'modules/network/foundry-spoke-vnet.bicep' = {
   name: 'foundry-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -221,7 +221,7 @@ module foundrySpokeVnet 'modules-network-secured/foundry-spoke-vnet.bicep' = {
 }
 
 // Step 4: Deploy App Service Spoke VNet (needs firewall IP + DNS resolver IP)
-module appServiceSpokeVnet 'modules-network-secured/appservice-spoke-vnet.bicep' = {
+module appServiceSpokeVnet 'modules/network/appservice-spoke-vnet.bicep' = {
   name: 'appservice-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -253,7 +253,7 @@ resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 }
 
 // VNet flow logs live under the regional Network Watcher in NetworkWatcherRG.
-module agentFlowLogs 'modules-network-secured/agent-flow-logs.bicep' = {
+module agentFlowLogs 'modules/network/agent-flow-logs.bicep' = {
   name: 'agent-flow-logs-${uniqueSuffix}-deployment'
   scope: resourceGroup('NetworkWatcherRG')
   params: {
@@ -269,7 +269,7 @@ module agentFlowLogs 'modules-network-secured/agent-flow-logs.bicep' = {
 
 
 // Step 5: VNet Peerings (Hub ↔ Foundry Spoke)
-module hubToFoundryPeering 'modules-network-secured/vnet-peering.bicep' = {
+module hubToFoundryPeering 'modules/network/vnet-peering.bicep' = {
   name: 'hub-foundry-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -280,7 +280,7 @@ module hubToFoundryPeering 'modules-network-secured/vnet-peering.bicep' = {
 }
 
 // Step 6: VNet Peerings (Hub ↔ App Service Spoke)
-module hubToAppServicePeering 'modules-network-secured/vnet-peering.bicep' = {
+module hubToAppServicePeering 'modules/network/vnet-peering.bicep' = {
   name: 'hub-appservice-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -295,7 +295,7 @@ module hubToAppServicePeering 'modules-network-secured/vnet-peering.bicep' = {
 /*
   Create the AI Services account and gpt-4o model deployment
 */
-module aiAccount 'modules-network-secured/ai-account-identity.bicep' = {
+module aiAccount 'modules/foundry/ai-account-identity.bicep' = {
   name: 'ai-${accountName}-${uniqueSuffix}-deployment'
   params: {
     // workspace organization
@@ -317,7 +317,7 @@ module aiAccount 'modules-network-secured/ai-account-identity.bicep' = {
 
 // ==================== KEY VAULT (CMK) ====================
 
-module keyVault 'modules-network-secured/keyvault.bicep' = {
+module keyVault 'modules/resources/keyvault.bicep' = {
   name: 'keyvault-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: keyVaultName
@@ -327,7 +327,7 @@ module keyVault 'modules-network-secured/keyvault.bicep' = {
 }
 
 // Create agent dependent resources (Storage, CosmosDB, AI Search, App Service)
-module aiDependencies 'modules-network-secured/standard-dependent-resources.bicep' = {
+module aiDependencies 'modules/resources/standard-dependent-resources.bicep' = {
   name: 'dependencies-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -359,7 +359,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = 
   name: aiDependencies.outputs.cosmosDBName
 }
 
-module acr './modules-network-secured/acr.bicep' = {
+module acr './modules/resources/acr.bicep' = {
   name: 'acr-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -371,7 +371,7 @@ module acr './modules-network-secured/acr.bicep' = {
 // ==================== CMK RBAC & ENCRYPTION ====================
 
 // Assign Key Vault Crypto Service Encryption User to service identities (post-creation)
-module keyVaultRoleAssignments 'modules-network-secured/keyvault-role-assignments.bicep' = {
+module keyVaultRoleAssignments 'modules/rbac/keyvault-role-assignments.bicep' = {
   name: 'keyvault-rbac-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: keyVault.outputs.keyVaultName
@@ -383,7 +383,7 @@ module keyVaultRoleAssignments 'modules-network-secured/keyvault-role-assignment
 }
 
 // Update AI Services account with CMK encryption (must be after RBAC assignment)
-module aiAccountEncryption 'modules-network-secured/ai-account-encryption.bicep' = {
+module aiAccountEncryption 'modules/encryption/ai-account-encryption.bicep' = {
   name: 'ai-encryption-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccount.outputs.accountName
@@ -403,7 +403,7 @@ module aiAccountEncryption 'modules-network-secured/ai-account-encryption.bicep'
 var noZRSRegions = ['southindia', 'westus', 'northcentralus']
 var storageSkuName = contains(noZRSRegions, location) ? 'Standard_GRS' : 'Standard_ZRS'
 
-module storageEncryption 'modules-network-secured/storage-encryption.bicep' = {
+module storageEncryption 'modules/encryption/storage-encryption.bicep' = {
   name: 'storage-encryption-${uniqueSuffix}-deployment'
   params: {
     storageName: aiDependencies.outputs.azureStorageName
@@ -419,7 +419,7 @@ module storageEncryption 'modules-network-secured/storage-encryption.bicep' = {
 
 // ==================== PRIVATE ENDPOINTS & DNS ====================
 
-module privateEndpointAndDNS 'modules-network-secured/private-endpoint-and-dns.bicep' = {
+module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = {
   name: '${uniqueSuffix}-private-endpoint'
   params: {
     aiAccountName: aiAccount.outputs.accountName
@@ -457,7 +457,7 @@ module privateEndpointAndDNS 'modules-network-secured/private-endpoint-and-dns.b
 /*
   Creates a new project (sub-resource of the AI Services account)
 */
-module aiProject 'modules-network-secured/ai-project-identity.bicep' = {
+module aiProject 'modules/foundry/ai-project-identity.bicep' = {
   name: 'ai-${projectName}-${uniqueSuffix}-deployment'
   params: {
     // workspace organization
@@ -494,7 +494,7 @@ module aiProject 'modules-network-secured/ai-project-identity.bicep' = {
   ]
 }
 
-module formatProjectWorkspaceId 'modules-network-secured/format-project-workspace-id.bicep' = {
+module formatProjectWorkspaceId 'modules/foundry/format-project-workspace-id.bicep' = {
   name: 'format-project-workspace-id-${uniqueSuffix}-deployment'
   params: {
     projectWorkspaceId: aiProject.outputs.projectWorkspaceId
@@ -504,7 +504,7 @@ module formatProjectWorkspaceId 'modules-network-secured/format-project-workspac
 /*
   Assigns the project SMI the storage blob data contributor role on the storage account
 */
-module storageAccountRoleAssignment 'modules-network-secured/azure-storage-account-role-assignment.bicep' = {
+module storageAccountRoleAssignment 'modules/rbac/azure-storage-account-role-assignment.bicep' = {
   name: 'storage-ra-${uniqueSuffix}-deployment'
   params: {
     azureStorageName: aiDependencies.outputs.azureStorageName
@@ -520,7 +520,7 @@ module storageAccountRoleAssignment 'modules-network-secured/azure-storage-accou
   Assigns the project SMI Reader role on Application Insights.
   This supports running Evaluations on existing traces.
 */
-module appInsightsRoleAssignment 'modules-network-secured/app-insights-role-assignment.bicep' = {
+module appInsightsRoleAssignment 'modules/rbac/app-insights-role-assignment.bicep' = {
   name: 'appi-ra-${uniqueSuffix}-deployment'
   params: {
     appInsightsName: appInsightsName
@@ -532,7 +532,7 @@ module appInsightsRoleAssignment 'modules-network-secured/app-insights-role-assi
 /*
   Assigns the project SMI Container Registry Repository Reader role on ACR.
 */
-module acrRoleAssignment 'modules-network-secured/acr-role-assignment.bicep' = {
+module acrRoleAssignment 'modules/rbac/acr-role-assignment.bicep' = {
   name: 'acr-ra-${uniqueSuffix}-deployment'
   params: {
     acrName: acr.outputs.acrName
@@ -543,7 +543,7 @@ module acrRoleAssignment 'modules-network-secured/acr-role-assignment.bicep' = {
 /*
   Assigns Foundry User role to the project SMI on the Foundry project resource.
 */
-module foundryProjectRoleAssignment 'modules-network-secured/foundry-project-role-assignment.bicep' = {
+module foundryProjectRoleAssignment 'modules/rbac/foundry-project-role-assignment.bicep' = {
   name: 'foundry-project-ra-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccount.outputs.accountName
@@ -553,7 +553,7 @@ module foundryProjectRoleAssignment 'modules-network-secured/foundry-project-rol
 }
 
 // The Comos DB Operator role must be assigned before the caphost is created
-module cosmosAccountRoleAssignments 'modules-network-secured/cosmosdb-account-role-assignment.bicep' = {
+module cosmosAccountRoleAssignments 'modules/rbac/cosmosdb-account-role-assignment.bicep' = {
   name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosDBName: aiDependencies.outputs.cosmosDBName
@@ -566,7 +566,7 @@ module cosmosAccountRoleAssignments 'modules-network-secured/cosmosdb-account-ro
 }
 
 // This role can be assigned before or after the caphost is created
-module aiSearchRoleAssignments 'modules-network-secured/ai-search-role-assignments.bicep' = {
+module aiSearchRoleAssignments 'modules/rbac/ai-search-role-assignments.bicep' = {
   name: 'ai-search-ra-${uniqueSuffix}-deployment'
   params: {
     aiSearchName: aiDependencies.outputs.aiSearchName
@@ -579,7 +579,7 @@ module aiSearchRoleAssignments 'modules-network-secured/ai-search-role-assignmen
 }
 
 // This module creates the capability host for the project and account
-module addProjectCapabilityHost 'modules-network-secured/add-project-capability-host.bicep' = {
+module addProjectCapabilityHost 'modules/foundry/add-project-capability-host.bicep' = {
   name: 'capabilityHost-configuration-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccount.outputs.accountName
@@ -601,7 +601,7 @@ module addProjectCapabilityHost 'modules-network-secured/add-project-capability-
 }
 
 // The Storage Blob Data Owner role must be assigned after the caphost is created
-module storageContainersRoleAssignment 'modules-network-secured/blob-storage-container-role-assignments.bicep' = {
+module storageContainersRoleAssignment 'modules/rbac/blob-storage-container-role-assignments.bicep' = {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
   params: {
     aiProjectPrincipalId: aiProject.outputs.projectPrincipalId
@@ -614,7 +614,7 @@ module storageContainersRoleAssignment 'modules-network-secured/blob-storage-con
 }
 
 // The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
-module cosmosContainerRoleAssignments 'modules-network-secured/cosmos-container-role-assignments.bicep' = {
+module cosmosContainerRoleAssignments 'modules/rbac/cosmos-container-role-assignments.bicep' = {
   name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosAccountName: aiDependencies.outputs.cosmosDBName
@@ -629,7 +629,7 @@ module cosmosContainerRoleAssignments 'modules-network-secured/cosmos-container-
 
 // ==================== VM + BASTION (in Foundry Spoke) ====================
 
-module vmModule 'modules-network-secured/vm.bicep' = {
+module vmModule 'modules/resources/vm.bicep' = {
   name: 'vm-deployment-${uniqueSuffix}'
   params: {
     location: location
@@ -658,7 +658,7 @@ module vmModule 'modules-network-secured/vm.bicep' = {
 */
 
 // Step 7: model-gateway spoke VNet
-module modelGatewaySpokeVnet 'modules-network-secured/model-gateway/model-gateway-spoke-vnet.bicep' = if (enableModelGateway) {
+module modelGatewaySpokeVnet 'modules/model-gateway/model-gateway-spoke-vnet.bicep' = if (enableModelGateway) {
   name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -670,7 +670,7 @@ module modelGatewaySpokeVnet 'modules-network-secured/model-gateway/model-gatewa
 }
 
 // Step 8: peer hub <-> model-gateway spoke
-module hubToModelGatewayPeering 'modules-network-secured/vnet-peering.bicep' = if (enableModelGateway) {
+module hubToModelGatewayPeering 'modules/network/vnet-peering.bicep' = if (enableModelGateway) {
   name: 'hub-model-gateway-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -681,7 +681,7 @@ module hubToModelGatewayPeering 'modules-network-secured/vnet-peering.bicep' = i
 }
 
 // Provider AI Foundry (the "real" model provider) — minimal, locked-down.
-module providerFoundry 'modules-network-secured/model-gateway/provider-foundry.bicep' = if (enableModelGateway) {
+module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = if (enableModelGateway) {
   name: 'provider-foundry-${uniqueSuffix}-deployment'
   params: {
     accountName: providerAccountName
@@ -696,7 +696,7 @@ module providerFoundry 'modules-network-secured/model-gateway/provider-foundry.b
 }
 
 // APIM Standard v2 in the gateway spoke.
-module apim 'modules-network-secured/model-gateway/apim.bicep' = if (enableModelGateway) {
+module apim 'modules/model-gateway/apim.bicep' = if (enableModelGateway) {
   name: 'model-gateway-apim-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -709,7 +709,7 @@ module apim 'modules-network-secured/model-gateway/apim.bicep' = if (enableModel
 }
 
 // Private endpoints (APIM inbound + provider Foundry) + DNS in the gateway spoke.
-module modelGatewayPrivateEndpoints 'modules-network-secured/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
+module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
   name: 'model-gateway-pe-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -727,7 +727,7 @@ module modelGatewayPrivateEndpoints 'modules-network-secured/model-gateway/model
 }
 
 // Grant APIM MI Cognitive Services User on the provider Foundry (backend MI auth).
-module apimProviderRoleAssignment 'modules-network-secured/model-gateway/apim-provider-role-assignment.bicep' = if (enableModelGateway) {
+module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assignment.bicep' = if (enableModelGateway) {
   name: 'model-gateway-apim-rbac-${uniqueSuffix}-deployment'
   params: {
     providerAccountName: providerFoundry.outputs.accountName
@@ -736,7 +736,7 @@ module apimProviderRoleAssignment 'modules-network-secured/model-gateway/apim-pr
 }
 
 // APIM inference API + policy (inbound token validation, backend + MI auth).
-module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bicep' = if (enableModelGateway) {
+module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = if (enableModelGateway) {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
@@ -751,7 +751,7 @@ module apimApiPolicy 'modules-network-secured/model-gateway/apim-api-policy.bice
 }
 
 // Advertise APIM to the primary Foundry project as an ApiManagement connection.
-module apimConnection 'modules-network-secured/model-gateway/apim-connection.bicep' = if (enableModelGateway) {
+module apimConnection 'modules/model-gateway/apim-connection.bicep' = if (enableModelGateway) {
   name: 'model-gateway-connection-${uniqueSuffix}-deployment'
   params: {
     aiFoundryName: aiAccount.outputs.accountName
@@ -769,7 +769,7 @@ module apimConnection 'modules-network-secured/model-gateway/apim-connection.bic
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
 // private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
 // and after the API/policy children so it never races their creation.
-module apimLockdown 'modules-network-secured/model-gateway/apim-lockdown.bicep' = if (enableModelGateway) {
+module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = if (enableModelGateway) {
   name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
@@ -788,7 +788,7 @@ module apimLockdown 'modules-network-secured/model-gateway/apim-lockdown.bicep' 
 // PUT before this second rule-collection-group PUT lands on the same policy. This avoids
 // the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
 // rule-collection-group PUTs arrive back-to-back.
-module modelGatewayFirewallRules 'modules-network-secured/model-gateway/model-gateway-firewall-rules.bicep' = if (enableModelGateway) {
+module modelGatewayFirewallRules 'modules/model-gateway/model-gateway-firewall-rules.bicep' = if (enableModelGateway) {
   name: 'model-gateway-fwall-rules-${uniqueSuffix}-deployment'
   params: {
     firewallPolicyName: firewallPolicyName
@@ -809,7 +809,7 @@ module modelGatewayFirewallRules 'modules-network-secured/model-gateway/model-ga
 // that can reach the Foundry private endpoint). The VM's system-assigned identity still
 // needs Foundry User on the project so the on-VM script can acquire a token and call the
 // Agents API — that RBAC is provisioned here.
-module vmFoundryRole 'modules-network-secured/vm-foundry-role.bicep' = {
+module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
   name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
     accountName: aiAccount.outputs.accountName

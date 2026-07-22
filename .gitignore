@@ -1,7 +1,7 @@
 # Compiled ARM templates (generated from bicep — do not commit)
 *.json
 # ...except the azd parameters file, which must be committed.
-!main.parameters.json
+!infra/main.parameters.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.

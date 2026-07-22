@@ -21,7 +21,7 @@
       the core private-endpoint-and-dns.bicep, so this module only REFERENCES
       them (creating them again would collide).
 
-  Modelled on modules-network-secured/private-endpoint-and-dns.bicep.
+  Modelled on infra/modules/network/private-endpoint-and-dns.bicep.
 */
 
 @description('Azure region for the private endpoints')

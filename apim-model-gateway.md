@@ -6,7 +6,8 @@ locked-down Foundry M365 agent sample. Read this to resume work after a session 
 > Secrets are intentionally **not** in this file. The APIM subscription key is a
 > deterministic `guid(resourceGroup().id, apimName, 'model-gateway-apikey')` and is
 > fetched live via `listSecrets` (see [Operational commands](#operational-commands)).
-> `main.bicepparam` holds a real VM password and **must never be committed**.
+> The VM admin password (`vmAdminPassword`) is prompted for by `azd` at provision
+> time and is never stored in the repo.
 
 ---
 
@@ -99,7 +100,7 @@ connection — the portal emits the flat `authHeaderName`/`authHeaderFormat` met
 
 ## 6. Files
 
-`modules-network-secured/model-gateway/`
+`infra/modules/model-gateway/`
 - `model-gateway-spoke-vnet.bicep` — new spoke VNet, subnets, UDR, NSGs, PE network policies.
 - `provider-foundry.bicep` — provider AIServices account + model deployment + MI, public access disabled.
 - `apim.bicep` — APIM Standard v2 + VNet integration + system MI. **Create Enabled, then flip
@@ -112,14 +113,15 @@ connection — the portal emits the flat `authHeaderName`/`authHeaderFormat` met
 - `apim-provider-role-assignment.bicep` — APIM MI → `Cognitive Services OpenAI User` on provider.
 
 Modified core:
-- `main.bicep` — `enableModelGateway` flag; conditional modules; firewall rule; hub↔spoke
+- `infra/main.bicep` — `enableModelGateway` flag; conditional modules; firewall rule; hub↔spoke
   peering. Key vars: `providerBackendBaseUrl` (`.../openai`), `modelGatewayConnectionName`
   (`'model-gateway'`), `effectiveGatewayApiKey` (deterministic guid, never empty).
   Consuming conditional-module outputs from always-deployed resources uses safe-access
   (`mod.?outputs.x ?? default`) to avoid BCP318 hard-reference failures.
 - `scripts/seed-agents.ps1` — on-VM agent seeding (run via `azd hooks run predeploy` →
   `hooks/predeploy.ps1` → `az vm run-command`); optional 2nd agent uses `model-gateway/<model>`.
-- `main.bicepparam` — `enableModelGateway`, gateway params. **DO NOT COMMIT (real password).**
+- `infra/main.parameters.json` — `enableModelGateway`, gateway params as azd env
+  defaults (`${VAR=default}`); `vmAdminPassword` is omitted so azd prompts for it.
 
 ## 7. Live environment (current deployment)
 
@@ -168,13 +170,13 @@ KEY=$(az rest --method post --url "https://management.azure.com/subscriptions/$S
 PROVID="/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/gwprovider32cm"
 PROJID="/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/aiservices32cm/projects/project32cm"
 az deployment group create -g $RG --name gw-policy-v1-patch \
-  --template-file modules-network-secured/model-gateway/apim-api-policy.bicep \
+  --template-file infra/modules/model-gateway/apim-api-policy.bicep \
   --parameters apimName=apim-32cm-modelgw backendBaseUrl="https://gwprovider32cm.openai.azure.com/openai" \
     providerAccountResourceId="$PROVID" callerProjectResourceId="$PROJID" apiSubscriptionKey="$KEY"
 
 # Targeted deploy: connection module (creates/updates the 'model-gateway' connection)
 az deployment group create -g $RG --name gw-connection-v1-patch \
-  --template-file modules-network-secured/model-gateway/apim-connection.bicep \
+  --template-file infra/modules/model-gateway/apim-connection.bicep \
   --parameters aiFoundryName=aiservices32cm projectName=project32cm connectionName=model-gateway \
     apimGatewayUrl="https://apim-32cm-modelgw.azure-api.net" apiPath=inference \
     exposedModelName=gpt-5.4-mini apiKey="$KEY"

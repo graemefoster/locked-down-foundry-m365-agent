@@ -4,7 +4,7 @@ name: locked-down-foundry-m365-agent
 
 infra:
   provider: bicep
-  path: .
+  path: infra
   module: main
 
 hooks:
