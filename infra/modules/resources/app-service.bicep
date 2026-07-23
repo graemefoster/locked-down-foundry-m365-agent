@@ -45,7 +45,7 @@ var teamsInboundIpRules = [
     action: 'Allow'
     priority: 100 + i
     name: 'AllowTeamsInbound-${i}'
-    description: 'Microsoft Teams Required inbound range (Bot Channel Adapter -> public YARP).'
+    description: 'Microsoft Teams Required inbound range'
   }
 ]
 var yarpIpRestrictions = enableTeamsPublish ? teamsInboundIpRules : []
