@@ -91,7 +91,7 @@ azd down
   once a service exists; `azd hooks run predeploy` works regardless. `predown` runs on any
   `azd down`.
 
-## Optional: model gateway
-`enableModelGateway=true` (default **false**) deploys an APIM-fronted provider Foundry and a
+## Model gateway
+The model gateway is always deployed: an APIM-fronted provider Foundry and a
 second seeded agent routed through it. See `apim-model-gateway.md`. Networking deep-dive:
 `NETWORKING.md`.

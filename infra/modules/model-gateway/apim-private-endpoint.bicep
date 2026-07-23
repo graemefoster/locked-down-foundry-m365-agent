@@ -3,8 +3,8 @@
   ------------------------------------------------
   APIM is now shared by two scenarios (the optional model gateway AND the
   optional Teams/M365 publish inbound path), so its inbound private endpoint and
-  the privatelink.azure-api.net DNS zone are ALWAYS deployed — independent of
-  enableModelGateway. Callers reach the gateway ONLY through this PE (APIM
+  the privatelink.azure-api.net DNS zone are ALWAYS deployed. Callers reach the
+  gateway ONLY through this PE (APIM
   publicNetworkAccess is flipped to 'Disabled' by apim-lockdown.bicep):
 
     * the primary Foundry project (model-gateway connection), and

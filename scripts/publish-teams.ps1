@@ -18,6 +18,9 @@
   Idempotent: re-running GetIdentity is read-only; the PATCH is a merge-patch; and a
   publish of an already-published appVersion ("version already exists") is treated as
   success. Prints '[publish-teams] Done.' only on success (the host gates on this marker).
+
+  Both modes require -AccessToken: a delegated USER token (aud https://ai.azure.com) the
+  host hook acquires and forwards. The publish OBO step rejects app-only / MI tokens (502).
 #>
 param(
   [Parameter(Mandatory = $true)]  [ValidateSet('GetIdentity', 'Publish')] [string]$Mode,
@@ -36,39 +39,27 @@ param(
   [Parameter(Mandatory = $false)] [string]$PrivacyUrl = 'https://privacy.microsoft.com',
   [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl = 'https://www.microsoft.com/legal/terms-of-use',
 
-  # Optional caller-supplied bearer token for the https://ai.azure.com audience.
-  # When empty (default) the VM's own managed identity token (IMDS) is used, which is fine
-  # for the read/PATCH steps (GetIdentity, activity-protocol enable). The Step 4 publish
-  # call, however, triggers an on-behalf-of exchange in Foundry to submit the app to the
-  # M365 catalog, which REQUIRES a delegated USER token - an app-only / managed-identity
-  # token fails server-side with HTTP 502. The postdeploy hook acquires a user token on the
-  # host and passes it here for the Publish invocation.
-  [Parameter(Mandatory = $false)] [string]$AccessToken = ''
+  # REQUIRED delegated USER bearer token for the https://ai.azure.com audience, acquired
+  # host-side by the postdeploy hook (`az account get-access-token`). This script only ever
+  # runs as part of publishing an agent, and the Microsoft 365 publish step (Step 4) performs
+  # an on-behalf-of (OBO) exchange with the caller's token to submit the app to the M365
+  # catalog. An app-only / managed-identity token has no user context and fails server-side
+  # with a bare HTTP 502, so a USER token is mandatory (the read + PATCH steps accept it too).
+  [Parameter(Mandatory = $true)] [string]$AccessToken
 )
 $ErrorActionPreference = 'Stop'
 
 # Strip trailing slash so /agents never becomes //agents.
 $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
 
-function Get-FoundryToken {
-  $response = Invoke-RestMethod `
-    -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fai.azure.com%2F' `
-    -Headers @{ Metadata = 'true' } `
-    -Method Get
-  return $response.access_token
-}
-
 Write-Host "[publish-teams] Mode=$Mode Agent=$AgentName"
 Write-Host "[publish-teams] Endpoint: $FoundryProjectEndpoint"
 
-if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
-  $token = $AccessToken.Trim()
-  Write-Host '[publish-teams] Using caller-supplied access token (user identity).'
+if ([string]::IsNullOrWhiteSpace($AccessToken)) {
+  throw '[publish-teams] -AccessToken is required: pass a delegated USER token for the https://ai.azure.com audience. The Microsoft 365 publish step does an on-behalf-of exchange and rejects app-only / managed-identity tokens with HTTP 502.'
 }
-else {
-  $token = Get-FoundryToken
-  Write-Host '[publish-teams] Token acquired (VM managed identity).'
-}
+$token = $AccessToken.Trim()
+Write-Host '[publish-teams] Using caller-supplied user access token.'
 $authHeader = @{ Authorization = "Bearer $token" }
 
 if ($Mode -eq 'GetIdentity') {

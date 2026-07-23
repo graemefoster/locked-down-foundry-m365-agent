@@ -1,8 +1,8 @@
 /*
   Model-Gateway: Provider Foundry Private Endpoint + DNS
   ------------------------------------------------------
-  Creates the provider Foundry private endpoint that keeps the (optional) model
-  provider fully private, landing in the gateway spoke's pe-subnet:
+  Creates the provider Foundry private endpoint that keeps the model provider
+  fully private, landing in the gateway spoke's pe-subnet:
 
     * Provider Foundry PE (groupId 'account') -> services.ai / openai /
       cognitiveservices zones. APIM's outbound VNet-integration subnet reaches
@@ -10,7 +10,7 @@
 
   The APIM inbound PE + privatelink.azure-api.net zone are handled separately by
   apim-private-endpoint.bicep (always-on), because APIM is now shared by the
-  Teams inbound path too. This module only deploys when enableModelGateway=true.
+  Teams inbound path too.
 
   DNS:
     * The three Cognitive Services zones ARE already created and hub-linked by

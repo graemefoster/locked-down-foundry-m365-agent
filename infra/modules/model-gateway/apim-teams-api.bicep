@@ -5,21 +5,23 @@
   M365 Copilot (see the Learn article linked in README.md / NETWORKING.md):
 
     Bot Channel Adapter -> Azure Bot Service -> YARP (public App Service)
-      -> THIS APIM API -> primary Foundry agent activityProtocol endpoint (private PE).
+      -> THIS APIM API -> the Foundry agent activityProtocol endpoint (private PE).
 
-  YARP forwards the bot's POST to APIM path '<apiPath>'; this API rewrites the URI
-  to the agent's activityProtocol endpoint and forwards to the primary Foundry
-  account over its private endpoint (APIM outbound VNet integration -> firewall ->
-  foundry PE).
+  Path-routed: each published agent's bot posts to '<apiPath>/{agentName}'; this single
+  API + policy rewrites the URI to that agent's activityProtocol endpoint (deriving the
+  agent from the {agentName} path segment) and forwards to the primary Foundry account
+  over its private endpoint (APIM outbound VNet integration -> firewall -> foundry PE).
+  One API serves every published agent — no per-agent re-provision.
 
   Auth posture:
     * validate-jwt (defense-in-depth) — the Bot Channel Adapter presents a signed
       Bot Framework JWT. We validate it at the APIM edge using the Bot Framework
       OpenID metadata, pinning issuer 'https://api.botframework.com' and (when
-      botAppId is supplied) the audience = the bot's Microsoft App ID. The bot's
-      App ID is the agent identity principal_id, which only exists AFTER agent
-      seeding, so botAppId defaults to '' here (issuer-only validation) and the
-      publish hook pins the audience live once it knows the principal_id.
+      botAppIds are supplied) the audience against a SET of the published bots'
+      Microsoft App IDs (each = an agent identity principal_id, which only exists
+      AFTER agent seeding). botAppIds defaults to [] here (issuer-only validation)
+      and the publish hook rebuilds the full audience allowlist live once the
+      agents are seeded and their bots created.
     * The ORIGINAL Authorization header (bot JWT) is forwarded to Foundry
       unchanged — Foundry validates the token on your behalf and authorizes the
       end user. We do NOT swap in a managed-identity token.
@@ -41,14 +43,11 @@ param foundryAccountName string
 @description('Name of the primary Foundry project')
 param projectName string
 
-@description('Name of the agent to route Teams/M365 traffic to (its activityProtocol endpoint is the backend)')
-param agentName string
-
 @description('API version for the agent activityProtocol endpoint')
 param activityApiVersion string = '2025-05-15-preview'
 
-@description('Bot Microsoft App ID (= agent identity principal_id) to pin as the validate-jwt audience. Empty = validate issuer only (the publish hook pins the audience live once the agent is seeded).')
-param botAppId string = ''
+@description('List of bot Microsoft App IDs (= each published agent identity principal_id) to allow as validate-jwt audiences. Each published agent has its own bot, so this is a set. Empty = validate issuer only (the publish hook rebuilds the full audience set live once agents are seeded).')
+param botAppIds array = []
 
 @description('Expected Entra tenant GUID. When set, the policy asserts the Bot Framework token serviceurl is scoped to this tenant (the GUID appears in the serviceurl path, e.g. smba.trafficmanager.net/amer/<tenantId>/) and rejects anything else with 403 — single-tenant lockdown. Empty = skip the assertion.')
 param expectedTenantId string = ''
@@ -59,11 +58,16 @@ param expectedTenantId string = ''
 // tooling can discover the APIM -> Foundry edge; the policy references it by ID.
 var backendBaseUrl = 'https://${foundryAccountName}.services.ai.azure.com'
 var backendId = 'foundry-${foundryAccountName}'
-var rewriteTarget = '/api/projects/${projectName}/agents/${agentName}/endpoint/protocols/activityProtocol?api-version=${activityApiVersion}'
+// Path-routed: the {agentName} token is a URL-template parameter the bot supplies in the
+// messaging-endpoint path (/teams/{agentName}). APIM substitutes it into the rewrite target,
+// so ONE API + policy serves every published agent (no per-agent re-provision). ${projectName}
+// / ${activityApiVersion} are baked at deploy time; {agentName} is left literal for APIM.
+var rewriteTarget = '/api/projects/${projectName}/agents/{agentName}/endpoint/protocols/activityProtocol?api-version=${activityApiVersion}'
 
-var audienceBlock = empty(botAppId)
-  ? ''
-  : '<audiences><audience>@@BOTAPPID@@</audience></audiences>'
+// Multi-audience allowlist: each published agent has its own bot (own App ID), so
+// validate-jwt accepts a SET of audiences. Empty list => issuer-only (audiences omitted).
+var audienceEntries = [for id in botAppIds: '<audience>${id}</audience>']
+var audienceBlock = empty(botAppIds) ? '' : '<audiences>${join(audienceEntries, '')}</audiences>'
 
 // Single-tenant lockdown: the Bot Framework token has no `tid` claim, but its
 // serviceurl path embeds the caller's tenant GUID (smba.trafficmanager.net/<region>/<tenantId>/).
@@ -93,13 +97,12 @@ var policyTemplate = '''<policies>
   <on-error><base /></on-error>
 </policies>'''
 
-var audienceRendered = replace(audienceBlock, '@@BOTAPPID@@', botAppId)
 var serviceUrlAssertRendered = replace(serviceUrlAssertBlock, '@@TENANTID@@', expectedTenantId)
 
 var renderedPolicy = replace(
   replace(
     replace(
-      replace(policyTemplate, '@@AUDIENCES@@', audienceRendered),
+      replace(policyTemplate, '@@AUDIENCES@@', audienceBlock),
       '@@SERVICEURLASSERT@@',
       serviceUrlAssertRendered
     ),
@@ -142,16 +145,25 @@ resource teamsApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   }
 }
 
-// The bot posts every activity to the single messaging endpoint (POST). The API
-// path is the messaging endpoint; the policy rewrites to the activityProtocol path.
+// Path-routed messaging endpoint: each bot posts to /teams/{agentName}. The {agentName}
+// URL-template parameter is substituted into the rewrite target, so ONE operation + policy
+// serves every published agent.
 resource messagesOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
   parent: teamsApi
   name: 'post-activities'
   properties: {
     displayName: 'Post Activities'
     method: 'POST'
-    urlTemplate: '/'
-    description: 'Bot Channel Adapter posts Teams/M365 activities here; forwarded to the agent activityProtocol endpoint.'
+    urlTemplate: '/{agentName}'
+    templateParameters: [
+      {
+        name: 'agentName'
+        description: 'Seeded Foundry agent name; its activityProtocol endpoint is the backend.'
+        type: 'string'
+        required: true
+      }
+    ]
+    description: 'Bot Channel Adapter posts Teams/M365 activities to /teams/{agentName}; forwarded to that agent activityProtocol endpoint.'
   }
 }
 

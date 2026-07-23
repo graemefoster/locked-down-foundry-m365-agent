@@ -100,7 +100,6 @@ A fresh `azd up` uses those defaults with no extra setup. Override any value per
 before provisioning:
 
 ```bash
-azd env set ENABLE_MODEL_GATEWAY false
 azd env set AZURE_LOCATION eastus2
 ```
 

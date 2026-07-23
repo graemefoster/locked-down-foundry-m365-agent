@@ -9,7 +9,6 @@
     "modelVersion": { "value": "${MODEL_VERSION=2026-03-05}" },
     "modelSkuName": { "value": "${MODEL_SKU_NAME=GlobalStandard}" },
     "modelCapacity": { "value": "${MODEL_CAPACITY=30}" },
-    "enableModelGateway": { "value": "${ENABLE_MODEL_GATEWAY=true}" },
     "gatewayModelName": { "value": "${GATEWAY_MODEL_NAME=gpt-5.4-mini}" },
     "gatewayModelFormat": { "value": "${GATEWAY_MODEL_FORMAT=OpenAI}" },
     "gatewayModelVersion": { "value": "${GATEWAY_MODEL_VERSION=2026-03-17}" },
@@ -24,8 +23,6 @@
     "peSubnetName": { "value": "${PE_SUBNET_NAME=pe-subnet}" },
     "projectCapHost": { "value": "${PROJECT_CAP_HOST=caphostproj}" },
     "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" },
-    "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" },
-    "teamsAgentName": { "value": "${TEAMS_AGENT_NAME=hello-world-agent}" },
-    "teamsBotAppId": { "value": "${TEAMS_BOT_APP_ID=}" }
+    "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" }
   }
 }

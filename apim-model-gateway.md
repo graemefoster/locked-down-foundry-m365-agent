@@ -13,13 +13,12 @@ locked-down Foundry M365 agent sample. Read this to resume work after a session 
 
 ## 1. What it is / goal
 
-When `enableModelGateway=true`, deploy an **Azure API Management (Standard v2)** instance
+Deploy an **Azure API Management (Standard v2)** instance
 plus a **"real" model-provider AI Foundry** in a **new spoke VNet**, then advertise APIM
 to the **primary** Foundry project as an `ApiManagement` connection so a seeded agent can
 use a model referenced as `<connection-name>/<model-name>` (e.g. `model-gateway/gpt-5.4-mini`).
 
-Everything is gated behind `enableModelGateway`, which is **on by default** (`azd` sets
-`ENABLE_MODEL_GATEWAY=true`); set it to `false` to skip it. Goal: hit as many enterprise
+The whole gateway is always deployed. Goal: hit as many enterprise
 features as possible (private APIM, VNet integration, keyless Entra auth to the gateway,
 dynamic model discovery).
 
@@ -114,14 +113,12 @@ connection — the portal emits the flat `authHeaderName`/`authHeaderFormat` met
 - `apim-provider-role-assignment.bicep` — APIM MI → `Cognitive Services OpenAI User` on provider.
 
 Modified core:
-- `infra/main.bicep` — `enableModelGateway` flag; conditional modules; firewall rule; hub↔spoke
+- `infra/main.bicep` — always-deployed model-gateway modules; firewall rule; hub↔spoke
   peering. Key vars: `providerBackendBaseUrl` (`.../openai`), `modelGatewayConnectionName`
   (`'model-gateway'`), `effectiveGatewayApiKey` (deterministic guid, never empty).
-  Consuming conditional-module outputs from always-deployed resources uses safe-access
-  (`mod.?outputs.x ?? default`) to avoid BCP318 hard-reference failures.
 - `scripts/seed-agents.ps1` — on-VM agent seeding (run via `azd hooks run predeploy` →
-  `hooks/predeploy.ps1` → `az vm run-command`); optional 2nd agent uses `model-gateway/<model>`.
-- `infra/main.parameters.json` — `enableModelGateway`, gateway params as azd env
+  `hooks/predeploy.ps1` → `az vm run-command`); 2nd agent uses `model-gateway/<model>`.
+- `infra/main.parameters.json` — gateway params as azd env
   defaults (`${VAR=default}`); `vmAdminPassword` is omitted so azd prompts for it.
 
 ## 7. Live environment (current deployment)
@@ -140,7 +137,7 @@ Modified core:
 | Connection | `model-gateway` → agents use `model-gateway/gpt-5.4-mini` |
 | VM | `test-vm-32cm` (system MI principalId `4278ef4f-88a3-4d40-ae1a-70f140cf671c`) |
 | App Insights | `32cm-appi` (appId `a9af1477-3c76-4297-82cd-5713adcf3f1b`) |
-| bicepparam | `modelName='gpt-5.4'`, `gatewayModelName='gpt-5.4-mini'`, `enableModelGateway=true` |
+| bicepparam | `modelName='gpt-5.4'`, `gatewayModelName='gpt-5.4-mini'` |
 
 ## 8. Current state (verified live)
 
@@ -153,7 +150,7 @@ targeted module deploys and verified live:
   `authHeaderFormat={api_key}`, `customHeaders=None`. ✅
 - Operation `chat-completions`: `POST /chat/completions`, no template params. ✅
 - Live inference backend routes to `.../openai/v1/chat/completions`; chat op inherits `<base/>`. ✅
-- Agents seeded earlier: `hello-world-agent (gpt-5.4)`, `gateway-model-agent (model-gateway/gpt-5.4-mini)`.
+- Agents seeded earlier: `hello-world-agent (gpt-5.4)`, `gateway-model-agent (model-gateway/gpt-5.4-mini)`, `teams-agent (model-gateway/gpt-5.4-mini)` (the one published to Teams).
 
 Committed: `8f84ccb` "Route model gateway to Azure OpenAI v1 (model-in-body) + fix connection
 api-key auth" (`apim-connection.bicep` + `apim-api-policy.bicep`). Prior policy-align commit `f2cab3a`.

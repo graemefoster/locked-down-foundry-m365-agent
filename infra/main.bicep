@@ -53,9 +53,10 @@ param modelSkuName string = 'GlobalStandard'
 @description('The tokens per minute (TPM) of your model deployment')
 param modelCapacity int = 30
 
-// ==================== MODEL GATEWAY (optional) ====================
-@description('Deploy the optional enterprise model gateway: an APIM Standard v2 instance + a "real" provider AI Foundry in a NEW spoke, advertised to the primary Foundry project as an ApiManagement connection. Default false to avoid cost.')
-param enableModelGateway bool = false
+// ==================== MODEL GATEWAY ====================
+// The enterprise model gateway is always deployed: an APIM Standard v2 instance + a "real"
+// provider AI Foundry in a NEW spoke, advertised to the primary Foundry project as an
+// ApiManagement connection.
 
 @description('Model exposed through the gateway (deployed on the provider Foundry and advertised on the connection).')
 param gatewayModelName string = 'gpt-5.4-mini'
@@ -79,11 +80,15 @@ param gatewayCallerAppId string = ''
 @description('Deploy the Teams / M365 Copilot inbound publish path: a new APIM API that forwards to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by the postdeploy hook (scripts/publish-teams.ps1). Default true.')
 param enableTeamsPublish bool = true
 
-@description('Name of the seeded agent to publish to Teams / M365 (its activityProtocol endpoint is the APIM backend).')
-param teamsAgentName string = 'hello-world-agent'
+@description('Names of the seeded agents to publish to Teams / M365. Each gets its own Azure Bot Service whose messaging endpoint is https://<yarp>/teams/<agentName>; the single path-routed APIM Teams API rewrites to each agent activityProtocol endpoint. Defaults to all three seeded agents.')
+param teamsPublishAgentNames array = [
+  'hello-world-agent'
+  'gateway-model-agent'
+  'teams-agent'
+]
 
-@description('Bot Microsoft App ID (= agent identity principal_id) pinned as the APIM validate-jwt audience. Empty = validate the Bot Framework issuer only; the publish hook pins the audience live once the agent is seeded.')
-param teamsBotAppId string = ''
+@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; the publish hook rebuilds the full audience allowlist live once the agents are seeded.')
+param teamsBotAppIds array = []
 
 // Create a short, unique suffix, that will be unique to each resource group
 var uniqueSuffix = substring(uniqueString('${resourceGroup().id}'), 0, 4)
@@ -231,7 +236,7 @@ module foundrySpokeVnet 'modules/network/foundry-spoke-vnet.bicep' = {
     firewallPrivateIp: firewall.outputs.firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: agentInboundAllowedCidrs
-    modelGatewayPeCidr: enableModelGateway ? modelGatewayPeSubnetCidr : ''
+    modelGatewayPeCidr: modelGatewayPeSubnetCidr
     apimSubnetCidr: enableTeamsPublish ? modelGatewayApimSubnetCidr : ''
   }
 }
@@ -667,11 +672,11 @@ module vmModule 'modules/resources/vm.bicep' = {
   ]
 }
 
-// ==================== MODEL GATEWAY (optional spoke) ====================
+// ==================== MODEL GATEWAY (spoke) ====================
 
 /*
-  Optional enterprise model gateway. When enableModelGateway is true this deploys,
-  in a NEW spoke (10.3.0.0/16) peered only to the hub:
+  Enterprise model gateway (always deployed). In a NEW spoke (10.3.0.0/16) peered
+  only to the hub this deploys:
     - an APIM Standard v2 instance (inbound PE + outbound VNet integration),
     - a locked-down "provider" AI Foundry that actually hosts the model,
   then advertises APIM to the primary Foundry project as an ApiManagement
@@ -706,7 +711,7 @@ module hubToModelGatewayPeering 'modules/network/vnet-peering.bicep' = {
 }
 
 // Provider AI Foundry (the "real" model provider) — minimal, locked-down.
-module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = if (enableModelGateway) {
+module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = {
   name: 'provider-foundry-${uniqueSuffix}-deployment'
   params: {
     accountName: providerAccountName
@@ -749,7 +754,7 @@ module apimPrivateEndpoint 'modules/model-gateway/apim-private-endpoint.bicep' =
 }
 
 // Provider Foundry private endpoint + DNS in the gateway spoke (model gateway only).
-module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = if (enableModelGateway) {
+module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = {
   name: 'model-gateway-pe-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -763,7 +768,7 @@ module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private
 }
 
 // Grant APIM MI Cognitive Services User on the provider Foundry (backend MI auth).
-module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assignment.bicep' = if (enableModelGateway) {
+module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assignment.bicep' = {
   name: 'model-gateway-apim-rbac-${uniqueSuffix}-deployment'
   params: {
     providerAccountName: providerFoundry.outputs.accountName
@@ -772,7 +777,7 @@ module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assi
 }
 
 // APIM inference API + policy (inbound token validation, backend + MI auth).
-module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = if (enableModelGateway) {
+module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
@@ -787,7 +792,7 @@ module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = if (enableM
 }
 
 // Advertise APIM to the primary Foundry project as an ApiManagement connection.
-module apimConnection 'modules/model-gateway/apim-connection.bicep' = if (enableModelGateway) {
+module apimConnection 'modules/model-gateway/apim-connection.bicep' = {
   name: 'model-gateway-connection-${uniqueSuffix}-deployment'
   params: {
     aiFoundryName: aiAccount.outputs.accountName
@@ -810,8 +815,7 @@ module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTea
     apimName: apim.outputs.apimName
     foundryAccountName: aiAccount.outputs.accountName
     projectName: aiProject.outputs.projectName
-    agentName: teamsAgentName
-    botAppId: teamsBotAppId
+    botAppIds: teamsBotAppIds
     expectedTenantId: tenant().tenantId
   }
 }
@@ -894,19 +898,19 @@ output AZURE_AI_PROJECT_NAME string = aiProject.outputs.projectName
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
 
-@description('Whether to seed the second (model-gateway) agent.')
-output SEED_ENABLE_SECOND_AGENT bool = enableModelGateway
+@description('Whether to seed the second (model-gateway) agent. Always true — the model gateway is always deployed.')
+output SEED_ENABLE_SECOND_AGENT bool = true
 
 @description('Model reference for the second (model-gateway) agent.')
-output SEED_SECOND_AGENT_MODEL string = apimConnection.?outputs.agentModelReference ?? ''
+output SEED_SECOND_AGENT_MODEL string = apimConnection.outputs.agentModelReference
 
 // ---- Teams / M365 publish (consumed by the postdeploy hook) ----
 
 @description('Whether the Teams / M365 publish path was deployed (gates the postdeploy hook).')
 output SEED_ENABLE_TEAMS_PUBLISH bool = enableTeamsPublish
 
-@description('Name of the seeded agent to publish to Teams / M365.')
-output TEAMS_AGENT_NAME string = teamsAgentName
+@description('Comma-separated names of the seeded agents to publish to Teams / M365 (the postdeploy hook creates one bot per agent, endpoint /teams/<agentName>).')
+output TEAMS_PUBLISH_AGENT_NAMES string = join(teamsPublishAgentNames, ',')
 
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
 output TEAMS_YARP_FQDN string = aiDependencies.outputs.yarpWebAppFqdn
@@ -922,6 +926,9 @@ output TEAMS_TENANT_ID string = tenant().tenantId
 
 @description('Suggested Azure Bot Service resource name the postdeploy hook creates (stable per environment).')
 output TEAMS_BOT_NAME string = 'bot-${uniqueSuffix}'
+
+@description('Environment unique suffix, prefixed onto each published agent display name so entries are unambiguous per deployment in a shared tenant catalog (e.g. "<suffix>-teams-agent").')
+output TEAMS_NAME_PREFIX string = uniqueSuffix
 
 @description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id

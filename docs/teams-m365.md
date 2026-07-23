@@ -3,7 +3,12 @@
 > Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#optional-teams--m365-publish-inbound-path).
 
 The Teams / M365 publish path is **on by default** (`enableTeamsPublish=true`; set it
-`false` to opt out). It publishes the primary seeded agent (`hello-world-agent`) to
+`false` to opt out). It publishes **every seeded agent** (`hello-world-agent`,
+`gateway-model-agent`, `teams-agent`) to Teams / M365, each with its own Azure Bot
+Service. A **single, path-routed APIM Teams API** listens on `/teams/{agentName}` and
+rewrites each request to the matching agent's activityProtocol endpoint, so one API
+backs any number of agents. Edit `teamsPublishAgentNames` to change which agents are
+published. This publishes to
 **Microsoft Teams and Microsoft 365 Copilot**, even
 though the Foundry endpoint has public network access disabled. This follows the
 Learn article
@@ -16,8 +21,8 @@ with the corporate-firewall specifics from
 The **Azure Bot Service is only a registration**. It doesn't listen for or process any
 traffic. It holds the bot identity (`msaAppId`) and a **messaging endpoint**, and it
 connects **bot channels** — of which **Microsoft Teams** is the one we use — to that
-endpoint. In this template the messaging endpoint points at the **YARP App Service**
-(`https://<yarp-fqdn>/teams`). Microsoft's public **Bot Connector** reads the
+endpoint. In this template each agent's messaging endpoint points at the **YARP App Service**
+(`https://<yarp-fqdn>/teams/<agentName>`). Microsoft's public **Bot Connector** reads the
 registration to learn which endpoint a channel should deliver to, then POSTs activities
 straight there. So the request path is **Teams → Bot Connector → YARP**; the Bot Service
 resource sits off to the side as configuration, never in the data path.
@@ -30,12 +35,12 @@ which forwards inward:
 
 ```mermaid
 flowchart LR
-    reg["Azure Bot Service<br/>(registration only)<br/>msaAppId · channels: Teams<br/>messaging endpoint = YARP FQDN + /teams"]
+    reg["Azure Bot Service (one per agent)<br/>(registration only)<br/>msaAppId · channels: Teams<br/>messaging endpoint = YARP FQDN + /teams/&lt;agentName&gt;"]
     T["Teams / M365 Copilot"] --> CONN["Bot Connector / Channel Adapter<br/>(Microsoft, public)"]
     reg -. "points the Teams channel<br/>at your endpoint" .-> CONN
     CONN -->|"POST activities<br/>from Teams IP ranges<br/>52.112.0.0/14, 52.122.0.0/15"| YARP["YARP App Service<br/>PUBLIC · managed TLS<br/>IP-restricted · VNet-integrated out"]
-    YARP -->|private endpoint| APIM["APIM Teams API<br/>validate-jwt"]
-    APIM -->|"set-backend + rewrite-uri<br/>via firewall"| FDRY["Foundry agent<br/>activityProtocol endpoint<br/>(private endpoint)"]
+    YARP -->|private endpoint| APIM["APIM Teams API<br/>/teams/{agentName}<br/>validate-jwt"]
+    APIM -->|"set-backend + rewrite-uri<br/>per-agent via firewall"| FDRY["Foundry agent<br/>activityProtocol endpoint<br/>(private endpoint)"]
     FDRY -.->|reply over MS backbone| T
 ```
 
@@ -83,25 +88,32 @@ activityProtocol endpoint.
 
 ### Hook-driven publish
 
-Steps 2–4 need values that only exist **after** the agent is seeded (the agent
-identity `principal_id` = the bot Microsoft App ID), so publishing is driven by the
+Steps 2–4 need values that only exist **after** the agents are seeded (each agent
+identity `principal_id` = that bot's Microsoft App ID), so publishing is driven by the
 azd **postdeploy** hook ([`hooks/postdeploy.ps1`](../hooks/postdeploy.ps1)) rather than
-Bicep. **Strict boundary:** the private VM only ever calls Foundry REST APIs; every
+Bicep. The hook **loops over `TEAMS_PUBLISH_AGENT_NAMES`**, publishing each agent with
+its own bot. **Strict boundary:** the private VM only ever calls Foundry REST APIs; every
 ARM / Bicep / APIM control-plane action runs host-side, outside the VNet.
+
+Per agent:
 
 1. **Get identity** *(on the VM — Foundry REST)* — runs
    [`scripts/publish-teams.ps1`](../scripts/publish-teams.ps1) on the private VM (via
    `az vm run-command`) to read `instance_identity.principal_id`.
 2. **Create the Azure Bot Service registration** *(host-side)* — `az deployment group create` of
    [`hooks/bot-service.bicep`](../hooks/bot-service.bicep) (azurebot, PNA disabled,
-   single-tenant, **Teams channel**; messaging endpoint = YARP public FQDN + `/teams`).
-   This is registration/config only — it points the Teams channel at YARP; it does not
-   receive traffic itself.
-3. **Pin the APIM `validate-jwt` audience** *(host-side)* to the bot App ID
-   (best-effort; issuer validation + IP restriction stay active if it fails).
+   single-tenant, **Teams channel**; name `<TEAMS_BOT_NAME>-<agentName>`, messaging
+   endpoint = YARP public FQDN + `/teams/<agentName>`). This is registration/config only —
+   it points the Teams channel at YARP; it does not receive traffic itself.
 4. **Publish** *(on the VM — Foundry REST)* — the VM script enables the `activity`
    protocol + `BotServiceRbac` scheme (keeping `responses` + `Entra`), then calls the
    Microsoft 365 publish API.
+
+Then **once**, after every bot exists:
+
+3. **Set the APIM `validate-jwt` audience allowlist** *(host-side)* to the SET of all
+   published bot App IDs (best-effort; issuer validation + IP restriction stay active if
+   it fails).
 
 > **Publish needs a delegated *user* token (OBO), not the VM managed identity.**
 > Foundry's `microsoft365/publish` API performs an on-behalf-of exchange with the
@@ -119,13 +131,18 @@ Key parameters:
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | `enableTeamsPublish` | `true` | Master switch: Teams APIM API + public YARP flip + the postdeploy publish hook. Set `false` to opt out. |
-| `teamsAgentName` | `hello-world-agent` | Seeded agent to publish (its activityProtocol endpoint is the APIM backend). |
-| `teamsBotAppId` | `''` | Optional pre-known bot App ID for the APIM `validate-jwt` audience; empty = issuer-only at provision, pinned live by the hook. |
+| `teamsPublishAgentNames` | `['hello-world-agent','gateway-model-agent','teams-agent']` | Seeded agents to publish. Each gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
+| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by the hook once all agents are seeded. |
 
 Optional publish metadata is read from env by the hook (`azd env set`):
-`TEAMS_BOT_DISPLAY_NAME`, `TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,
+`TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,
 `TEAMS_SHORT_DESCRIPTION`, `TEAMS_FULL_DESCRIPTION`, `TEAMS_DEVELOPER_NAME`,
 `TEAMS_DEVELOPER_WEBSITE_URL`, `TEAMS_PRIVACY_URL`, `TEAMS_TERMS_OF_USE_URL`.
+
+> Each published agent's display name (bot + M365 catalog title) is
+> `<uniqueSuffix>-<agentName>` (e.g. `jwm3-teams-agent`), prefixed with the environment's
+> unique resource suffix (`TEAMS_NAME_PREFIX`) so agents from different deployments stay
+> distinct in a shared tenant catalog instead of colliding on a bare name like `teams-agent`.
 
 > **Caller RBAC:** VM run-command invoke (e.g. *Virtual Machine Contributor*) +
 > *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.

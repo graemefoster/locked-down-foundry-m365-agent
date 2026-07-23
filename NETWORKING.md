@@ -29,7 +29,7 @@
 | Hub | `10.0.0.0/16` | Azure Firewall + DNS Private Resolver | n/a (shared services) |
 | Foundry spoke | `10.2.0.0/16` | Agent subnet + PE subnet + dev VM | **agent subnet only** |
 | App Service spoke | `10.1.0.0/16` | YARP reverse proxy (App Service) | unrestricted |
-| **Model-gateway spoke** (optional) | `10.3.0.0/16` | APIM Standard v2 + provider Foundry (only when `enableModelGateway=true`) | **both subnets routed via firewall** |
+| **Model-gateway spoke** | `10.3.0.0/16` | APIM Standard v2 + provider Foundry (always deployed) | **both subnets routed via firewall** |
 
 Foundry spoke subnets:
 
@@ -80,7 +80,7 @@ Defined in [`infra/modules/network/foundry-spoke-vnet.bicep`](./infra/modules/ne
 |------|------|-----|------------|-----|
 | 100 | `Allow-IntraSubnet-Outbound` | agent subnet | `*` | ACA data-plane node/pod comms. |
 | 110 | `Allow-PrivateEndpoints-Outbound` | `pe-subnet` (`10.2.1.0/24`) | 443 / TCP | Reach private endpoints (AI account, Search, Storage, Cosmos, Key Vault, ACR). HTTPS only, PE subnet only. |
-| 115 | `Allow-ModelGatewayApim-Outbound` *(model gateway only)* | model-gateway PE subnet (`10.3.1.0/24`) | 443 / TCP | Reach the **APIM model-gateway inbound private endpoint** (dynamic model discovery + inference). Only added when `enableModelGateway=true`. **Without this, `Deny-All-Outbound` blocks the agent → APIM PE and Foundry finds zero models.** |
+| 115 | `Allow-ModelGatewayApim-Outbound` | model-gateway PE subnet (`10.3.1.0/24`) | 443 / TCP | Reach the **APIM model-gateway inbound private endpoint** (dynamic model discovery + inference). **Without this, `Deny-All-Outbound` blocks the agent → APIM PE and Foundry finds zero models.** |
 | 120 | `Allow-DnsResolver-Udp-Outbound` | DNS resolver `/32` | 53 / UDP | DNS to the hub DNS Private Resolver over peering. |
 | 121 | `Allow-DnsResolver-Tcp-Outbound` | DNS resolver `/32` | 53 / TCP | DNS (TCP) to the hub resolver. |
 | 130 | `Allow-Firewall-Outbound` | firewall private IP `/32` | 443 / TCP | UDR next hop for internet-bound egress. HTTPS only, single host. |
@@ -225,8 +225,7 @@ control-plane surfaces plus the single A365 hostname.
 
 ## Optional: Model Gateway spoke (APIM + provider Foundry)
 
-Controlled by `enableModelGateway`, which is **on by default** (`azd` sets
-`ENABLE_MODEL_GATEWAY=true`); set it to `false` to skip this spoke. It adds a
+Always deployed. It adds a
 third spoke that fronts a "real" model provider Foundry behind Azure API
 Management, and advertises APIM to the primary Foundry project as a keyless
 `ApiManagement` connection. A second agent is seeded using the model
@@ -311,18 +310,18 @@ activities directly to YARP:
 Teams / M365 Copilot
   → Bot Connector / Channel Adapter (Microsoft, public)
         (delivers to the messaging endpoint the Azure Bot Service registration
-         declares for the Teams channel = https://<yarp-public-fqdn>/teams)
+         declares for the Teams channel = https://<yarp-public-fqdn>/teams/<agentName>)
   → YARP App Service   (PUBLIC; managed TLS; ipSecurityRestrictions = Microsoft Teams
                         published IP ranges [52.112.0.0/14, 52.122.0.0/15 + IPv6],
                         default Deny; VNet-integrated outbound)
   → firewall (App Service spoke is unrestricted; 443 egress via the wildcard
               APPLICATION rule — no new firewall rule needed for YARP → APIM)
-  → APIM inbound PE (10.3.1.x) → APIM Teams API
+  → APIM inbound PE (10.3.1.x) → APIM Teams API (path-routed: /teams/{agentName})
         validate-jwt (openid-config login.botframework.com,
-                      issuer https://api.botframework.com, [audience = bot App ID])
+                      issuer https://api.botframework.com, [audience ∈ published bot App IDs])
           ↳ APIM → login.botframework.com (HTTPS:443, via firewall APP rule) to fetch
             the Bot Framework IdP OIDC metadata + signing keys — REQUIRED or 401
-        rewrite-uri → /api/projects/<proj>/agents/<agent>/endpoint/protocols/activityProtocol
+        rewrite-uri → /api/projects/<proj>/agents/{agentName}/endpoint/protocols/activityProtocol
   → APIM outbound VNet integration → firewall (Net-ApimToFoundryPe allow)
   → primary Foundry account private endpoint (10.2.1.x) → agent activityProtocol
 ```

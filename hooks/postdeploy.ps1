@@ -23,22 +23,28 @@
   HTTP 502. This hook acquires that user token host-side and forwards it to the VM script
   (the VM's own managed identity works for the read/PATCH steps but NOT for publish).
 
-  Flow:
-    1. GetIdentity on the VM      -> agent principal_id (the bot Microsoft App ID)
-    2. Create the Azure Bot Service (host)  -> botServiceArmId
-    3. (best-effort) pin the APIM Teams API validate-jwt audience to the App ID
+  Flow (repeated per published agent, one Azure Bot Service each):
+    1. GetIdentity on the VM      -> agent principal_id (that agent's bot Microsoft App ID)
+    2. Create the agent's Azure Bot Service (host) -> botServiceArmId
+       (name '<TEAMS_BOT_NAME>-<agentName>', messaging endpoint https://<yarp>/teams/<agentName>)
     4. Publish on the VM under the caller's USER token (Step 3 PATCH + Step 4 publish API)
+  Then ONCE, after all bots exist:
+    3. (best-effort) set the single path-routed APIM Teams API validate-jwt audience
+       allowlist to the SET of every published agent's App ID.
 
   No-ops unless SEED_ENABLE_TEAMS_PUBLISH == true.
 
   Required env (Bicep outputs surfaced by azd; run `azd env refresh` if missing):
     AZURE_RESOURCE_GROUP, SEED_AGENTS_VM_NAME, AZURE_AI_PROJECT_ENDPOINT,
-    TEAMS_AGENT_NAME, TEAMS_YARP_FQDN, TEAMS_APIM_NAME, TEAMS_APIM_API_NAME,
-    TEAMS_TENANT_ID, TEAMS_BOT_NAME  (+ AZURE_SUBSCRIPTION_ID, an azd built-in)
-  Optional publish metadata env: TEAMS_BOT_DISPLAY_NAME, TEAMS_PUBLISH_SCOPE,
+    TEAMS_PUBLISH_AGENT_NAMES (CSV; falls back to legacy TEAMS_AGENT_NAME),
+    TEAMS_YARP_FQDN, TEAMS_APIM_NAME, TEAMS_APIM_API_NAME,
+    TEAMS_TENANT_ID, TEAMS_BOT_NAME, TEAMS_NAME_PREFIX  (+ AZURE_SUBSCRIPTION_ID, an azd built-in)
+  Optional publish metadata env: TEAMS_PUBLISH_SCOPE,
     TEAMS_APP_VERSION, TEAMS_SHORT_DESCRIPTION, TEAMS_FULL_DESCRIPTION,
     TEAMS_DEVELOPER_NAME, TEAMS_DEVELOPER_WEBSITE_URL, TEAMS_PRIVACY_URL,
     TEAMS_TERMS_OF_USE_URL, TEAMS_LOG_ANALYTICS_ID (workspace for bot diagnostics)
+  Each published agent's display name is '<TEAMS_NAME_PREFIX>-<agentName>' (the env's
+  unique suffix), so entries from different deployments stay distinct in the tenant catalog.
 
   Caller RBAC: VM run-command invoke (e.g. Virtual Machine Contributor) + Azure
   Bot Service Contributor (create the bot) + Foundry User on the project. The caller
@@ -69,10 +75,42 @@ function Get-OptionalEnv {
   return $value.Trim('"')
 }
 
+# ARM control-plane calls to APIM v2 entity sub-resources (e.g. .../policies/policy) can
+# intermittently return HTTP 502/503/504 (the ARM->APIM management-plane proxy), which is why
+# a re-run of this hook occasionally failed the audience pin. Retry those transient failures
+# with backoff. Returns a result object: .Success (bool) + .Output (string lines, stderr
+# ErrorRecords filtered out so a success-with-warning still parses cleanly).
+function Invoke-AzRestWithRetry {
+  param([string[]]$AzArgs, [int]$MaxAttempts = 5)
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $out = az @AzArgs 2>&1
+    if ($LASTEXITCODE -eq 0) {
+      return [pscustomobject]@{ Success = $true; Output = @($out | Where-Object { $_ -is [string] }) }
+    }
+    $joined = ($out | ForEach-Object { "$_" }) -join ' '
+    $transient = $joined -match 'Bad Gateway|Gateway Timeout|Service Unavailable|\b50[234]\b'
+    if ($transient -and $attempt -lt $MaxAttempts) {
+      $wait = [math]::Min(30, [math]::Pow(2, $attempt))
+      Write-Host "[postdeploy] APIM control-plane call returned a transient error (attempt $attempt/$MaxAttempts) - retrying in ${wait}s..."
+      Start-Sleep -Seconds $wait
+      continue
+    }
+    return [pscustomobject]@{ Success = $false; Output = @($out | ForEach-Object { "$_" }) }
+  }
+}
+
 $resourceGroup   = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
 $vmName          = Get-RequiredEnv 'SEED_AGENTS_VM_NAME'
 $projectEndpoint = Get-RequiredEnv 'AZURE_AI_PROJECT_ENDPOINT'
-$agentName       = Get-RequiredEnv 'TEAMS_AGENT_NAME'
+$agentNamesCsv   = Get-OptionalEnv 'TEAMS_PUBLISH_AGENT_NAMES'
+if ([string]::IsNullOrWhiteSpace($agentNamesCsv)) {
+  # Back-compat: fall back to the legacy single-agent output.
+  $agentNamesCsv = Get-RequiredEnv 'TEAMS_AGENT_NAME'
+}
+$agentNames = @($agentNamesCsv.Trim('"').Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if ($agentNames.Count -eq 0) {
+  throw '[postdeploy] No agents to publish (TEAMS_PUBLISH_AGENT_NAMES / TEAMS_AGENT_NAME are empty).'
+}
 $yarpFqdn        = Get-RequiredEnv 'TEAMS_YARP_FQDN'
 $apimName        = Get-RequiredEnv 'TEAMS_APIM_NAME'
 $apimApiName     = Get-RequiredEnv 'TEAMS_APIM_API_NAME'
@@ -85,7 +123,7 @@ if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
   $subscriptionId = (az account show --query id -o tsv)
 }
 
-$displayName     = Get-OptionalEnv 'TEAMS_BOT_DISPLAY_NAME' $agentName
+$namePrefix      = Get-OptionalEnv 'TEAMS_NAME_PREFIX'
 $publishScope    = Get-OptionalEnv 'TEAMS_PUBLISH_SCOPE' 'Shared'
 $appVersion      = Get-OptionalEnv 'TEAMS_APP_VERSION' '1.0.0'
 $shortDesc       = Get-OptionalEnv 'TEAMS_SHORT_DESCRIPTION' 'Foundry M365 agent'
@@ -95,9 +133,18 @@ $developerUrl    = Get-OptionalEnv 'TEAMS_DEVELOPER_WEBSITE_URL' 'https://azure.
 $privacyUrl      = Get-OptionalEnv 'TEAMS_PRIVACY_URL' 'https://privacy.microsoft.com'
 $termsUrl        = Get-OptionalEnv 'TEAMS_TERMS_OF_USE_URL' 'https://www.microsoft.com/legal/terms-of-use'
 
-# In this topology the bot messaging endpoint is the PUBLIC YARP proxy + '/teams',
-# which forwards to APIM -> the agent activityProtocol private endpoint.
-$botEndpoint = "https://$yarpFqdn/teams"
+# The published display name (bot + M365 catalog title) is prefixed with the environment's
+# unique suffix so entries from different deployments are unambiguous in a shared tenant
+# catalog (e.g. "<suffix>-teams-agent"). Empty prefix falls back to the bare agent name.
+function Get-DisplayName {
+  param([string]$AgentName)
+  if ([string]::IsNullOrWhiteSpace($namePrefix)) { return $AgentName }
+  return "$namePrefix-$AgentName"
+}
+
+# In this topology each agent's bot messaging endpoint is the PUBLIC YARP proxy at
+# '/teams/<agentName>', which forwards to the single path-routed APIM Teams API ->
+# that agent's activityProtocol private endpoint (computed per agent below).
 
 $repoRoot      = Split-Path $PSScriptRoot -Parent
 $publishScript = Join-Path $repoRoot 'scripts/publish-teams.ps1'
@@ -133,90 +180,13 @@ function Invoke-OnVm {
 Write-Host '[postdeploy] Registering Microsoft.BotService resource provider (idempotent)...'
 az provider register --namespace Microsoft.BotService --only-show-errors | Out-Null
 
-# --- Step 1: get the agent identity (on the VM) ---
-Write-Host "[postdeploy] Step 1: reading agent '$agentName' identity on VM '$vmName'..."
-$identityOut = Invoke-OnVm -ScriptParameters @(
-  'Mode=GetIdentity',
-  "FoundryProjectEndpoint=$projectEndpoint",
-  "AgentName=$agentName"
-)
-Write-Host '----- publish-teams (GetIdentity) output -----'
-Write-Host $identityOut
-Write-Host '----------------------------------------------'
-if ($identityOut -notmatch '\[publish-teams\] Done\.') {
-  throw '[postdeploy] GetIdentity did not complete successfully. See VM output above.'
-}
-$principalId = ([regex]'PRINCIPAL_ID=([0-9a-fA-F-]{36})').Match($identityOut).Groups[1].Value
-if ([string]::IsNullOrWhiteSpace($principalId)) {
-  throw '[postdeploy] Could not parse the agent principal_id from the VM output.'
-}
-Write-Host "[postdeploy] Agent principal_id (bot App ID): $principalId"
-
-# --- Step 2: create the Azure Bot Service (host-side ARM) ---
-Write-Host "[postdeploy] Step 2: creating Azure Bot Service '$botName' (endpoint $botEndpoint)..."
-$botArmId = az deployment group create `
-  --resource-group $resourceGroup `
-  --template-file $botTemplate `
-  --parameters `
-    botName=$botName `
-    displayName="$displayName" `
-    msaAppId=$principalId `
-    tenantId=$tenantId `
-    endpoint=$botEndpoint `
-    logAnalyticsWorkspaceId=$logAnalyticsId `
-  --query 'properties.outputs.botServiceArmId.value' -o tsv
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botArmId)) {
-  throw "[postdeploy] Bot Service deployment failed (exit $LASTEXITCODE)."
-}
-Write-Host "[postdeploy] Bot Service ARM ID: $botArmId"
-
-# --- Step 3 (best-effort): pin the APIM validate-jwt audience to the bot App ID ---
-# The APIM Teams API ships with issuer-only validation (botAppId unknown at provision time).
-# Now that we know the App ID, tighten the policy to also validate the audience. Best-effort:
-# a failure here does NOT block publishing (issuer validation + IP restriction remain active).
-try {
-  Write-Host '[postdeploy] Pinning APIM validate-jwt audience to the bot App ID...'
-  $policyUrl = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.ApiManagement/service/$apimName/apis/$apimApiName/policies/policy?api-version=2024-05-01"
-  # Read the RAW policy XML. `-o tsv` on a multi-line value makes PowerShell capture
-  # stdout as a string ARRAY, so re-join it into a single string - otherwise the PUT
-  # body serialises `value` as a JSON array and APIM rejects it ("Data at the root
-  # level is invalid. Line 1, position 1").
-  $currentLines = az rest --method get --url "$policyUrl&format=rawxml" --query 'properties.value' -o tsv
-  $current = ($currentLines -join "`n")
-  if (-not [string]::IsNullOrWhiteSpace($current) -and $current -match '</issuers>') {
-    if ($current -match [regex]::Escape($principalId)) {
-      Write-Host '[postdeploy] APIM audience already pinned - skipping.'
-    }
-    else {
-      $audiences = "<audiences><audience>$principalId</audience></audiences>"
-      # validate-jwt requires child order openid-config -> audiences -> issuers ->
-      # required-claims, so insert BEFORE <issuers> (not after </issuers>).
-      $updated = $current -replace '<issuers>', "$audiences<issuers>"
-      $bodyObj = @{ properties = @{ format = 'rawxml'; value = $updated } } | ConvertTo-Json -Depth 10 -Compress
-      $tmp = New-TemporaryFile
-      Set-Content -Path $tmp -Value $bodyObj -Encoding utf8
-      az rest --method put --url $policyUrl --headers 'Content-Type=application/json' --body "@$tmp" --only-show-errors | Out-Null
-      Remove-Item $tmp -Force
-      if ($LASTEXITCODE -eq 0) { Write-Host '[postdeploy] APIM audience pinned.' }
-      else { Write-Warning '[postdeploy] APIM audience pin PUT returned non-zero; leaving issuer-only validation.' }
-    }
-  }
-  else {
-    Write-Warning '[postdeploy] Could not read the current APIM policy; leaving issuer-only validation.'
-  }
-}
-catch {
-  Write-Warning "[postdeploy] APIM audience pin failed (non-fatal): $($_.Exception.Message)"
-}
-
-# --- Acquire a USER (delegated) token for the publish call ---
-# The Foundry Microsoft 365 publish orchestration performs an on-behalf-of (OBO) exchange
-# with the CALLER's token to submit the app to the M365 catalog. A managed-identity /
-# service-principal token has no user context to exchange, so the publish step fails
-# server-side with a bare HTTP 502 (Step 3 PATCH, which does not OBO, still succeeds under
-# MSI). It MUST be a delegated user token, so acquire one here on the azd host (a user) and
-# pass it to the VM script, which uses it instead of the VM's IMDS managed-identity token.
-Write-Host '[postdeploy] Acquiring a user access token for the publish call (aud https://ai.azure.com)...'
+# --- Acquire a USER (delegated) token (used by every publish-teams call on the VM) ---
+# publish-teams.ps1 requires a delegated USER token. The Microsoft 365 publish step (Step 4)
+# performs an on-behalf-of (OBO) exchange with the caller's token to submit the app to the
+# M365 catalog; an app-only / managed-identity token has no user context and fails
+# server-side with a bare HTTP 502. Acquire it here on the azd host (a user) and forward it
+# to the VM script for BOTH the GetIdentity read and the publish.
+Write-Host '[postdeploy] Acquiring a user access token (aud https://ai.azure.com)...'
 $publishToken = az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($publishToken)) {
   throw "[postdeploy] Failed to acquire an access token. Run 'az login' as a user (not a service principal)."
@@ -239,30 +209,147 @@ catch {
   Write-Warning "[postdeploy] Could not decode the access token to verify it is a user token: $($_.Exception.Message)"
 }
 
-# --- Steps 3+4: enable activity protocol + publish (on the VM) ---
-Write-Host "[postdeploy] Steps 3+4: publishing agent '$agentName' to Teams / M365 (scope=$publishScope)..."
-$publishOut = Invoke-OnVm -ScriptParameters @(
-  'Mode=Publish',
-  "FoundryProjectEndpoint=$projectEndpoint",
-  "AgentName=$agentName",
-  "BotServiceArmId=$botArmId",
-  "AccessToken=$publishToken",
-  "DisplayName=$displayName",
-  "PublishScope=$publishScope",
-  "AppVersion=$appVersion",
-  "ShortDescription=$shortDesc",
-  "FullDescription=$fullDesc",
-  "DeveloperName=$developerName",
-  "DeveloperWebsiteUrl=$developerUrl",
-  "PrivacyUrl=$privacyUrl",
-  "TermsOfUseUrl=$termsUrl"
-)
-Write-Host '----- publish-teams (Publish) output -----'
-Write-Host $publishOut
-Write-Host '------------------------------------------'
-if ($publishOut -notmatch '\[publish-teams\] Done\.') {
-  throw '[postdeploy] Agent publish did not complete successfully. See VM output above.'
+# =====================================================================================
+# Phase A: per agent, read its identity and create its Azure Bot Service (host-side ARM).
+# Collect each agent's App ID so we can build the APIM audience allowlist in one shot.
+# =====================================================================================
+$published = @()   # { Name; PrincipalId; BotArmId; BotName }
+
+foreach ($agentName in $agentNames) {
+  $agentBotName = "$botName-$agentName"
+  $botEndpoint  = "https://$yarpFqdn/teams/$agentName"
+  $displayName  = Get-DisplayName $agentName
+
+  # --- Step 1: get the agent identity (on the VM) ---
+  Write-Host "[postdeploy] ($agentName) Step 1: reading agent identity on VM '$vmName'..."
+  $identityOut = Invoke-OnVm -ScriptParameters @(
+    'Mode=GetIdentity',
+    "FoundryProjectEndpoint=$projectEndpoint",
+    "AgentName=$agentName",
+    "AccessToken=$publishToken"
+  )
+  Write-Host "----- publish-teams (GetIdentity: $agentName) output -----"
+  Write-Host $identityOut
+  Write-Host '----------------------------------------------'
+  if ($identityOut -notmatch '\[publish-teams\] Done\.') {
+    throw "[postdeploy] GetIdentity did not complete successfully for '$agentName'. See VM output above."
+  }
+  $principalId = ([regex]'PRINCIPAL_ID=([0-9a-fA-F-]{36})').Match($identityOut).Groups[1].Value
+  if ([string]::IsNullOrWhiteSpace($principalId)) {
+    throw "[postdeploy] Could not parse the agent principal_id for '$agentName' from the VM output."
+  }
+  Write-Host "[postdeploy] ($agentName) principal_id (bot App ID): $principalId"
+
+  # --- Step 2: create the agent's Azure Bot Service (host-side ARM) ---
+  Write-Host "[postdeploy] ($agentName) Step 2: creating Azure Bot Service '$agentBotName' (endpoint $botEndpoint)..."
+  $botArmId = az deployment group create `
+    --resource-group $resourceGroup `
+    --name "bot-$agentName" `
+    --template-file $botTemplate `
+    --parameters `
+      botName=$agentBotName `
+      displayName="$displayName" `
+      msaAppId=$principalId `
+      tenantId=$tenantId `
+      endpoint=$botEndpoint `
+      logAnalyticsWorkspaceId=$logAnalyticsId `
+    --query 'properties.outputs.botServiceArmId.value' -o tsv
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botArmId)) {
+    throw "[postdeploy] Bot Service deployment failed for '$agentName' (exit $LASTEXITCODE)."
+  }
+  Write-Host "[postdeploy] ($agentName) Bot Service ARM ID: $botArmId"
+
+  $published += [pscustomobject]@{ Name = $agentName; PrincipalId = $principalId; BotArmId = $botArmId; BotName = $agentBotName }
 }
 
-Write-Host "[postdeploy] Teams / M365 publish complete. Bot: $botName, scope: $publishScope."
-Write-Host '[postdeploy] Find the agent in the Teams / M365 Copilot store (Shared -> "Your agents"; Tenant -> "Built by your org" after admin approval).'
+# =====================================================================================
+# Phase B (best-effort): set the single path-routed APIM Teams API validate-jwt audience
+# allowlist to the SET of every published agent's App ID. The API ships with issuer-only
+# validation (App IDs unknown at provision time). A failure here does NOT block publishing
+# (issuer validation + IP restriction remain active).
+# =====================================================================================
+try {
+  $appIds = @($published | ForEach-Object { $_.PrincipalId } | Sort-Object -Unique)
+  Write-Host "[postdeploy] Setting APIM validate-jwt audience allowlist to $($appIds.Count) bot App ID(s)..."
+  $policyUrl = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.ApiManagement/service/$apimName/apis/$apimApiName/policies/policy?api-version=2024-05-01"
+  # Read the RAW policy XML. `-o tsv` on a multi-line value makes PowerShell capture
+  # stdout as a string ARRAY, so re-join it into a single string - otherwise the PUT
+  # body serialises `value` as a JSON array and APIM rejects it ("Data at the root
+  # level is invalid. Line 1, position 1"). Retry transient 5xx from the ARM->APIM proxy.
+  $get = Invoke-AzRestWithRetry -AzArgs @(
+    'rest', '--method', 'get', '--url', "$policyUrl&format=rawxml", '--query', 'properties.value', '-o', 'tsv'
+  )
+  $current = if ($get.Success) { ($get.Output -join "`n") } else { '' }
+  if (-not $get.Success) {
+    Write-Warning '[postdeploy] Could not read the current APIM policy after retries (transient control-plane errors); leaving issuer-only validation.'
+  }
+  elseif (-not [string]::IsNullOrWhiteSpace($current) -and $current -match '</issuers>') {
+    $audienceEntries = ($appIds | ForEach-Object { "<audience>$_</audience>" }) -join ''
+    $audiences = "<audiences>$audienceEntries</audiences>"
+    # REPLACE any existing <audiences> block wholesale - prepending a second block yields
+    # invalid XML (two <audiences> elements) and APIM rejects the PUT. Otherwise (issuer-only
+    # policy) insert before <issuers>. validate-jwt requires child order
+    # openid-config -> audiences -> issuers -> required-claims.
+    if ($current -match '(?s)<audiences>.*?</audiences>') {
+      $updated = $current -replace '(?s)<audiences>.*?</audiences>', $audiences
+    }
+    else {
+      $updated = $current -replace '<issuers>', "$audiences<issuers>"
+    }
+    if ($updated -eq $current) {
+      Write-Host '[postdeploy] APIM audience allowlist already up to date - skipping.'
+    }
+    else {
+      $bodyObj = @{ properties = @{ format = 'rawxml'; value = $updated } } | ConvertTo-Json -Depth 10 -Compress
+      $tmp = New-TemporaryFile
+      Set-Content -Path $tmp -Value $bodyObj -Encoding utf8
+      $put = Invoke-AzRestWithRetry -AzArgs @(
+        'rest', '--method', 'put', '--url', $policyUrl, '--headers', 'Content-Type=application/json', '--body', "@$tmp", '--only-show-errors'
+      )
+      Remove-Item $tmp -Force
+      if ($put.Success) { Write-Host "[postdeploy] APIM audience allowlist set to: $($appIds -join ', ')." }
+      else { Write-Warning '[postdeploy] APIM audience allowlist PUT failed after retries (transient control-plane 5xx). The validate-jwt audiences are NOT updated - re-run `azd hooks run postdeploy` to complete the pin.' }
+    }
+  }
+  else {
+    Write-Warning '[postdeploy] Current APIM policy did not contain the expected <issuers> element; leaving issuer-only validation.'
+  }
+}
+catch {
+  Write-Warning "[postdeploy] APIM audience allowlist update failed (non-fatal): $($_.Exception.Message)"
+}
+
+# =====================================================================================
+# Phase C: per agent, enable activity protocol + publish to Teams / M365 (on the VM).
+# =====================================================================================
+foreach ($p in $published) {
+  $agentName   = $p.Name
+  $displayName = Get-DisplayName $agentName
+  Write-Host "[postdeploy] ($agentName) Steps 3+4: publishing to Teams / M365 (scope=$publishScope)..."
+  $publishOut = Invoke-OnVm -ScriptParameters @(
+    'Mode=Publish',
+    "FoundryProjectEndpoint=$projectEndpoint",
+    "AgentName=$agentName",
+    "BotServiceArmId=$($p.BotArmId)",
+    "AccessToken=$publishToken",
+    "DisplayName=$displayName",
+    "PublishScope=$publishScope",
+    "AppVersion=$appVersion",
+    "ShortDescription=$shortDesc",
+    "FullDescription=$fullDesc",
+    "DeveloperName=$developerName",
+    "DeveloperWebsiteUrl=$developerUrl",
+    "PrivacyUrl=$privacyUrl",
+    "TermsOfUseUrl=$termsUrl"
+  )
+  Write-Host "----- publish-teams (Publish: $agentName) output -----"
+  Write-Host $publishOut
+  Write-Host '------------------------------------------'
+  if ($publishOut -notmatch '\[publish-teams\] Done\.') {
+    throw "[postdeploy] Agent publish did not complete successfully for '$agentName'. See VM output above."
+  }
+  Write-Host "[postdeploy] ($agentName) Teams / M365 publish complete. Bot: $($p.BotName)."
+}
+
+Write-Host "[postdeploy] All agents published (scope=$publishScope): $($published.Name -join ', ')."
+Write-Host '[postdeploy] Find the agents in the Teams / M365 Copilot store (Shared -> "Your agents"; Tenant -> "Built by your org" after admin approval).'
