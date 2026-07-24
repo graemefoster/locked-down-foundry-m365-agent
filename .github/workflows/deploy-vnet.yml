@@ -1,0 +1,53 @@
+name: Deploy (VNet self-hosted)
+
+# ---------------------------------------------------------------------------
+# Posture A gate: this is the ONLY workflow that runs on the self-hosted runner
+# inside the VNet. It is deliberately locked down so untrusted code can never
+# execute on the VM:
+#   * NO pull_request trigger  -> forks cannot queue a job here.
+#   * workflow_dispatch only    -> a maintainer must launch it by hand.
+#   * environment: vnet-deploy  -> add a REQUIRED REVIEWER + branch=main to this
+#                                  environment in repo Settings so the job pauses
+#                                  for manual approval before touching the VM.
+#   * repository guard          -> extra belt-and-braces against fork contexts.
+#
+# The runner is inside the VNet, so it reaches the PRIVATE Foundry endpoint
+# directly. No `az login` is needed: seed-agents.ps1 uses the VM's managed
+# identity via IMDS, exactly as the predeploy hook's run-command path does.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+    inputs:
+      foundryProjectEndpoint:
+        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
+        required: false
+        default: ""
+      modelDeploymentName:
+        description: "Model deployment name (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  seed-agents:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: vnet-deploy
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Seed Foundry agents (in-VNet, via VM managed identity)
+        shell: pwsh
+        env:
+          # Prefer the dispatch input, fall back to a repo/environment variable.
+          FOUNDRY_ENDPOINT: ${{ inputs.foundryProjectEndpoint != '' && inputs.foundryProjectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
+          MODEL_DEPLOYMENT: ${{ inputs.modelDeploymentName != '' && inputs.modelDeploymentName || vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT) -or [string]::IsNullOrWhiteSpace($env:MODEL_DEPLOYMENT)) {
+            throw "Set repo variables AZURE_AI_PROJECT_ENDPOINT and AZURE_AI_MODEL_DEPLOYMENT_NAME, or pass them as dispatch inputs."
+          }
+          ./scripts/seed-agents.ps1 `
+            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
+            -ModelDeploymentName    $env:MODEL_DEPLOYMENT
