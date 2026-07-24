@@ -970,6 +970,19 @@ module vmContributorRole 'modules/rbac/vm-contributor-role.bicep' = if (installG
   }
 }
 
+// Grant the VM MI Cognitive Services OpenAI User on the AI Services account so the nightly
+// eval workflow's AI-assisted evaluators can call the judge model's inference API. This is a
+// data-plane action neither Contributor (management-plane) nor Foundry User (Agents API)
+// covers — without it the judge calls fail with 401 PermissionDenied. See the module header
+// for the full rationale. Opt-in (runner only) and scoped to the account.
+module vmOpenAiUserRole 'modules/rbac/vm-openai-user-role.bicep' = if (installGithubRunner) {
+  name: 'vm-openai-user-role-${uniqueSuffix}'
+  params: {
+    accountName: aiAccount.outputs.accountName
+    vmPrincipalId: vmModule.outputs.vmPrincipalId
+  }
+}
+
 // Write the PAT into Key Vault via ARM (control plane) — only when a value is
 // supplied. Skipped (leaving any existing secret intact) when GITHUB_RUNNER_PAT
 // is empty, so the secret can be seeded once and the env var cleared afterward.
