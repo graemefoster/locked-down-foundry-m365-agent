@@ -48,6 +48,10 @@ param(
   # Log Analytics workspace resource ID for bot diagnostics. Optional.
   [Parameter(Mandatory = $false)] [string]$LogAnalyticsWorkspaceId = '',
   [Parameter(Mandatory = $false)] [string]$PublishScope = 'Shared',
+  # Delegated USER token used ONLY for the Microsoft 365 publish call (Step 4),
+  # which rejects an app-only / managed-identity token. When empty, the MI token
+  # is used for publish too (the app-only test path).
+  [Parameter(Mandatory = $false)] [string]$PublishAccessToken = '',
   [Parameter(Mandatory = $false)] [string]$AppVersion = '1.0.0',
   [Parameter(Mandatory = $false)] [string]$ShortDescription = 'Foundry M365 agent',
   [Parameter(Mandatory = $false)] [string]$FullDescription = 'A Foundry agent published to Microsoft 365 from a locked-down virtual network.',
@@ -93,6 +97,24 @@ try {
 }
 catch {
   Write-Warning "[publish-runner] Could not decode the access token: $($_.Exception.Message)"
+}
+
+# --- Select the token for the Microsoft 365 publish call (Step 4) ---
+# The publish API rejects app-only / MI tokens (HTTP 502), so prefer the delegated
+# USER token supplied via the device-code sign-in. When none is supplied, fall back
+# to the MI token (the app-only test path, which is expected to 502 at Step 4).
+$publishToken = if ([string]::IsNullOrWhiteSpace($PublishAccessToken)) { $token } else { $PublishAccessToken }
+if (-not [string]::IsNullOrWhiteSpace($PublishAccessToken)) {
+  try {
+    $pseg = $PublishAccessToken.Split('.')[1].Replace('-', '+').Replace('_', '/')
+    switch ($pseg.Length % 4) { 2 { $pseg += '==' } 3 { $pseg += '=' } }
+    $pclaims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($pseg)) | ConvertFrom-Json
+    Write-Host "[publish-runner] Publish token idtyp='$($pclaims.idtyp)' upn='$($pclaims.upn)$($pclaims.unique_name)' (delegated user token for the M365 publish)."
+  }
+  catch { Write-Warning "[publish-runner] Could not decode the publish token: $($_.Exception.Message)" }
+}
+else {
+  Write-Host '[publish-runner] No delegated user token supplied; using the app-only MI token for the publish call (expected to 502).'
 }
 
 foreach ($agentName in $agents) {
@@ -143,7 +165,7 @@ foreach ($agentName in $agents) {
     -FoundryProjectEndpoint $FoundryProjectEndpoint `
     -AgentName $agentName `
     -BotServiceArmId $botArmId `
-    -AccessToken $token `
+    -AccessToken $publishToken `
     -DisplayName $displayName `
     -PublishScope $PublishScope `
     -AppVersion $AppVersion `
