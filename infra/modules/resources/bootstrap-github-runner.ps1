@@ -50,6 +50,10 @@ $ErrorActionPreference = 'Stop'
 # and re-join on comma so config.cmd --labels always gets the intended comma-separated list.
 $RunnerLabels = ((@($RunnerLabels) -join ' ') -split '[,\s]+' | Where-Object { $_ }) -join ','
 
+# Set when we change the machine PATH after the runner service already exists, so we
+# can restart it below to pick up the new PATH (a running service caches its env block).
+$script:RunnerNeedsRestart = $false
+
 function Write-Log([string] $Message) {
   Write-Host "[bootstrap-runner] $((Get-Date).ToString('s')) $Message"
 }
@@ -80,17 +84,18 @@ Install-AzureCli
 
 # --- 0b. Ensure Git for Windows is installed (admin/SYSTEM context) -----------
 # The microsoft/ai-agent-evals action (nightly eval workflow) runs its steps with
-# `shell: bash`, which on Windows resolves to Git Bash. Windows Server ships no
-# Git, so install Git for Windows to the default location the runner probes for
-# bash.exe (%ProgramFiles%\Git\bin\bash.exe). Like Install-AzureCli this runs as
-# SYSTEM (a workflow step running as NETWORK SERVICE could not) and is idempotent,
-# and is placed BEFORE the runner idempotency check so it also lands on VMs where
-# the runner is already installed. (actions/checkout still uses its API-tarball
+# `shell: bash`, which on Windows resolves to Git Bash (bash.exe). Windows Server ships
+# no Git, so install Git for Windows. The default Git install only puts `Git\cmd` (git.exe)
+# on PATH — NOT `Git\bin` (bash.exe) — so the runner's `where bash` lookup fails with
+# "bash: command not found". Ensure-GitBashOnPath adds `Git\bin` to the machine PATH.
+# Both run as SYSTEM (a workflow step running as NETWORK SERVICE could not) and are
+# idempotent, and are placed BEFORE the runner idempotency check so they also land on
+# VMs where the runner is already installed. (actions/checkout still uses its API-tarball
 # fallback and does not require git; this is purely to provide bash for the action.)
 function Install-GitForWindows {
   $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
   if ((Get-Command git -ErrorAction SilentlyContinue) -or (Test-Path $gitBash)) {
-    Write-Log 'Git for Windows already installed - skipping.'
+    Write-Log 'Git for Windows already installed - skipping install.'
     return
   }
   Write-Log "Installing Git for Windows $GitVersion..."
@@ -102,7 +107,25 @@ function Install-GitForWindows {
   if ($p.ExitCode -ne 0) { throw "Git for Windows install failed with exit code $($p.ExitCode)." }
   Write-Log 'Git for Windows installed.'
 }
+function Ensure-GitBashOnPath {
+  $gitBin = Join-Path $env:ProgramFiles 'Git\bin'
+  if (-not (Test-Path (Join-Path $gitBin 'bash.exe'))) {
+    Write-Log "bash.exe not found under '$gitBin' - skipping PATH update."
+    return
+  }
+  $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+  $parts = @($machinePath -split ';' | Where-Object { $_ })
+  if ($parts -contains $gitBin) {
+    Write-Log "'$gitBin' already on the machine PATH."
+    return
+  }
+  Write-Log "Adding '$gitBin' to the machine PATH (needed for shell: bash)..."
+  [Environment]::SetEnvironmentVariable('Path', ($machinePath.TrimEnd(';') + ';' + $gitBin), 'Machine')
+  if (($env:Path -split ';') -notcontains $gitBin) { $env:Path = $env:Path.TrimEnd(';') + ';' + $gitBin }
+  $script:RunnerNeedsRestart = $true
+}
 Install-GitForWindows
+Ensure-GitBashOnPath
 
 # --- 0c. Pre-seed Python into the runner tool cache (admin/SYSTEM context) -----
 # The nightly eval workflow uses actions/setup-python, whose install runs the Python
@@ -166,6 +189,10 @@ Install-PythonToolcache
 # --- 0d. Idempotency: skip if a runner service already exists ----------------
 $existingService = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue
 if ($existingService) {
+  if ($script:RunnerNeedsRestart) {
+    Write-Log "Restarting runner service '$($existingService.Name)' to pick up the updated PATH..."
+    Restart-Service -Name $existingService.Name -Force
+  }
   Write-Log "Runner service '$($existingService.Name)' already installed. Nothing to do."
   return
 }
