@@ -12,3 +12,10 @@ definition:
       server_label: testweathermcpserver
       server_url: https://mcp-qodk-asp.azurewebsites.net/
       project_connection_id: testweathermcpserver
+      # Auto-approve MCP tool calls. MCP tools default to require_approval "always",
+      # which pauses the run on an mcp_approval_request. The nightly eval samples the
+      # agent non-interactively (nothing answers the approval), so those turns end as a
+      # dangling tool-call with no final text -> the agents-category evaluators
+      # (intent_resolution, task_adherence) fail with "Response string cannot be empty".
+      # "never" lets the tool execute so the model produces a final answer to evaluate.
+      require_approval: "never"
