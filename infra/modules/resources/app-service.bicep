@@ -90,6 +90,18 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
           value: appInsights.properties.ConnectionString
         }
         {
+          name: 'ApplicationInsightsAgent_EXTENSION_VERSION'
+          value: '~3'
+        }
+        {
+          name: 'XDT_MicrosoftApplicationInsights_Mode'
+          value: 'recommended'
+        }
+        {
+          name: 'XDT_MicrosoftApplicationInsights_PreemptSdk'
+          value: '1'
+        }
+        {
           name: 'ReverseProxy__Clusters__cluster1__Destinations__destination1__Address'
           value: yarpReverseProxyAddress
         }
@@ -115,6 +127,10 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsights.properties.ConnectionString
+        }
+        {
+          name: 'ApplicationInsightsAgent_EXTENSION_VERSION'
+          value: '~3'
         }
         {
           name: 'ASPNETCORE_ENVIRONMENT'
