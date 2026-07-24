@@ -119,6 +119,20 @@ param vmAdminPassword string
 
 param vmAdminUsername string
 
+@description('''
+GitHub repo URL (https://github.com/owner/repo) to register a self-hosted Actions
+runner on the dev VM against. Leave EMPTY (default) to skip runner installation.
+When set, the VM installs a runner as a Windows service, reading a fine-grained PAT
+from Key Vault via its managed identity. See docs/github-runner.md.
+''')
+param githubRunnerRepoUrl string = ''
+
+@description('Name of the Key Vault secret holding the runner PAT (Administration: read & write). Seeded manually.')
+param githubRunnerPatSecretName string = 'gh-runner-pat'
+
+@description('Comma-separated labels applied to the self-hosted runner.')
+param githubRunnerLabels string = 'vnet,foundry-private'
+
 var projectName = toLower('${firstProjectName}${uniqueSuffix}')
 var cosmosDBName = toLower('${aiServices}${uniqueSuffix}cosmosdb')
 var aiSearchName = toLower('${aiServices}${uniqueSuffix}search')
@@ -875,6 +889,38 @@ module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
   }
   dependsOn: [
     addProjectCapabilityHost
+  ]
+}
+
+// ==================== SELF-HOSTED GITHUB ACTIONS RUNNER (opt-in) ====================
+
+// When githubRunnerRepoUrl is set, install a self-hosted runner on the dev VM so
+// complex, representative deployments can run INSIDE the VNet (reaching the private
+// Foundry endpoint directly) instead of being marshalled through `az vm run-command`.
+// The VM MI needs Key Vault Secrets User to read the runner PAT; the extension that
+// runs the bootstrap is sequenced AFTER that role assignment. See docs/github-runner.md.
+var installGithubRunner = !empty(githubRunnerRepoUrl)
+
+module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
+  name: 'vm-kv-secrets-role-${uniqueSuffix}'
+  params: {
+    keyVaultName: keyVault.outputs.keyVaultName
+    vmPrincipalId: vmModule.outputs.vmPrincipalId
+  }
+}
+
+module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (installGithubRunner) {
+  name: 'vm-runner-extension-${uniqueSuffix}'
+  params: {
+    vmName: vmModule.outputs.vmName
+    location: location
+    githubRunnerRepoUrl: githubRunnerRepoUrl
+    keyVaultName: keyVault.outputs.keyVaultName
+    githubRunnerPatSecretName: githubRunnerPatSecretName
+    githubRunnerLabels: githubRunnerLabels
+  }
+  dependsOn: [
+    vmKeyVaultSecretsRole
   ]
 }
 

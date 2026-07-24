@@ -1,0 +1,109 @@
+<#
+.SYNOPSIS
+  Bootstraps a self-hosted GitHub Actions runner on the locked-down dev VM.
+
+.DESCRIPTION
+  Runs ON the VM via a CustomScriptExtension at provision time (NOT via
+  az vm run-command, and it does NOT call the Foundry API — it is provisioning
+  glue, so it lives under infra/ next to the vm.bicep module that embeds it).
+
+  Flow (Posture A — persistent, non-ephemeral runner; the VM is trusted because
+  only gated, trusted workflows ever run on it):
+    1. Acquire a managed-identity token for Key Vault via IMDS (169.254.169.254).
+    2. Read the fine-grained PAT from Key Vault over the private data plane.
+    3. Mint a short-lived GitHub Actions registration token with that PAT.
+    4. Download + configure the runner and install it as a Windows service.
+
+  Idempotent: if the runner service is already installed it exits early, so the
+  extension can re-run on subsequent `azd provision` without re-registering.
+
+  Secrets: the PAT is only ever read from Key Vault in-memory on the VM. It is
+  never written to disk, the azd env, or the repo. The GitHub registration token
+  is short-lived (~1h) and single-use.
+
+.NOTES
+  Windows Server has no az CLI preinstalled, so this uses IMDS + REST directly,
+  mirroring scripts/seed-agents.ps1.
+#>
+[CmdletBinding()]
+param(
+  # e.g. https://github.com/owner/repo
+  [Parameter(Mandatory = $true)] [string] $RepoUrl,
+  # Key Vault (DNS) name, e.g. aiservicesxxxxkv
+  [Parameter(Mandatory = $true)] [string] $KeyVaultName,
+  # Name of the KV secret holding the fine-grained PAT (Administration: r/w)
+  [Parameter(Mandatory = $true)] [string] $PatSecretName,
+  # Comma-separated runner labels
+  [Parameter(Mandatory = $false)] [string] $RunnerLabels = 'vnet,foundry-private',
+  # Runner version to install (actions/runner release, no leading 'v')
+  [Parameter(Mandatory = $false)] [string] $RunnerVersion = '2.328.0',
+  [Parameter(Mandatory = $false)] [string] $InstallDir = 'C:\actions-runner'
+)
+
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+function Write-Log([string] $Message) {
+  Write-Host "[bootstrap-runner] $((Get-Date).ToString('s')) $Message"
+}
+
+# --- 0. Idempotency: skip if a runner service already exists -----------------
+$existingService = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue
+if ($existingService) {
+  Write-Log "Runner service '$($existingService.Name)' already installed. Nothing to do."
+  return
+}
+
+# --- 1. Managed-identity token for Key Vault (IMDS) --------------------------
+function Get-ImdsToken([string] $Resource) {
+  $uri = "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=$([uri]::EscapeDataString($Resource))"
+  $resp = Invoke-RestMethod -Uri $uri -Headers @{ Metadata = 'true' } -Method Get
+  return $resp.access_token
+}
+
+Write-Log 'Acquiring managed-identity token for Key Vault...'
+$kvToken = Get-ImdsToken 'https://vault.azure.net'
+
+# --- 2. Read the PAT from Key Vault (private data plane) ----------------------
+Write-Log "Reading PAT secret '$PatSecretName' from Key Vault '$KeyVaultName'..."
+$secretUri = "https://$KeyVaultName.vault.azure.net/secrets/$PatSecretName?api-version=7.4"
+$pat = (Invoke-RestMethod -Uri $secretUri -Headers @{ Authorization = "Bearer $kvToken" } -Method Get).value
+if ([string]::IsNullOrWhiteSpace($pat)) {
+  throw "Key Vault secret '$PatSecretName' was empty. Seed it with: az keyvault secret set --vault-name $KeyVaultName --name $PatSecretName --value <PAT>"
+}
+
+# --- 3. Mint a GitHub Actions registration token ------------------------------
+# Derive owner/repo from the repo URL and call the repo-scoped runner endpoint.
+$path = ([uri]$RepoUrl).AbsolutePath.Trim('/')   # "owner/repo"
+$ghHeaders = @{
+  Authorization          = "Bearer $pat"
+  Accept                 = 'application/vnd.github+json'
+  'X-GitHub-Api-Version' = '2022-11-28'
+  'User-Agent'           = 'locked-down-foundry-runner-bootstrap'
+}
+Write-Log "Requesting runner registration token for '$path'..."
+$regToken = (Invoke-RestMethod -Uri "https://api.github.com/repos/$path/actions/runners/registration-token" `
+    -Headers $ghHeaders -Method Post).token
+
+# --- 4. Download + configure + install as a service ---------------------------
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+Set-Location $InstallDir
+
+$zip = Join-Path $InstallDir "actions-runner-win-x64-$RunnerVersion.zip"
+if (-not (Test-Path $zip)) {
+  $url = "https://github.com/actions/runner/releases/download/v$RunnerVersion/actions-runner-win-x64-$RunnerVersion.zip"
+  Write-Log "Downloading runner $RunnerVersion..."
+  Invoke-WebRequest -Uri $url -OutFile $zip
+}
+Write-Log 'Extracting runner...'
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $InstallDir)
+
+$runnerName = "$env:COMPUTERNAME-vnet"
+Write-Log "Configuring runner '$runnerName' as a Windows service..."
+# --runasservice installs + starts the service; --replace makes re-runs safe.
+& "$InstallDir\config.cmd" --unattended --url $RepoUrl --token $regToken `
+  --name $runnerName --labels $RunnerLabels --runasservice --replace --work '_work'
+if ($LASTEXITCODE -ne 0) { throw "config.cmd failed with exit code $LASTEXITCODE" }
+
+Write-Log 'Runner installed and started as a service.'
