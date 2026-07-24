@@ -61,6 +61,23 @@ and the extension is sequenced **after** both that assignment and the PAT-secret
 3. **Repo Settings → Actions → General:** require approval for **all outside
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
+4. **Set the deploy-workflow repo variables** (repo Settings → Secrets and variables →
+   Actions → *Variables*) so `deploy-vnet.yml` knows what to seed — these mirror the azd
+   outputs of the target environment:
+
+   | Variable | Value | Source |
+   |---|---|---|
+   | `AZURE_AI_PROJECT_ENDPOINT` | e.g. `https://<aiservices>.services.ai.azure.com/api/projects/<project>` | `azd env get-value AZURE_AI_PROJECT_ENDPOINT` |
+   | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | e.g. `gpt-5.4` | `azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME` |
+
+   ```bash
+   gh variable set AZURE_AI_PROJECT_ENDPOINT --body "$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)"
+   gh variable set AZURE_AI_MODEL_DEPLOYMENT_NAME --body "$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+   ```
+
+   You can also override either per-run via the workflow's dispatch inputs; the inputs take
+   precedence over the variables.
+
 ## Enable it
 
 ```bash

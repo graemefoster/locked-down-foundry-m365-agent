@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Seed Foundry agents (in-VNet, via VM managed identity)
-        shell: pwsh
+        shell: powershell
         env:
           # Prefer the dispatch input, fall back to a repo/environment variable.
           FOUNDRY_ENDPOINT: ${{ inputs.foundryProjectEndpoint != '' && inputs.foundryProjectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}

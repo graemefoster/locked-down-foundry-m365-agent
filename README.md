@@ -69,6 +69,10 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
   Standard v2 (private), dynamic model discovery, and defense-in-depth auth.
   **[docs/model-gateway.md](./docs/model-gateway.md)** ·
   [deep dive](./apim-model-gateway.md).
+- **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
+  the dev VM so complex deployments run *inside the VNet*, reaching the private Foundry
+  endpoint directly instead of via `az vm run-command`. Opt in with
+  `GITHUB_RUNNER_REPO_URL`. **[docs/github-runner.md](./docs/github-runner.md)**.
 
 ## Documentation
 
@@ -79,6 +83,7 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 | [NETWORKING.md](./NETWORKING.md) | Rule-by-rule network lockdown: NSG, firewall, flow logs, validation. |
 | [docs/teams-m365.md](./docs/teams-m365.md) | Publish an agent to Teams / M365 Copilot (inbound path, hooks, JWT). |
 | [docs/model-gateway.md](./docs/model-gateway.md) · [apim-model-gateway.md](./apim-model-gateway.md) | Optional APIM model gateway overview + full walkthrough. |
+| [docs/github-runner.md](./docs/github-runner.md) | Optional in-VNet self-hosted GitHub Actions runner: security model, auth, setup. |
 
 ## References
 
