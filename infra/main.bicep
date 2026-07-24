@@ -919,6 +919,17 @@ module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if 
   }
 }
 
+// Grant the VM MI Contributor over the resource group so the runner (which runs AS the
+// VM MI) can do control-plane work for representative end-to-end deployments — e.g.
+// create the Azure Bot Service in the gated Teams / M365 publish workflow. Opt-in
+// (runner only) and scoped to the resource group to bound the blast radius.
+module vmContributorRole 'modules/rbac/vm-contributor-role.bicep' = if (installGithubRunner) {
+  name: 'vm-contributor-role-${uniqueSuffix}'
+  params: {
+    vmPrincipalId: vmModule.outputs.vmPrincipalId
+  }
+}
+
 // Write the PAT into Key Vault via ARM (control plane) — only when a value is
 // supplied. Skipped (leaving any existing secret intact) when GITHUB_RUNNER_PAT
 // is empty, so the secret can be seeded once and the env var cleared afterward.

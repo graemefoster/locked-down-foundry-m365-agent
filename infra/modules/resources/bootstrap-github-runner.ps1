@@ -47,7 +47,31 @@ function Write-Log([string] $Message) {
   Write-Host "[bootstrap-runner] $((Get-Date).ToString('s')) $Message"
 }
 
-# --- 0. Idempotency: skip if a runner service already exists -----------------
+# --- 0a. Ensure the Azure CLI is installed (admin/SYSTEM context) -------------
+# The runner service runs as a NON-admin account (NETWORK SERVICE) and cannot run
+# an MSI install from within a workflow step, so install az here where the
+# CustomScriptExtension runs as SYSTEM. This lets gated workflows do control-plane
+# work on the VM (e.g. create the Azure Bot Service for the Teams / M365 publish
+# flow) as the VM managed identity. Runs on every extension execution but is
+# idempotent (skips if az is already present). Placed BEFORE the runner
+# idempotency check so it also lands on VMs where the runner is already installed.
+function Install-AzureCli {
+  $azCmd = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
+  if ((Get-Command az -ErrorAction SilentlyContinue) -or (Test-Path $azCmd)) {
+    Write-Log 'Azure CLI already installed - skipping.'
+    return
+  }
+  Write-Log 'Installing Azure CLI (MSI)...'
+  $msi = Join-Path $env:TEMP 'azure-cli.msi'
+  Invoke-WebRequest -Uri 'https://aka.ms/installazurecliwindowsx64' -OutFile $msi -UseBasicParsing
+  $p = Start-Process 'msiexec.exe' -ArgumentList '/i', "`"$msi`"", '/qn', '/norestart' -Wait -PassThru
+  Remove-Item $msi -Force -ErrorAction SilentlyContinue
+  if ($p.ExitCode -ne 0) { throw "Azure CLI MSI install failed with exit code $($p.ExitCode)." }
+  Write-Log 'Azure CLI installed.'
+}
+Install-AzureCli
+
+# --- 0b. Idempotency: skip if a runner service already exists ----------------
 $existingService = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue
 if ($existingService) {
   Write-Log "Runner service '$($existingService.Name)' already installed. Nothing to do."

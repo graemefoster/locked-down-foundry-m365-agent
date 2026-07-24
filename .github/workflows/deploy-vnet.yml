@@ -12,8 +12,15 @@ name: Deploy (VNet self-hosted)
 #   * repository guard          -> extra belt-and-braces against fork contexts.
 #
 # The runner is inside the VNet, so it reaches the PRIVATE Foundry endpoint
-# directly. No `az login` is needed: seed-agents.ps1 uses the VM's managed
-# identity via IMDS, exactly as the predeploy hook's run-command path does.
+# directly. No `az login` is needed for seeding: seed-agents.ps1 uses the VM's
+# managed identity via IMDS, exactly as the predeploy hook's run-command path does.
+#
+# The OPTIONAL publish path (publishToTeams=true) additionally creates each agent's
+# Azure Bot Service and publishes it to Teams / M365, all AS THE VM MANAGED IDENTITY
+# (Contributor on the resource group, granted when the runner is installed). az is
+# preinstalled on the VM by the runner bootstrap. Note: the Microsoft 365 publish
+# step may require a delegated USER token; this path deliberately uses the app-only
+# MI token to confirm whether that is the case.
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -26,6 +33,11 @@ on:
         description: "Model deployment name (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
         required: false
         default: ""
+      publishToTeams:
+        description: "Also publish the seeded agent(s) to Teams / M365 (creates a Bot Service per agent)"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -51,3 +63,53 @@ jobs:
           ./scripts/seed-agents.ps1 `
             -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
             -ModelDeploymentName    $env:MODEL_DEPLOYMENT
+
+      # --- Optional: publish to Teams / M365 (as the VM managed identity) -------
+      - name: Ensure Azure CLI is on PATH
+        if: ${{ inputs.publishToTeams }}
+        shell: powershell
+        run: |
+          # az is installed by the runner bootstrap (SYSTEM context). The already-running
+          # runner service may hold a stale PATH, so surface az to later steps explicitly.
+          $azDir = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin'
+          if (Test-Path (Join-Path $azDir 'az.cmd')) {
+            Add-Content -Path $env:GITHUB_PATH -Value $azDir
+          } elseif (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+            throw "Azure CLI not found on the VM. Re-run 'azd provision' so the runner bootstrap installs it."
+          }
+
+      - name: Sign in with the VM managed identity
+        if: ${{ inputs.publishToTeams }}
+        shell: powershell
+        run: az login --identity --output none
+
+      - name: Publish agent(s) to Teams / M365 (in-VNet, via VM managed identity)
+        if: ${{ inputs.publishToTeams }}
+        shell: powershell
+        env:
+          FOUNDRY_ENDPOINT: ${{ inputs.foundryProjectEndpoint != '' && inputs.foundryProjectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          AGENT_NAMES:      ${{ vars.TEAMS_PUBLISH_AGENT_NAMES }}
+          YARP_FQDN:        ${{ vars.TEAMS_YARP_FQDN }}
+          TENANT_ID:        ${{ vars.TEAMS_TENANT_ID }}
+          BOT_NAME:         ${{ vars.TEAMS_BOT_NAME }}
+          NAME_PREFIX:      ${{ vars.TEAMS_NAME_PREFIX }}
+          LOG_ANALYTICS_ID: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+          PUBLISH_SCOPE:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
+        run: |
+          foreach ($v in 'FOUNDRY_ENDPOINT','RESOURCE_GROUP','AGENT_NAMES','YARP_FQDN','TENANT_ID','BOT_NAME') {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
+              throw "Publish requires repo variable '$v'. Set AZURE_RESOURCE_GROUP, TEAMS_PUBLISH_AGENT_NAMES, TEAMS_YARP_FQDN, TEAMS_TENANT_ID and TEAMS_BOT_NAME (from 'azd env get-values')."
+            }
+          }
+          $scope = if ([string]::IsNullOrWhiteSpace($env:PUBLISH_SCOPE)) { 'Shared' } else { $env:PUBLISH_SCOPE }
+          ./scripts/publish-teams-runner.ps1 `
+            -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
+            -ResourceGroup            $env:RESOURCE_GROUP `
+            -AgentNames               $env:AGENT_NAMES `
+            -YarpFqdn                 $env:YARP_FQDN `
+            -TenantId                 $env:TENANT_ID `
+            -BotName                  $env:BOT_NAME `
+            -NamePrefix               $env:NAME_PREFIX `
+            -LogAnalyticsWorkspaceId  $env:LOG_ANALYTICS_ID `
+            -PublishScope             $scope
