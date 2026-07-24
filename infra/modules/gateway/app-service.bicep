@@ -115,14 +115,29 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
   }
 }
 
+// User-assigned identity for the MCP web app. Used as a federated credential (MI-as-FIC) so
+// App Service built-in auth can act as the Entra app registration WITHOUT a client secret —
+// see builtin-auth.bicep + app-registration.bicep. The identity's clientId is surfaced to
+// EasyAuth via the magic OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID app setting below.
+resource mcpIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-mcp-${aspName}'
+  location: location
+}
+
 resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
   name: 'mcp-${aspName}'
   location: location
   kind: 'app,linux'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${mcpIdentity.id}': {}
+    }
+  }
   properties: {
     serverFarmId: aspTest.id
     siteConfig: {
-      linuxFxVersion: 'DOCKER|docker.io/graemefoster/my-mcp-function-webapp:0.7'
+      linuxFxVersion: 'DOCKER|docker.io/graemefoster/my-mcp-function-webapp:0.9'
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -135,6 +150,12 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
         {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
+        }
+        // Magic setting: tells App Service built-in auth to authenticate as the app
+        // registration using this managed identity as a federated credential (no secret).
+        {
+          name: 'OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID'
+          value: mcpIdentity.properties.clientId
         }
       ]
       publicNetworkAccess: 'Disabled'
@@ -182,3 +203,6 @@ output yarpWebAppFqdn string = webApp.properties.defaultHostName
 output yarpWebAppName string = webApp.name
 output mcpWebAppName string = mcpWebApp.name
 output mcpWebAppFqdn string = mcpWebApp.properties.defaultHostName
+// MI-as-FIC wiring for the MCP web app's built-in auth (see app-registration.bicep).
+output mcpWebAppIdentityPrincipalId string = mcpIdentity.properties.principalId
+output mcpWebAppIdentityClientId string = mcpIdentity.properties.clientId

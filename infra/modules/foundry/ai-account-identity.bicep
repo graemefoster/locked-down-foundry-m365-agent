@@ -48,7 +48,7 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
       : null)
     // Set disable local auth to true or false. Agent service does not support API key based authentication
     disableLocalAuth: false
-    restrictOutboundNetworkAccess: true
+    restrictOutboundNetworkAccess: false //to further restrict tool calls to specific endpoints, set to true then use the allowedFqdnList property
     allowedFqdnList: empty(keyVaultName) ? [] : [
       '${keyVaultName}.vault.azure.net'
     ]

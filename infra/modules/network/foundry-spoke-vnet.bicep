@@ -36,6 +36,14 @@ reach the APIM gateway PE on 443. Empty = model gateway not deployed, so no rule
 param modelGatewayPeCidr string = ''
 
 @description('''
+CIDR of the App Service spoke private-endpoint subnet that hosts the MCP web app inbound
+private endpoint. The agent subnet is allowed outbound to this on 443 so the hosted agent can
+enumerate/call the MCP tool. Force-tunnelled via the firewall (0.0.0.0/0 UDR) but the NSG sees
+the real PE IP, so this explicit allow is required.
+''')
+param appServicePeCidr string = ''
+
+@description('''
 CIDR of the gateway spoke apim-subnet (APIM v2 outbound VNet integration). When non-empty,
 the Foundry pe-subnet gets privateEndpointNetworkPolicies=Enabled + a UDR routing return
 traffic to this CIDR back through the Azure Firewall — required for the Teams inbound path,
@@ -450,6 +458,21 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           destinationAddressPrefix: modelGatewayPeCidr
           destinationPortRange: '443'
           description: 'HTTPS to APIM model-gateway PE subnet. Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so this explicit allow is required.'
+        }
+      }
+    ], appServicePeCidr == '' ? [] : [
+      {
+        name: 'Allow-AppServicePe-Outbound'
+        properties: {
+          priority: 116
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: agentSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: appServicePeCidr
+          destinationPortRange: '443'
+          description: 'HTTPS to the App Service spoke PE subnet (MCP web app). Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so this explicit allow is required.'
         }
       }
     ])

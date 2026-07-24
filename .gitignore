@@ -2,6 +2,8 @@
 *.json
 # ...except the azd parameters file, which must be committed.
 !infra/main.parameters.json
+# ...and the bicep extension config (enables the microsoftGraphV1 extension).
+!infra/bicepconfig.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.
