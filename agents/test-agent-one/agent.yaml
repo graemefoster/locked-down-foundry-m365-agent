@@ -1,7 +1,7 @@
 metadata:
   microsoft.voice-live.enabled: "false"
 object: agent.version
-name: cicd-deploy4d-agent
+name: cicd-deployed-agent
 description: ""
 definition:
   kind: prompt
