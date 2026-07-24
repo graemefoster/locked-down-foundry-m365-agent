@@ -81,7 +81,7 @@ jobs:
           cat agent.json
 
       - name: Upload agent.json
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: agent-json
           path: agent.json
@@ -97,7 +97,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent.json
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: agent-json
 
