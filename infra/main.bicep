@@ -130,6 +130,16 @@ param githubRunnerRepoUrl string = ''
 @description('Name of the Key Vault secret holding the runner PAT (Administration: read & write). Seeded manually.')
 param githubRunnerPatSecretName string = 'gh-runner-pat'
 
+@description('''
+Fine-grained GitHub PAT (Administration: read & write) for the self-hosted runner.
+Written into Key Vault by Bicep (control-plane write, works despite the private KV
+firewall). Sourced from ${GITHUB_RUNNER_PAT} (empty by default). Set it with
+`azd env set GITHUB_RUNNER_PAT <pat>`; you may clear it after provisioning — the KV
+secret persists. Leave empty to reuse an already-seeded secret.
+''')
+@secure()
+param githubRunnerPat string = ''
+
 @description('Comma-separated labels applied to the self-hosted runner.')
 param githubRunnerLabels string = 'vnet,foundry-private'
 
@@ -909,6 +919,18 @@ module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if 
   }
 }
 
+// Write the PAT into Key Vault via ARM (control plane) — only when a value is
+// supplied. Skipped (leaving any existing secret intact) when GITHUB_RUNNER_PAT
+// is empty, so the secret can be seeded once and the env var cleared afterward.
+module runnerPatSecret 'modules/resources/runner-pat-secret.bicep' = if (installGithubRunner && !empty(githubRunnerPat)) {
+  name: 'runner-pat-secret-${uniqueSuffix}'
+  params: {
+    keyVaultName: keyVault.outputs.keyVaultName
+    secretName: githubRunnerPatSecretName
+    patValue: githubRunnerPat
+  }
+}
+
 module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (installGithubRunner) {
   name: 'vm-runner-extension-${uniqueSuffix}'
   params: {
@@ -921,6 +943,7 @@ module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (ins
   }
   dependsOn: [
     vmKeyVaultSecretsRole
+    runnerPatSecret
   ]
 }
 

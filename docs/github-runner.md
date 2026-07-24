@@ -31,10 +31,16 @@ untrusted job.
 The runner does not store a GitHub credential. The VM's **managed identity** reads a
 **fine-grained PAT** from **Key Vault** (private data plane, over the VM's private DNS),
 then mints a short-lived, single-use runner **registration token** to register once as a
-Windows service. Nothing sensitive transits `azd`, the `.env`, or the repo.
+Windows service.
+
+The PAT is written into Key Vault by Bicep (`runner-pat-secret.bicep`) as an ARM
+**control-plane** operation, which succeeds even though the vault has
+`publicNetworkAccess=Disabled` (the KV firewall only governs the *data* plane). So no
+in-VNet seeding, temporary roles, or `az vm run-command` are needed.
 
 ```
-VM managed identity --(IMDS)--> KV token --> read PAT from Key Vault
+azd (GITHUB_RUNNER_PAT) --ARM control plane--> Key Vault secret gh-runner-pat
+VM managed identity --(IMDS)--> KV token --> read PAT (data plane, private endpoint)
    --> POST /repos/{owner}/{repo}/actions/runners/registration-token
    --> config.cmd --runasservice   (persistent, non-ephemeral)
 ```
@@ -42,17 +48,12 @@ VM managed identity --(IMDS)--> KV token --> read PAT from Key Vault
 Bootstrap: `infra/modules/resources/bootstrap-github-runner.ps1`, embedded (base64) into
 a `CustomScriptExtension` by `infra/modules/resources/vm-runner-extension.bicep`. The VM
 MI is granted **Key Vault Secrets User** by `infra/modules/rbac/vm-keyvault-secrets-role.bicep`,
-and the extension is sequenced **after** that assignment in `main.bicep`.
+and the extension is sequenced **after** both that assignment and the PAT-secret write.
 
-## One-time manual setup (kept out of the repo/azd)
+## One-time setup
 
 1. **Create a fine-grained PAT** on the repo with **Administration: read & write**
-   (that scope gates the runner-token endpoints). Then seed it into Key Vault:
-   ```bash
-   az keyvault secret set --vault-name <aiservices><suffix>kv \
-     --name gh-runner-pat --value <PAT>
-   ```
-   The vault name is `toLower('${aiServices}${uniqueSuffix}kv')` (see `main.bicep`).
+   (that scope gates the runner-token endpoints).
 
 2. **Create the `vnet-deploy` Environment** (repo Settings → Environments):
    add yourself as a **required reviewer** and restrict deployment branches to `main`.
@@ -60,15 +61,20 @@ and the extension is sequenced **after** that assignment in `main.bicep`.
 3. **Repo Settings → Actions → General:** require approval for **all outside
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
-4. **Set the runner PAT secret name** if you didn't use the default:
-   `azd env set GITHUB_RUNNER_PAT_SECRET_NAME <name>`.
-
 ## Enable it
 
 ```bash
 azd env set GITHUB_RUNNER_REPO_URL https://github.com/<owner>/<repo>
+azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>   # written to Key Vault by Bicep
 azd provision
+# optional: clear the PAT from the local azd env — the KV secret persists
+azd env set GITHUB_RUNNER_PAT ""
 ```
+
+`GITHUB_RUNNER_PAT` is a `@secure()` param sourced from `${GITHUB_RUNNER_PAT}` (empty by
+default). While set, it lives in the local, gitignored `.azure/<env>/.env`. Leaving it
+empty on later provisions reuses the already-seeded Key Vault secret (the secret write is
+conditional and ARM never deletes it).
 
 On first provision the RBAC role assignment can take 1–5 min to propagate to the KV
 data plane (same class of delay noted for CMK enablement). If the extension fails

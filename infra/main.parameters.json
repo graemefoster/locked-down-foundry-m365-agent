@@ -24,6 +24,7 @@
     "projectCapHost": { "value": "${PROJECT_CAP_HOST=caphostproj}" },
     "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" },
     "githubRunnerRepoUrl": { "value": "${GITHUB_RUNNER_REPO_URL=}" },
+    "githubRunnerPat": { "value": "${GITHUB_RUNNER_PAT=}" },
     "githubRunnerPatSecretName": { "value": "${GITHUB_RUNNER_PAT_SECRET_NAME=gh-runner-pat}" },
     "githubRunnerLabels": { "value": "${GITHUB_RUNNER_LABELS=vnet,foundry-private}" },
     "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" }
