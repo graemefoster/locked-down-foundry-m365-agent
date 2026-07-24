@@ -11,7 +11,7 @@
   The resolved agent name and version are written to $GITHUB_OUTPUT (agent-name, agent-version)
   so the composite action can surface them to the publish step.
 
-  Windows PowerShell 5.1 compatible. Uses the VM managed identity via the Azure CLI (az login --identity fallback).
+  Windows PowerShell 5.1 compatible. Uses the VM managed identity via IMDS (no az login).
 #>
 param(
   [Parameter(Mandatory = $true)] [string]$AgentJsonPath,

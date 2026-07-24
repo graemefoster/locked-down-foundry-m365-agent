@@ -6,7 +6,7 @@
   URL is unchanged; only the served version selector is updated (merge-patch, so any existing
   protocol_configuration / authorization_schemes are preserved).
 
-  Windows PowerShell 5.1 compatible. Uses the VM managed identity via the Azure CLI (az login --identity fallback).
+  Windows PowerShell 5.1 compatible. Uses the VM managed identity via IMDS (no az login).
 #>
 param(
   [Parameter(Mandatory = $true)] [string]$AgentName,

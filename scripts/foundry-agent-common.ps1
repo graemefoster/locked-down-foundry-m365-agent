@@ -2,8 +2,8 @@
   Shared Foundry Agents helpers (dot-sourced by create-agent.ps1 and publish-agent.ps1)
   ------------------------------------------------------------------------------------
   These functions run ON the private VNet self-hosted runner (the only host that can reach
-  the Foundry private endpoint). They acquire a managed-identity token via the Azure CLI and
-  call the Agents REST API, mirroring the proven pattern in scripts/seed-agents.ps1.
+  the Foundry private endpoint). They acquire a managed-identity token via IMDS and call the
+  Agents REST API, mirroring the proven pattern in scripts/seed-agents.ps1.
 
   Windows PowerShell 5.1 compatible: no external modules, no ConvertFrom-Yaml.
 
@@ -13,20 +13,15 @@
 $ErrorActionPreference = 'Stop'
 
 function Get-FoundryToken {
-  # Acquire a token for the Foundry data plane (https://ai.azure.com) using the Azure CLI. az is
-  # preinstalled on the VM by the runner bootstrap. If no MI context is active yet, log in with
-  # the VM managed identity and retry once.
-  $token = az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv 2>$null
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-    Write-Host '[foundry] No active az context - signing in with the VM managed identity.'
-    az login --identity --output none
-    if ($LASTEXITCODE -ne 0) { throw '[foundry] az login --identity failed.' }
-    $token = az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-      throw '[foundry] Failed to acquire a Foundry access token via the Azure CLI.'
-    }
-  }
-  return $token.Trim()
+  # Acquire a token for the Foundry data plane (https://ai.azure.com) from the VM managed
+  # identity via IMDS. We use IMDS directly rather than the Azure CLI because the self-hosted
+  # runner service can hold a stale PATH in which `az` is not resolvable. This mirrors the
+  # proven approach in scripts/seed-agents.ps1.
+  $response = Invoke-RestMethod `
+    -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fai.azure.com%2F' `
+    -Headers @{ Metadata = 'true' } `
+    -Method Get
+  return $response.access_token
 }
 
 # Extract the HTTP status code + response body from a terminating Invoke-RestMethod error.
