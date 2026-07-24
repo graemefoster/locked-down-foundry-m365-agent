@@ -15,10 +15,13 @@
 - Observability: firewall diagnostics land in **resource-specific tables**
   (`AZFW*`), and **VNet flow logs + Traffic Analytics** on the agent subnet let
   you see exactly what is being allowed or dropped.
-- ⚠️ **One known exception:** Agent 365 telemetry egress requires the broad
+- ⚠️ **Known limitations:** (1) Agent 365 telemetry egress requires the broad
   `AzureFrontDoor.Frontend` service tag on the NSG — see
-  [Known limitation: Agent 365 telemetry egress](#known-limitation-agent-365-telemetry-egress).
-  **This needs to be raised with the product team.**
+  [Known limitation: Agent 365 telemetry egress](#known-limitation-agent-365-telemetry-egress);
+  and (2) version-over-version eval comparison (cluster analysis) is unsupported
+  in Private BYO workspaces — see
+  [Known limitation: version-over-version eval comparison](#️-known-limitation-version-over-version-eval-comparison-cluster-analysis).
+  **Both need to be raised with the product team.**
 
 ---
 
@@ -173,6 +176,56 @@ subnet must reach the A365 observability service.
 > Until one of the above lands, the recommended posture is: keep the
 > `AzureFrontDoor.Frontend` NSG allow **and** add the firewall SNI application
 > rule so the exact FQDN is the effective boundary.
+
+---
+
+## ⚠️ Known limitation: version-over-version eval comparison (cluster analysis)
+
+> **Not a networking-rule gap — a Foundry *workspace* limitation that only bites
+> in the Private BYO-network posture this sample deploys. Tracked as a platform
+> missing-feature to raise with the product team.**
+
+The nightly evaluation workflow (`.github/workflows/nightly-eval-agent-one.yml`)
+uses the Microsoft **`microsoft/ai-agent-evals`** GitHub Action to score the agent
+against a dataset. The action can also produce a **version-over-version comparison**
+(e.g. latest deployed agent vs. the previous version) so you can catch regressions.
+
+**What we found:**
+
+- Per-version scoring works perfectly on the in-VNet runner (all evaluators score
+  every conversation).
+- The comparison step, however, calls `project_client.beta.insights.generate(...)`
+  (`action.py` → `generate_comparison_insight`), which performs **cluster analysis**.
+- In a **Private BYO-network (bring-your-own-VNet) Foundry workspace** — exactly the
+  locked-down posture in this repo — that API returns:
+
+  > `(UserError) Insights generation request is invalid. Cluster analysis is not
+  > supported in Private BYO enabled workspaces.`
+
+- The exception is **uncaught** and propagates, so the whole action **fails the run
+  even though every per-version score succeeded**. It fires only when two agent
+  versions are evaluated together (`len(agent_ids) > 1`).
+
+**Why this happens:**
+
+- The comparison feature depends on a **server-side cluster-analysis service** that is
+  simply not offered to Private BYO workspaces (a data-plane feature gap, not an RBAC
+  or firewall/NSG issue — no network rule can enable it).
+
+**How we mitigate it (implemented):**
+
+- The nightly workflow **defaults to a single-agent evaluation of the latest version**,
+  so the run is green and a full scored report still posts every night.
+- A comparison run remains **opt-in**: pass the `agentIds` (two `name:version` ids) and
+  `baselineAgentId` dispatch inputs. That path will fail in *this* workspace but works
+  against a non-private workspace (and will "just work" here if/when the platform adds
+  support).
+
+**Action item to raise with the product team:**
+
+1. Support **comparison insights / cluster analysis for Private BYO-network
+   workspaces**, or provide a documented alternative for regression comparison that
+   does not depend on the cluster-analysis service.
 
 ---
 

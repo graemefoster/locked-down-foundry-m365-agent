@@ -21,6 +21,18 @@ name: Nightly eval — test-agent-one (VNet self-hosted)
 #   * Python is provided at run time by actions/setup-python (the VM subnet has
 #     unrestricted egress, so the download and `pip install` succeed).
 #
+# ⚠️ Known limitation — version-over-version comparison is DISABLED by default here:
+#   microsoft/ai-agent-evals' comparison step calls the Foundry "insights.generate"
+#   (cluster-analysis) API, which is NOT supported in Private BYO-network workspaces
+#   (this project is one). Passing two agent versions makes action.py raise
+#   "(UserError) ... Cluster analysis is not supported in Private BYO enabled workspaces."
+#   AFTER all per-version scoring succeeds, failing the whole run. So by default we
+#   evaluate ONLY the latest version (single-agent) — a full scored report still posts.
+#   To force a comparison anyway (e.g. against a non-private workspace, or once the
+#   platform supports it), pass the `agentIds`/`baselineAgentId` inputs explicitly.
+#   Tracked as a platform missing-feature. See NETWORKING.md → "Known limitation:
+#   version-over-version eval comparison".
+#
 # workflow_dispatch + a repository guard keep fork code off the VM. The nightly
 # schedule is UTC; 16:00 UTC ≈ midnight in UTC+08. (Docs advise NOT evaluating on
 # every commit, to keep model/eval costs down.)
@@ -39,11 +51,11 @@ on:
         required: false
         default: ""
       agentIds:
-        description: "Agent id(s) to evaluate as name:version, comma-separated (default: previous + latest version of the manifest agent, compared)"
+        description: "Agent id(s) to evaluate as name:version, comma-separated. Default: latest version only (single-agent). Pass two ids to force a comparison (unsupported in Private BYO workspaces — see header)."
         required: false
         default: ""
       baselineAgentId:
-        description: "Baseline agent id (name:version) to compare against (default: the previous version when auto-resolving)"
+        description: "Baseline agent id (name:version) for an explicit comparison run (only used when agentIds lists two versions)."
         required: false
         default: ""
       dataPath:
@@ -70,10 +82,11 @@ jobs:
       - uses: actions/checkout@v5
 
       # Resolve endpoint, deployment name, data path, and the agent id(s) to evaluate.
-      # When agentIds is not supplied we look up the CURRENT versions of the agent named
-      # in the manifest (via the same IMDS + Agents REST helpers the deploy path uses) and
-      # compare the LATEST version against the one before it (the baseline). This surfaces,
-      # each night, whether the most recently deployed version regressed vs the prior one.
+      # When agentIds is not supplied we look up the manifest agent's versions (via the same
+      # IMDS + Agents REST helpers the deploy path uses) and evaluate ONLY the latest one.
+      # We intentionally do NOT auto-compare against the previous version: the comparison step
+      # is unsupported in this Private BYO workspace (see header). A comparison run is opt-in
+      # via the agentIds/baselineAgentId inputs.
       - name: Resolve evaluation inputs
         id: cfg
         shell: powershell
@@ -122,16 +135,17 @@ jobs:
               throw "No versions found for agent '$agentName' at $endpoint. Deploy it first (deploy-test-agent-one.yml)."
             }
             $latest = $versions[0]
+            # Default: evaluate ONLY the latest version (single-agent). We deliberately do NOT
+            # auto-build a version-over-version comparison: microsoft/ai-agent-evals' comparison
+            # relies on the Foundry "insights.generate" cluster-analysis API, which is NOT
+            # supported in Private BYO-network workspaces (this project) and fails the whole run
+            # AFTER scoring. To force a comparison anyway, pass the agentIds/baselineAgentId inputs.
+            $agentIds = "${agentName}:${latest}"
             if ($versions.Count -ge 2) {
-              # Compare the latest version against the previous one (the baseline).
-              $prev = $versions[1]
-              $agentIds = "${agentName}:${prev},${agentName}:${latest}"
-              if ([string]::IsNullOrWhiteSpace($baseline)) { $baseline = "${agentName}:${prev}" }
+              Write-Host "Found $($versions.Count) versions of '$agentName'; evaluating only the latest ($latest). Version-over-version comparison is unsupported in this Private BYO workspace — pass 'agentIds' to override."
             }
             else {
-              # Only one version exists — evaluate it on its own (no comparison possible).
-              $agentIds = "${agentName}:${latest}"
-              Write-Host "Only one version of '$agentName' exists; running a single-agent evaluation with no baseline."
+              Write-Host "Only one version of '$agentName' exists; running a single-agent evaluation."
             }
           }
 
@@ -178,9 +192,10 @@ jobs:
 
       # Runs the agent against the dataset and posts a scored report to the run summary.
       # DefaultAzureCredential authenticates as the VM's system-assigned managed identity.
-      # When two versions are resolved, the report includes a pairwise statistical comparison
-      # of the latest version against the baseline (previous) version. These env vars mirror
-      # exactly what microsoft/ai-agent-evals' action.yml sets for action.py.
+      # By default a single version is evaluated (see header). If two versions are passed
+      # explicitly, action.py also attempts a pairwise comparison — which will fail in this
+      # Private BYO workspace because the underlying cluster-analysis API is unsupported.
+      # These env vars mirror exactly what microsoft/ai-agent-evals' action.yml sets for action.py.
       - name: Run agent evaluation
         shell: bash
         working-directory: .ai-agent-evals
