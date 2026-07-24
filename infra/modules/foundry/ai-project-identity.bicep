@@ -19,6 +19,9 @@ param azureStorageResourceGroupName string
 param mcpServerName string
 param mcpUrl string
 
+@description('Audience the AgenticIdentityToken is minted for — the guarding Entra app registration Application ID URI (api://<appId>). Must be an audience you control, not a Microsoft one.')
+param mcpAudience string
+
 param logAnalyticsWorkspaceId string
 
 resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
@@ -107,6 +110,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
       category: 'RemoteTool'
       target: mcpUrl
       authType: 'AgenticIdentityToken'
+      audience: mcpAudience
       group: 'GenericProtocol'
       metadata: {
         type: 'custom_MCP'

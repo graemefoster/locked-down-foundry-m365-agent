@@ -1,0 +1,32 @@
+name: Publish Foundry agent version
+description: >-
+  Publish an agent version by routing 100% of the agent endpoint's traffic to it (the
+  "Publish Updates" action). The stable endpoint URL is unchanged. Runs on the in-VNet
+  self-hosted runner and authenticates with the VM managed identity via IMDS.
+
+inputs:
+  agent-name:
+    description: The agent name to publish.
+    required: true
+  agent-version:
+    description: The agent version to route 100% of traffic to.
+    required: true
+  foundry-endpoint:
+    description: Foundry project endpoint (private).
+    required: true
+  api-version:
+    description: Agents REST API version.
+    required: false
+    default: "2025-11-15-preview"
+
+runs:
+  using: composite
+  steps:
+    - name: Publish agent version
+      shell: powershell
+      run: |
+        ./scripts/publish-agent.ps1 `
+          -AgentName              "${{ inputs.agent-name }}" `
+          -AgentVersion           "${{ inputs.agent-version }}" `
+          -FoundryProjectEndpoint "${{ inputs.foundry-endpoint }}" `
+          -ApiVersion             "${{ inputs.api-version }}"

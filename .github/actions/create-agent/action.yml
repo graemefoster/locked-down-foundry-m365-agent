@@ -1,0 +1,38 @@
+name: Create or update Foundry agent
+description: >-
+  Create-or-update a Foundry agent from a normalized agent JSON file (produced from agent.yaml).
+  Runs on the in-VNet self-hosted runner and authenticates with the VM managed identity via IMDS.
+  Adds a new agent version when the definition changed; does not change which version serves
+  traffic (use the publish-agent action for that).
+
+inputs:
+  agent-json:
+    description: Path to the normalized agent JSON (from `yq -o=json agent.yaml`).
+    required: true
+  foundry-endpoint:
+    description: Foundry project endpoint (private).
+    required: true
+  api-version:
+    description: Agents REST API version.
+    required: false
+    default: "2025-11-15-preview"
+
+outputs:
+  agent-name:
+    description: The resolved agent name.
+    value: ${{ steps.run.outputs.agent-name }}
+  agent-version:
+    description: The agent version that was created (or the existing latest if unchanged).
+    value: ${{ steps.run.outputs.agent-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Create or update agent
+      id: run
+      shell: powershell
+      run: |
+        ./scripts/create-agent.ps1 `
+          -AgentJsonPath          "${{ inputs.agent-json }}" `
+          -FoundryProjectEndpoint "${{ inputs.foundry-endpoint }}" `
+          -ApiVersion             "${{ inputs.api-version }}"

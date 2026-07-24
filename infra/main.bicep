@@ -200,8 +200,13 @@ var firewallPolicyName = '${uniqueSuffix}fwallpol'
 // delegated subnet, not the whole App Service spoke VNet. Derived from the
 // App Service spoke default address space (10.1.0.0/16, subnet 0).
 var appServiceSpokeAddressPrefix = '10.1.0.0/16'
+var appServiceDelegatedSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24, 0)
+// App Service spoke PE subnet — hosts the MCP web app inbound private endpoint. The agent
+// subnet is allowed to reach it (NSG + firewall) and its return path is force-tunnelled back
+// through the firewall (appservice-spoke-vnet.bicep pe-subnet UDR).
+var appServicePeSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24, 1)
 var agentInboundAllowedCidrs = [
-  cidrSubnet(appServiceSpokeAddressPrefix, 24, 0)
+  appServiceDelegatedSubnetCidr
 ]
 
 // Foundry spoke address space (module default). Agent subnet is locked down at the
@@ -245,6 +250,7 @@ module firewall 'modules/network/firewall.bicep' = {
     logAnalyticsId: lanalytics.id
     yarpProxyFqdn: 'yarp-${appServicePlanName}.azurewebsites.net'
     agentSubnetCidr: agentSubnetCidr
+    appServicePeSubnetCidr: appServicePeSubnetCidr
     unrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
   }
 }
@@ -261,6 +267,7 @@ module foundrySpokeVnet 'modules/network/foundry-spoke-vnet.bicep' = {
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: agentInboundAllowedCidrs
     modelGatewayPeCidr: modelGatewayPeSubnetCidr
+    appServicePeCidr: appServicePeSubnetCidr
     apimSubnetCidr: enableTeamsPublish ? modelGatewayApimSubnetCidr : ''
   }
 }
@@ -504,6 +511,36 @@ module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = 
   ]
 }
 
+// ==================== GATEWAY: OAUTH ON THE MCP WEB APP ====================
+
+/*
+  Entra app registration guarding the private MCP web app. Federated to the MCP web app's
+  user-assigned managed identity (MI-as-FIC) so App Service built-in auth is secretless.
+*/
+module mcpAppRegistration 'modules/gateway/app-registration.bicep' = {
+  name: 'mcp-appreg-${uniqueSuffix}-deployment'
+  params: {
+    clientAppName: 'mcp-gateway-${uniqueSuffix}'
+    clientAppDisplayName: 'MCP Gateway (${uniqueSuffix})'
+    webAppIdentityPrincipalId: aiDependencies.outputs.mcpWebAppIdentityPrincipalId
+  }
+}
+
+/*
+  App Service built-in auth (EasyAuth) on the MCP web app — returns 401 on unauthenticated
+  requests (machine-to-machine, no interactive redirect) and validates the AgenticIdentityToken
+  audience against the app registration's Application ID URI.
+*/
+module mcpBuiltinAuth 'modules/gateway/builtin-auth.bicep' = {
+  name: 'mcp-auth-${uniqueSuffix}-deployment'
+  params: {
+    appServiceName: aiDependencies.outputs.mcpWebAppName
+    clientId: mcpAppRegistration.outputs.clientAppId
+    issuer: mcpAppRegistration.outputs.issuer
+    allowedAudience: mcpAppRegistration.outputs.audience
+  }
+}
+
 // ==================== AI PROJECT ====================
 
 /*
@@ -536,6 +573,9 @@ module aiProject 'modules/foundry/ai-project-identity.bicep' = {
 
     mcpServerName: 'testweathermcpserver'
     mcpUrl: 'https://${aiDependencies.outputs.mcpWebAppFqdn}/'
+    // Mint the agent's tool token for our own app registration (an audience we control), so
+    // App Service built-in auth on the MCP web app accepts it.
+    mcpAudience: mcpAppRegistration.outputs.audience
 
   }
   dependsOn: [
