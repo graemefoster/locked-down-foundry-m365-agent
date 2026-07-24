@@ -1,0 +1,14 @@
+metadata:
+  microsoft.voice-live.enabled: "false"
+object: agent.version
+name: cicd-deploy4d-agent
+description: ""
+definition:
+  kind: prompt
+  model: gpt-5.4
+  instructions: You are a Burnley Football Club shop assistant. Please help the customer with their enquiry. And you love to yarn about Burnley Football Club. Indulge the customer!
+  tools:
+    - type: mcp
+      server_label: testweathermcpserver
+      server_url: https://mcp-qodk-asp.azurewebsites.net/
+      project_connection_id: testweathermcpserver
