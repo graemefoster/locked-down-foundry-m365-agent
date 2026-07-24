@@ -148,6 +148,22 @@ function Get-LatestAgentVersion {
   return ($versions | Measure-Object -Maximum).Maximum
 }
 
+# Return all existing version numbers for an agent as ints, sorted DESCENDING (highest
+# first), or an empty array if the agent has no versions. Used by the nightly eval
+# workflow to pick the latest version and the one before it (baseline) for comparison.
+function Get-AgentVersionsDescending {
+  param([string]$Token, [string]$Endpoint, [string]$ApiVersion, [string]$Name)
+  $response = Invoke-FoundryRequest -Label "list versions '$Name'" -Request {
+    Invoke-RestMethod `
+      -Method Get `
+      -Uri "$Endpoint/agents/$Name/versions?api-version=$ApiVersion" `
+      -Headers @{ Authorization = "Bearer $Token" }
+  }
+  $versions = @($response.data | ForEach-Object { [int]$_.version })
+  if ($versions.Count -eq 0) { return @() }
+  return @($versions | Sort-Object -Descending)
+}
+
 # Point the agent endpoint at a specific version (100% traffic). Merge-patch, so any existing
 # protocol_configuration / authorization_schemes (e.g. a Teams-published agent) are preserved.
 function Set-ServedAgentVersion {

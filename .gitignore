@@ -4,6 +4,8 @@
 !infra/main.parameters.json
 # ...and the bicep extension config (enables the microsoftGraphV1 extension).
 !infra/bicepconfig.json
+# ...and the agent evaluation datasets (input data for the nightly eval workflow).
+!agents/**/eval-data.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.

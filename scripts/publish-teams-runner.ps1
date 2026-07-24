@@ -52,13 +52,16 @@ param(
   # which rejects an app-only / managed-identity token. When empty, the MI token
   # is used for publish too (the app-only test path).
   [Parameter(Mandatory = $false)] [string]$PublishAccessToken = '',
-  [Parameter(Mandatory = $false)] [string]$AppVersion = '1.0.0',
-  [Parameter(Mandatory = $false)] [string]$ShortDescription = 'Foundry M365 agent',
-  [Parameter(Mandatory = $false)] [string]$FullDescription = 'A Foundry agent published to Microsoft 365 from a locked-down virtual network.',
-  [Parameter(Mandatory = $false)] [string]$DeveloperName = 'Azure Developer',
-  [Parameter(Mandatory = $false)] [string]$DeveloperWebsiteUrl = 'https://azure.microsoft.com',
-  [Parameter(Mandatory = $false)] [string]$PrivacyUrl = 'https://privacy.microsoft.com',
-  [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl = 'https://www.microsoft.com/legal/terms-of-use'
+  # Publish metadata (the M365 app listing). Optional pass-throughs: when NOT supplied
+  # here they are not forwarded, so publish-teams.ps1's defaults apply — that script is
+  # the single source of truth for these values. Only set them to override those defaults.
+  [Parameter(Mandatory = $false)] [string]$AppVersion,
+  [Parameter(Mandatory = $false)] [string]$ShortDescription,
+  [Parameter(Mandatory = $false)] [string]$FullDescription,
+  [Parameter(Mandatory = $false)] [string]$DeveloperName,
+  [Parameter(Mandatory = $false)] [string]$DeveloperWebsiteUrl,
+  [Parameter(Mandatory = $false)] [string]$PrivacyUrl,
+  [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl
 )
 $ErrorActionPreference = 'Stop'
 
@@ -117,6 +120,13 @@ else {
   Write-Host '[publish-runner] No delegated user token supplied; using the app-only MI token for the publish call (expected to 502).'
 }
 
+# Forward only the publish-metadata overrides explicitly supplied to THIS script, so
+# publish-teams.ps1 stays the single source of truth for their defaults (no duplication).
+$publishMetadata = @{}
+foreach ($k in 'AppVersion', 'ShortDescription', 'FullDescription', 'DeveloperName', 'DeveloperWebsiteUrl', 'PrivacyUrl', 'TermsOfUseUrl') {
+  if ($PSBoundParameters.ContainsKey($k)) { $publishMetadata[$k] = $PSBoundParameters[$k] }
+}
+
 foreach ($agentName in $agents) {
   $agentBotName = "$BotName-$agentName"
   $botEndpoint  = "https://$YarpFqdn/teams/$agentName"
@@ -168,13 +178,7 @@ foreach ($agentName in $agents) {
     -AccessToken $publishToken `
     -DisplayName $displayName `
     -PublishScope $PublishScope `
-    -AppVersion $AppVersion `
-    -ShortDescription $ShortDescription `
-    -FullDescription $FullDescription `
-    -DeveloperName $DeveloperName `
-    -DeveloperWebsiteUrl $DeveloperWebsiteUrl `
-    -PrivacyUrl $PrivacyUrl `
-    -TermsOfUseUrl $TermsOfUseUrl *>&1 | Out-String
+    @publishMetadata *>&1 | Out-String
   Write-Host $publishOut
   if ($publishOut -notmatch '\[publish-teams\] Done\.') {
     throw "[publish-runner] Publish did not complete for '$agentName'."

@@ -1,0 +1,161 @@
+name: Nightly eval — test-agent-one (VNet self-hosted)
+
+# ---------------------------------------------------------------------------
+# Offline evaluation of the Foundry agent (agents/test-agent-one/agent.yaml)
+# using the Microsoft "Azure AI Agent Evaluation" GitHub Action:
+#   https://learn.microsoft.com/azure/foundry/how-to/evaluation-github-action
+#   https://github.com/microsoft/ai-agent-evals
+#
+# The action invokes the agent with the queries in agents/test-agent-one/eval-data.json,
+# runs the listed evaluators, and writes a scored report to the run summary.
+#
+# Why self-hosted / in-VNet (same reasoning as deploy-test-agent-one.yml):
+#   The Foundry project endpoint is PRIVATE, so the eval action can only reach it from
+#   the in-VNet self-hosted runner. Auth is free there: the action uses
+#   DefaultAzureCredential, which picks up the VM's SYSTEM-ASSIGNED managed identity via
+#   IMDS — no `azure/login` / OIDC and no id-token permission needed.
+#
+# Runner prerequisites (installed by infra/.../bootstrap-github-runner.ps1):
+#   * Git for Windows — the action's steps declare `shell: bash`, which on Windows
+#     resolves to Git Bash. Windows Server ships no Git, so the bootstrap installs it.
+#   * Python is provided at run time by actions/setup-python (the VM subnet has
+#     unrestricted egress, so the download and `pip install` succeed).
+#
+# workflow_dispatch + a repository guard keep fork code off the VM. The nightly
+# schedule is UTC; 16:00 UTC ≈ midnight in UTC+08. (Docs advise NOT evaluating on
+# every commit, to keep model/eval costs down.)
+# ---------------------------------------------------------------------------
+on:
+  schedule:
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+    inputs:
+      foundryProjectEndpoint:
+        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
+        required: false
+        default: ""
+      deploymentName:
+        description: "Model deployment used for evaluation (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+        required: false
+        default: ""
+      agentIds:
+        description: "Agent id(s) to evaluate as name:version, comma-separated (default: previous + latest version of the manifest agent, compared)"
+        required: false
+        default: ""
+      baselineAgentId:
+        description: "Baseline agent id (name:version) to compare against (default: the previous version when auto-resolving)"
+        required: false
+        default: ""
+      dataPath:
+        description: "Path to the eval data file"
+        required: false
+        default: "agents/test-agent-one/eval-data.json"
+      apiVersion:
+        description: "Agents REST API version (used only to resolve the latest agent version)"
+        required: false
+        default: "2025-11-15-preview"
+
+permissions:
+  contents: read
+
+env:
+  MANIFEST_PATH: agents/test-agent-one/agent.yaml
+
+jobs:
+  # Single job on the PRIVATE endpoint runner: resolve config, then run the eval action.
+  evaluate:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    steps:
+      - uses: actions/checkout@v5
+
+      # Resolve endpoint, deployment name, data path, and the agent id(s) to evaluate.
+      # When agentIds is not supplied we look up the CURRENT versions of the agent named
+      # in the manifest (via the same IMDS + Agents REST helpers the deploy path uses) and
+      # compare the LATEST version against the one before it (the baseline). This surfaces,
+      # each night, whether the most recently deployed version regressed vs the prior one.
+      - name: Resolve evaluation inputs
+        id: cfg
+        shell: powershell
+        env:
+          INPUT_ENDPOINT:   ${{ inputs.foundryProjectEndpoint }}
+          VAR_ENDPOINT:     ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+          INPUT_DEPLOYMENT: ${{ inputs.deploymentName }}
+          VAR_DEPLOYMENT:   ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+          INPUT_AGENT_IDS:  ${{ inputs.agentIds }}
+          INPUT_BASELINE:   ${{ inputs.baselineAgentId }}
+          INPUT_DATA_PATH:  ${{ inputs.dataPath }}
+          API_VERSION:      ${{ inputs.apiVersion }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $endpoint = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_ENDPOINT)) { $env:INPUT_ENDPOINT } else { $env:VAR_ENDPOINT }
+          if ([string]::IsNullOrWhiteSpace($endpoint)) {
+            throw "Set repo variable AZURE_AI_PROJECT_ENDPOINT, or pass foundryProjectEndpoint as a dispatch input."
+          }
+          $endpoint = $endpoint.TrimEnd('/')
+
+          $deployment = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DEPLOYMENT)) { $env:INPUT_DEPLOYMENT } else { $env:VAR_DEPLOYMENT }
+          if ([string]::IsNullOrWhiteSpace($deployment)) {
+            throw "Set repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME, or pass deploymentName as a dispatch input."
+          }
+
+          $dataPath = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DATA_PATH)) { $env:INPUT_DATA_PATH } else { 'agents/test-agent-one/eval-data.json' }
+          if (-not (Test-Path -LiteralPath $dataPath)) { throw "Eval data file not found: $dataPath" }
+
+          $apiVersion = if (-not [string]::IsNullOrWhiteSpace($env:API_VERSION)) { $env:API_VERSION } else { '2025-11-15-preview' }
+
+          $agentIds = $env:INPUT_AGENT_IDS
+          $baseline = $env:INPUT_BASELINE
+          if ([string]::IsNullOrWhiteSpace($agentIds)) {
+            # Read the agent name from the manifest (no yq on the VM — simple regex parse).
+            $manifest = $env:MANIFEST_PATH
+            if (-not (Test-Path -LiteralPath $manifest)) { throw "Manifest not found: $manifest" }
+            $nameLine = Select-String -LiteralPath $manifest -Pattern '^\s*name:\s*(.+?)\s*$' | Select-Object -First 1
+            if (-not $nameLine) { throw "Manifest '$manifest' has no 'name'." }
+            $agentName = $nameLine.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+
+            . (Join-Path $PWD 'scripts/foundry-agent-common.ps1')
+            $token = Get-FoundryToken
+            $versions = @(Get-AgentVersionsDescending -Token $token -Endpoint $endpoint -ApiVersion $apiVersion -Name $agentName)
+            if ($versions.Count -eq 0) {
+              throw "No versions found for agent '$agentName' at $endpoint. Deploy it first (deploy-test-agent-one.yml)."
+            }
+            $latest = $versions[0]
+            if ($versions.Count -ge 2) {
+              # Compare the latest version against the previous one (the baseline).
+              $prev = $versions[1]
+              $agentIds = "${agentName}:${prev},${agentName}:${latest}"
+              if ([string]::IsNullOrWhiteSpace($baseline)) { $baseline = "${agentName}:${prev}" }
+            }
+            else {
+              # Only one version exists — evaluate it on its own (no comparison possible).
+              $agentIds = "${agentName}:${latest}"
+              Write-Host "Only one version of '$agentName' exists; running a single-agent evaluation with no baseline."
+            }
+          }
+
+          Write-Host "Endpoint:    $endpoint"
+          Write-Host "Deployment:  $deployment"
+          Write-Host "Agent id(s): $agentIds"
+          Write-Host "Baseline:    $(if ([string]::IsNullOrWhiteSpace($baseline)) { '(none)' } else { $baseline })"
+          Write-Host "Data path:   $dataPath"
+
+          "endpoint=$endpoint"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "deployment=$deployment" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "agent-ids=$agentIds"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "baseline=$baseline"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "data-path=$dataPath"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # Runs the agent against the dataset and posts a scored report to the run summary.
+      # DefaultAzureCredential authenticates as the VM's system-assigned managed identity.
+      # When two versions are resolved, the report includes a pairwise statistical comparison
+      # of the latest version against the baseline (previous) version.
+      - name: Run agent evaluation
+        uses: microsoft/ai-agent-evals@v3-beta
+        with:
+          azure-ai-project-endpoint: ${{ steps.cfg.outputs.endpoint }}
+          deployment-name: ${{ steps.cfg.outputs.deployment }}
+          agent-ids: ${{ steps.cfg.outputs.agent-ids }}
+          baseline-agent-id: ${{ steps.cfg.outputs.baseline }}
+          data-path: ${{ github.workspace }}/${{ steps.cfg.outputs.data-path }}

@@ -37,11 +37,18 @@ param(
   [Parameter(Mandatory = $false)] [string] $RunnerLabels = 'vnet,foundry-private',
   # Runner version to install (actions/runner release, no leading 'v')
   [Parameter(Mandatory = $false)] [string] $RunnerVersion = '2.328.0',
+  # Git for Windows version to install (git-for-windows release, no leading 'v')
+  [Parameter(Mandatory = $false)] [string] $GitVersion = '2.47.1',
   [Parameter(Mandatory = $false)] [string] $InstallDir = 'C:\actions-runner'
 )
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# The managed Run Command passes -RunnerLabels as `-RunnerLabels vnet,foundry-private`;
+# PowerShell argument parsing can split that comma-separated value into an array. Flatten
+# and re-join on comma so config.cmd --labels always gets the intended comma-separated list.
+$RunnerLabels = ((@($RunnerLabels) -join ' ') -split '[,\s]+' | Where-Object { $_ }) -join ','
 
 function Write-Log([string] $Message) {
   Write-Host "[bootstrap-runner] $((Get-Date).ToString('s')) $Message"
@@ -71,7 +78,33 @@ function Install-AzureCli {
 }
 Install-AzureCli
 
-# --- 0b. Idempotency: skip if a runner service already exists ----------------
+# --- 0b. Ensure Git for Windows is installed (admin/SYSTEM context) -----------
+# The microsoft/ai-agent-evals action (nightly eval workflow) runs its steps with
+# `shell: bash`, which on Windows resolves to Git Bash. Windows Server ships no
+# Git, so install Git for Windows to the default location the runner probes for
+# bash.exe (%ProgramFiles%\Git\bin\bash.exe). Like Install-AzureCli this runs as
+# SYSTEM (a workflow step running as NETWORK SERVICE could not) and is idempotent,
+# and is placed BEFORE the runner idempotency check so it also lands on VMs where
+# the runner is already installed. (actions/checkout still uses its API-tarball
+# fallback and does not require git; this is purely to provide bash for the action.)
+function Install-GitForWindows {
+  $gitBash = Join-Path $env:ProgramFiles 'Git\bin\bash.exe'
+  if ((Get-Command git -ErrorAction SilentlyContinue) -or (Test-Path $gitBash)) {
+    Write-Log 'Git for Windows already installed - skipping.'
+    return
+  }
+  Write-Log "Installing Git for Windows $GitVersion..."
+  $installer = Join-Path $env:TEMP "Git-$GitVersion-64-bit.exe"
+  $url = "https://github.com/git-for-windows/git/releases/download/v$GitVersion.windows.1/Git-$GitVersion-64-bit.exe"
+  Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+  $p = Start-Process $installer -ArgumentList '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-', '/CLOSEAPPLICATIONS', '/NORESTARTAPPLICATIONS' -Wait -PassThru
+  Remove-Item $installer -Force -ErrorAction SilentlyContinue
+  if ($p.ExitCode -ne 0) { throw "Git for Windows install failed with exit code $($p.ExitCode)." }
+  Write-Log 'Git for Windows installed.'
+}
+Install-GitForWindows
+
+# --- 0c. Idempotency: skip if a runner service already exists ----------------
 $existingService = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue
 if ($existingService) {
   Write-Log "Runner service '$($existingService.Name)' already installed. Nothing to do."

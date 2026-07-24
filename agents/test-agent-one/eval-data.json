@@ -1,0 +1,21 @@
+{
+  "name": "test-agent-one-nightly",
+  "evaluators": [
+    "builtin.intent_resolution",
+    "builtin.task_adherence",
+    "builtin.coherence",
+    "builtin.fluency",
+    "builtin.relevance",
+    "builtin.violence"
+  ],
+  "data": [
+    { "query": "Hiya! What Burnley FC home shirts have you got for this season?" },
+    { "query": "Do you sell kids' Burnley kits, and what sizes are available?" },
+    { "query": "How much is a Burnley scarf and can I get it delivered to Australia?" },
+    { "query": "Can I return a shirt if it doesn't fit? What's your returns policy?" },
+    { "query": "What's the difference between the home and away kit this year?" },
+    { "query": "Do you do gift cards for the Burnley club shop?" },
+    { "query": "Tell me a bit about Burnley FC's history while I browse." },
+    { "query": "I want to buy a signed Burnley shirt as a present \u2013 what are my options?" }
+  ]
+}
