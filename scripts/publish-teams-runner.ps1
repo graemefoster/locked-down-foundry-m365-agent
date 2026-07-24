@@ -95,9 +95,6 @@ catch {
   Write-Warning "[publish-runner] Could not decode the access token: $($_.Exception.Message)"
 }
 
-Write-Host '[publish-runner] Registering Microsoft.BotService resource provider (idempotent)...'
-az provider register --namespace Microsoft.BotService --only-show-errors | Out-Null
-
 foreach ($agentName in $agents) {
   $agentBotName = "$BotName-$agentName"
   $botEndpoint  = "https://$YarpFqdn/teams/$agentName"
@@ -109,7 +106,7 @@ foreach ($agentName in $agents) {
     -Mode GetIdentity `
     -FoundryProjectEndpoint $FoundryProjectEndpoint `
     -AgentName $agentName `
-    -AccessToken $token 2>&1 | Out-String
+    -AccessToken $token *>&1 | Out-String
   Write-Host $identityOut
   if ($identityOut -notmatch '\[publish-teams\] Done\.') {
     throw "[publish-runner] GetIdentity did not complete for '$agentName'."
@@ -155,7 +152,7 @@ foreach ($agentName in $agents) {
     -DeveloperName $DeveloperName `
     -DeveloperWebsiteUrl $DeveloperWebsiteUrl `
     -PrivacyUrl $PrivacyUrl `
-    -TermsOfUseUrl $TermsOfUseUrl 2>&1 | Out-String
+    -TermsOfUseUrl $TermsOfUseUrl *>&1 | Out-String
   Write-Host $publishOut
   if ($publishOut -notmatch '\[publish-teams\] Done\.') {
     throw "[publish-runner] Publish did not complete for '$agentName'."
