@@ -15,7 +15,7 @@ jobs:
   bicep-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install Bicep CLI
         run: az bicep install
       - name: Build main.bicep (0 errors required; warnings expected)

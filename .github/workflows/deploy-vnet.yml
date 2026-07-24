@@ -36,7 +36,7 @@ jobs:
     runs-on: [self-hosted, vnet, foundry-private]
     environment: vnet-deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Seed Foundry agents (in-VNet, via VM managed identity)
         shell: pwsh
