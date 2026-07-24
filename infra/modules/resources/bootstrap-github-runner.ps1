@@ -66,7 +66,7 @@ $kvToken = Get-ImdsToken 'https://vault.azure.net'
 
 # --- 2. Read the PAT from Key Vault (private data plane) ----------------------
 Write-Log "Reading PAT secret '$PatSecretName' from Key Vault '$KeyVaultName'..."
-$secretUri = "https://$KeyVaultName.vault.azure.net/secrets/$PatSecretName?api-version=7.4"
+$secretUri = "https://$KeyVaultName.vault.azure.net/secrets/${PatSecretName}?api-version=7.4"
 $pat = (Invoke-RestMethod -Uri $secretUri -Headers @{ Authorization = "Bearer $kvToken" } -Method Get).value
 if ([string]::IsNullOrWhiteSpace($pat)) {
   throw "Key Vault secret '$PatSecretName' was empty. Seed it with: az keyvault secret set --vault-name $KeyVaultName --name $PatSecretName --value <PAT>"
