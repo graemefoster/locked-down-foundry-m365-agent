@@ -28,6 +28,11 @@ name: Deploy test-agent-one (VNet self-hosted)
 #                                 the VM. It creates/updates the agent version, then publishes it
 #                                 (routes 100% of traffic to the new version) with no manual gate,
 #                                 authenticating as the VM managed identity via IMDS.
+#   * publish-teams (self-hosted, in-VNet) - OPTIONAL, MANUAL APPROVAL. Gated by the vnet-deploy
+#                                 environment (add a required reviewer) so it pauses before it
+#                                 creates the Azure Bot Service and submits the app to the M365
+#                                 catalog. Reuses scripts/publish-teams-runner.ps1 and targets the
+#                                 agent this run just deployed. Skipped when publishToTeams=false.
 #
 # Reusable steps live as composite actions:
 #   .github/actions/create-agent   -> create-or-update (adds a new version when changed)
@@ -44,6 +49,11 @@ on:
         description: "Agents REST API version"
         required: false
         default: "2025-11-15-preview"
+      publishToTeams:
+        description: "After deploy, publish the agent to Teams / M365 (requires manual approval)"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -93,6 +103,9 @@ jobs:
     needs: prepare
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
+    outputs:
+      agent-name: ${{ steps.create.outputs.agent-name }}
+      endpoint: ${{ steps.cfg.outputs.endpoint }}
     steps:
       - uses: actions/checkout@v5
 
@@ -129,3 +142,88 @@ jobs:
           agent-version: ${{ steps.create.outputs.agent-version }}
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
           api-version: ${{ inputs.apiVersion }}
+
+  # --- Stage 3: publish to Teams / M365 (MANUAL APPROVAL) ----------------------
+  # Gated by the `vnet-deploy` environment: add a REQUIRED REVIEWER (+ branch=main)
+  # to that environment in repo Settings so this job pauses for approval before it
+  # creates the Azure Bot Service and submits the app to the Microsoft 365 catalog.
+  # Mirrors the publish path in deploy-vnet.yml, but targets the agent this run just
+  # deployed (deploy.outputs.agent-name). Only runs when publishToTeams is true.
+  publish-teams:
+    needs: deploy
+    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publishToTeams }}
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: vnet-deploy
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Ensure Azure CLI is on PATH
+        shell: powershell
+        run: |
+          # az is installed by the runner bootstrap (SYSTEM context). The already-running
+          # runner service may hold a stale PATH, so surface az to later steps explicitly.
+          $azDir = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin'
+          if (Test-Path (Join-Path $azDir 'az.cmd')) {
+            Add-Content -Path $env:GITHUB_PATH -Value $azDir
+          } elseif (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+            throw "Azure CLI not found on the VM. Re-run 'azd provision' so the runner bootstrap installs it."
+          }
+
+      # The Microsoft 365 publish step does an on-behalf-of submission and rejects an app-only /
+      # managed-identity token (HTTP 502). Acquire a DELEGATED USER token interactively via the
+      # device-code flow: the step prints a code + URL and blocks until you complete sign-in.
+      # Nothing secret is logged (the device code alone is useless; the token is masked).
+      - name: Acquire a delegated user token (device code)
+        shell: powershell
+        env:
+          TENANT_ID: ${{ vars.TEAMS_TENANT_ID }}
+        run: |
+          Write-Host '>>> A device-code sign-in is required for the Microsoft 365 publish step.'
+          Write-Host '>>> Open the URL below and enter the code, then this job will continue.'
+          az login --use-device-code --tenant $env:TENANT_ID --output none
+          if ($LASTEXITCODE -ne 0) { throw 'Device-code sign-in failed.' }
+          $userToken = az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($userToken)) {
+            throw 'Failed to acquire a user access token after device-code sign-in.'
+          }
+          Write-Host "::add-mask::$userToken"
+          "PUBLISH_USER_TOKEN=$userToken" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'Delegated user token acquired for the publish step.'
+
+      - name: Sign in with the VM managed identity
+        shell: powershell
+        # Restore the MI as the active az context so bot-service ARM creation and the Foundry
+        # read run as the VM managed identity (which holds the required RBAC).
+        run: az login --identity --output none
+
+      - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
+        shell: powershell
+        env:
+          FOUNDRY_ENDPOINT: ${{ needs.deploy.outputs.endpoint }}
+          AGENT_NAMES:      ${{ needs.deploy.outputs.agent-name }}
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          YARP_FQDN:        ${{ vars.TEAMS_YARP_FQDN }}
+          TENANT_ID:        ${{ vars.TEAMS_TENANT_ID }}
+          BOT_NAME:         ${{ vars.TEAMS_BOT_NAME }}
+          NAME_PREFIX:      ${{ vars.TEAMS_NAME_PREFIX }}
+          LOG_ANALYTICS_ID: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+          PUBLISH_SCOPE:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
+        run: |
+          foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAMES','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
+              throw "Publish requires '$v'. Set repo variables AZURE_RESOURCE_GROUP, TEAMS_YARP_FQDN, TEAMS_TENANT_ID and TEAMS_BOT_NAME (from 'azd env get-values')."
+            }
+          }
+          $scope = if ([string]::IsNullOrWhiteSpace($env:PUBLISH_SCOPE)) { 'Shared' } else { $env:PUBLISH_SCOPE }
+          ./scripts/publish-teams-runner.ps1 `
+            -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
+            -ResourceGroup            $env:RESOURCE_GROUP `
+            -AgentNames               $env:AGENT_NAMES `
+            -YarpFqdn                 $env:YARP_FQDN `
+            -TenantId                 $env:TENANT_ID `
+            -BotName                  $env:BOT_NAME `
+            -NamePrefix               $env:NAME_PREFIX `
+            -LogAnalyticsWorkspaceId  $env:LOG_ANALYTICS_ID `
+            -PublishScope             $scope `
+            -PublishAccessToken       $env:PUBLISH_USER_TOKEN
+
