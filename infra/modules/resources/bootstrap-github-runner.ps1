@@ -104,7 +104,66 @@ function Install-GitForWindows {
 }
 Install-GitForWindows
 
-# --- 0c. Idempotency: skip if a runner service already exists ----------------
+# --- 0c. Pre-seed Python into the runner tool cache (admin/SYSTEM context) -----
+# The nightly eval workflow uses actions/setup-python, whose install runs the Python
+# installer with InstallAllUsers=1 and creates a machine symlink — both require
+# elevation. The runner service is NON-admin (NETWORK SERVICE), so that install fails
+# ("Error happened during Python installation"). Pre-seed Python here, as SYSTEM, into
+# the runner's tool cache (_work\_tool) using the SAME actions/python-versions package
+# setup-python would use; it writes the `x64.complete` marker, so setup-python then
+# finds the cached version and skips the elevated install. We reuse python-versions'
+# own setup.ps1 (resolved from its manifest) so the exact install steps stay in sync.
+# Idempotent, and placed before the runner idempotency check so it also lands on VMs
+# where the runner is already installed.
+function Install-PythonToolcache {
+  param([string]$MajorMinor = '3.10')
+  $toolCache  = Join-Path $InstallDir '_work\_tool'
+  $pythonRoot = Join-Path $toolCache 'Python'
+  if (Test-Path $pythonRoot) {
+    $done = Get-ChildItem -Path $pythonRoot -Directory -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -like "$MajorMinor.*" -and (Test-Path (Join-Path $pythonRoot ("{0}\x64.complete" -f $_.Name))) }
+    if ($done) { Write-Log "Python $MajorMinor already present in the runner tool cache - skipping."; return }
+  }
+
+  Write-Log "Resolving latest Python $MajorMinor Windows x64 build from actions/python-versions..."
+  $manifest = Invoke-RestMethod -Uri 'https://raw.githubusercontent.com/actions/python-versions/main/versions-manifest.json' -UseBasicParsing
+  $pattern = "^$([regex]::Escape($MajorMinor))\.\d+$"
+  $entry = $manifest |
+    Where-Object { $_.version -match $pattern -and ($_.files | Where-Object { $_.platform -eq 'win32' -and $_.arch -eq 'x64' }) } |
+    Sort-Object { [version]$_.version } -Descending | Select-Object -First 1
+  if (-not $entry) { throw "No Windows x64 build for Python $MajorMinor in the python-versions manifest." }
+  $asset = $entry.files | Where-Object { $_.platform -eq 'win32' -and $_.arch -eq 'x64' } | Select-Object -First 1
+
+  $zip     = Join-Path $env:TEMP "python-$($entry.version)-win-x64.zip"
+  $extract = Join-Path $env:TEMP "python-$($entry.version)-win-x64"
+  Write-Log "Downloading Python $($entry.version)..."
+  Invoke-WebRequest -Uri $asset.download_url -OutFile $zip -UseBasicParsing
+  if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $extract)
+
+  New-Item -ItemType Directory -Force -Path $toolCache | Out-Null
+  $env:AGENT_TOOLSDIRECTORY = $toolCache
+  Write-Log "Installing Python $($entry.version) into $toolCache (as SYSTEM)..."
+  Push-Location $extract
+  try {
+    & (Join-Path $extract 'setup.ps1')
+    if ($LASTEXITCODE -ne 0) { throw "python-versions setup.ps1 exited with code $LASTEXITCODE." }
+  }
+  finally { Pop-Location }
+
+  # SYSTEM created the Python tree; grant the runner account (NETWORK SERVICE,
+  # well-known SID S-1-5-20) Modify so the action's `pip install` can write site-packages.
+  Write-Log 'Granting NETWORK SERVICE modify rights on the tool cache...'
+  & icacls $toolCache /grant '*S-1-5-20:(OI)(CI)M' /T /C /Q | Out-Null
+
+  Remove-Item $zip -Force -ErrorAction SilentlyContinue
+  Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+  Write-Log "Python $($entry.version) installed into the runner tool cache."
+}
+Install-PythonToolcache
+
+# --- 0d. Idempotency: skip if a runner service already exists ----------------
 $existingService = Get-Service -Name 'actions.runner.*' -ErrorAction SilentlyContinue
 if ($existingService) {
   Write-Log "Runner service '$($existingService.Name)' already installed. Nothing to do."
