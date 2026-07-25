@@ -53,6 +53,9 @@ param modelGatewayApimSubnetCidr string
 @description('CIDR of the primary Foundry spoke pe-subnet (Foundry account PE). The APIM outbound subnet is allowed to reach this on 443 for the Teams inbound path.')
 param foundryPeSubnetCidr string
 
+@description('CIDR of the App Service spoke pe-subnet (MCP web app PE). The APIM outbound subnet is allowed to reach this on 443 for the MCP server gateway path.')
+param appServicePeSubnetCidr string
+
 // Service tags APIM v2 may reach for platform dependencies / MI token acquisition
 // when its outbound-integration subnet force-tunnels 0.0.0.0/0 through the firewall.
 // AzureResourceManager is required for the dynamic model-discovery operations
@@ -165,6 +168,29 @@ resource gatewayRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColl
             ]
             destinationAddresses: [
               foundryPeSubnetCidr
+            ]
+            destinationPorts: ['443']
+            ipProtocols: ['TCP']
+          }
+        ]
+      }
+      {
+        name: 'Net-ApimToMcpPe'
+        ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
+        priority: 345
+        action: {
+          type: 'Allow'
+        }
+        rules: [
+          {
+            ruleType: 'NetworkRule'
+            name: 'AllowApimToMcpAppServicePE'
+            description: 'MCP gateway: APIM outbound subnet reaches the MCP web app private endpoint (App Service spoke pe-subnet) on 443/TCP to forward MCP tool requests.'
+            sourceAddresses: [
+              modelGatewayApimSubnetCidr
+            ]
+            destinationAddresses: [
+              appServicePeSubnetCidr
             ]
             destinationPorts: ['443']
             ipProtocols: ['TCP']

@@ -280,6 +280,7 @@ module appServiceSpokeVnet 'modules/network/appservice-spoke-vnet.bicep' = {
     vnetName: '${vnetName}-appservice-spoke'
     firewallPrivateIp: firewall.outputs.firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
+    apimSubnetCidr: modelGatewayApimSubnetCidr
   }
 }
 
@@ -572,7 +573,7 @@ module aiProject 'modules/foundry/ai-project-identity.bicep' = {
     logAnalyticsWorkspaceId: lanalytics.id
 
     mcpServerName: 'testweathermcpserver'
-    mcpUrl: 'https://${aiDependencies.outputs.mcpWebAppFqdn}/'
+    mcpUrl: '${apimMcpApi.outputs.mcpGatewayUrl}/'
     // Mint the agent's tool token for our own app registration (an audience we control), so
     // App Service built-in auth on the MCP web app accepts it.
     mcpAudience: mcpAppRegistration.outputs.audience
@@ -840,6 +841,20 @@ module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assi
   }
 }
 
+// APIM MCP server API — exposes the private MCP web app through the APIM gateway.
+// The Foundry MCP connection points at this APIM endpoint instead of directly at the
+// App Service private endpoint, so all MCP tool traffic flows through the gateway.
+module apimMcpApi 'modules/model-gateway/apim-mcp-api.bicep' = {
+  name: 'mcp-apim-api-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apim.outputs.apimName
+    mcpWebAppFqdn: aiDependencies.outputs.mcpWebAppFqdn
+  }
+  dependsOn: [
+    apimProviderRoleAssignment
+  ]
+}
+
 // APIM inference API + policy (inbound token validation, backend + MI auth).
 module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
@@ -898,6 +913,7 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
     apimPrivateEndpoint
     apimApiPolicy
     apimTeamsApi
+    apimMcpApi
   ]
 }
 
@@ -916,6 +932,7 @@ module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep'
     modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     foundryPeSubnetCidr: foundryPeSubnetCidr
+    appServicePeSubnetCidr: appServicePeSubnetCidr
   }
   dependsOn: [
     firewall
