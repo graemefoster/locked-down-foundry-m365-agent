@@ -103,7 +103,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           addressPrefix: peSubnet
           // MCP gateway path: honor the return-path UDR for PE traffic so APIM<->MCP PE
           // routing is symmetric through the firewall. No-op when apimSubnetCidr is empty.
-          privateEndpointNetworkPolicies: empty(apimSubnetCidr) ? null : 'Enabled'
+          privateEndpointNetworkPolicies: empty(apimSubnetCidr) ? 'Disabled' : 'Enabled'
           routeTable: empty(apimSubnetCidr) ? null : { id: peRouteTable.id }
         }
       }
