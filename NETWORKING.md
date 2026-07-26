@@ -40,7 +40,7 @@ Foundry spoke subnets:
 |--------|------|-------|
 | `agent-subnet` | `10.2.0.0/24` | Delegated to `Microsoft.App/environments` (ACA workload profile). **Locked down.** |
 | `pe-subnet` | `10.2.1.0/24` | Private endpoints (AI account, Search, Storage, Cosmos, Key Vault, ACR). |
-| `VirtualMachines` | `10.2.2.0/24` | Dev/jumpbox VM. Unrestricted egress. |
+| `VirtualMachines` | `10.2.2.0/24` | Linux worker VM (Actions runner + `az vm run-command` target) and the optional Windows dev/jumpbox VM. Unrestricted egress. |
 
 Routing: a UDR sends `0.0.0.0/0` from the agent and VM subnets to the firewall
 private IP. DNS for both spokes points at the hub DNS Private Resolver inbound

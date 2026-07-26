@@ -15,11 +15,12 @@ name: Nightly eval — test-agent-one (VNet self-hosted)
 #   DefaultAzureCredential, which picks up the VM's SYSTEM-ASSIGNED managed identity via
 #   IMDS — no `azure/login` / OIDC and no id-token permission needed.
 #
-# Runner prerequisites (installed by infra/.../bootstrap-github-runner.ps1):
-#   * Git for Windows — the action's steps declare `shell: bash`, which on Windows
-#     resolves to Git Bash. Windows Server ships no Git, so the bootstrap installs it.
-#   * Python is provided at run time by actions/setup-python (the VM subnet has
-#     unrestricted egress, so the download and `pip install` succeed).
+# The runner VM is LINUX (infra/modules/resources/vm-linux.bicep), which is why this
+# workflow can consume `microsoft/ai-agent-evals` directly: the action's steps declare
+# `shell: bash` and pass ${{ github.action_path }} unquoted, which used to break on the
+# old Windows runner's backslash paths and forced a manual checkout of the action.
+# Python, pwsh, git and the Azure CLI are provided by the VM's cloud-init bootstrap.
+
 #
 # ⚠️ Known limitation — version-over-version comparison is DISABLED by default here:
 #   microsoft/ai-agent-evals' comparison step calls the Foundry "insights.generate"
@@ -89,7 +90,7 @@ jobs:
       # via the agentIds/baselineAgentId inputs.
       - name: Resolve evaluation inputs
         id: cfg
-        shell: powershell
+        shell: pwsh
         env:
           INPUT_ENDPOINT:   ${{ inputs.foundryProjectEndpoint }}
           VAR_ENDPOINT:     ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
@@ -161,49 +162,17 @@ jobs:
           "baseline=$baseline"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "data-path=$dataPath"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      # We run the upstream microsoft/ai-agent-evals code ourselves rather than via
-      # `uses: microsoft/ai-agent-evals@v3-beta`. Reason: that composite action declares its
-      # steps with `shell: bash` and passes ${{ github.action_path }} UNQUOTED to pip/python.
-      # On this Windows runner the path is backslash-separated (C:\actions-runner\...), and
-      # bash strips the backslashes -> "C:actions-runner..." -> the action fails. Linux runners
-      # avoid this (forward-slash paths), but the Foundry endpoint is private so we must stay
-      # on the in-VNet Windows runner. Checking the action out to a sub-directory and invoking
-      # it from there with RELATIVE paths (`pip install .`, `python action.py`) means no Windows
-      # path is ever tokenised by bash. Pinned to the same v3-beta ref, so behaviour matches.
-      - name: Check out the evaluation action
-        uses: actions/checkout@v5
-        with:
-          repository: microsoft/ai-agent-evals
-          ref: v3-beta
-          path: .ai-agent-evals
-
-      # Provides python 3.10 (found in the runner tool cache, pre-seeded by the bootstrap).
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.10"
-
-      - name: Install evaluation dependencies
-        shell: bash
-        working-directory: .ai-agent-evals
-        run: |
-          python -m pip install --upgrade pip
-          pip install .
-
       # Runs the agent against the dataset and posts a scored report to the run summary.
       # DefaultAzureCredential authenticates as the VM's system-assigned managed identity.
       # By default a single version is evaluated (see header). If two versions are passed
-      # explicitly, action.py also attempts a pairwise comparison — which will fail in this
+      # explicitly, the action also attempts a pairwise comparison — which will fail in this
       # Private BYO workspace because the underlying cluster-analysis API is unsupported.
-      # These env vars mirror exactly what microsoft/ai-agent-evals' action.yml sets for action.py.
       - name: Run agent evaluation
-        shell: bash
-        working-directory: .ai-agent-evals
-        run: python action.py
-        env:
-          AZURE_AI_PROJECT_ENDPOINT: ${{ steps.cfg.outputs.endpoint }}
-          DEPLOYMENT_NAME: ${{ steps.cfg.outputs.deployment }}
-          API_VERSION: ""
-          DATA_PATH: ${{ github.workspace }}/${{ steps.cfg.outputs.data-path }}
-          AGENT_IDS: ${{ steps.cfg.outputs.agent-ids }}
-          BASELINE_AGENT_ID: ${{ steps.cfg.outputs.baseline }}
+        uses: microsoft/ai-agent-evals@v3-beta
+        with:
+          azure-ai-project-endpoint: ${{ steps.cfg.outputs.endpoint }}
+          deployment-name: ${{ steps.cfg.outputs.deployment }}
+          data-path: ${{ github.workspace }}/${{ steps.cfg.outputs.data-path }}
+          agent-ids: ${{ steps.cfg.outputs.agent-ids }}
+          baseline-agent-id: ${{ steps.cfg.outputs.baseline }}
+

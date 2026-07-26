@@ -70,9 +70,13 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
   **[docs/model-gateway.md](./docs/model-gateway.md)** ·
   [deep dive](./apim-model-gateway.md).
 - **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
-  the dev VM so complex deployments run *inside the VNet*, reaching the private Foundry
-  endpoint directly instead of via `az vm run-command`. Opt in with
+  the in-VNet **Linux** worker VM so complex deployments run *inside the VNet*, reaching
+  the private Foundry endpoint directly instead of via `az vm run-command`. Opt in with
   `GITHUB_RUNNER_REPO_URL`. **[docs/github-runner.md](./docs/github-runner.md)**.
+- **Optional Windows dev VM** *(off by default)* — the RDP-in-and-run-Edge box for
+  inspecting the environment from behind the firewall. All automation lives on the Linux
+  worker VM, so this stays off unless you want that interactive session: opt in with
+  `azd env set DEPLOY_WINDOWS_VM true`, which also brings up Azure Bastion to reach it.
 
 ## Documentation
 

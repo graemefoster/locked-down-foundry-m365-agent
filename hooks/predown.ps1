@@ -4,9 +4,7 @@
   A Foundry (Cognitive Services) account/project with an Agents capability host cannot be
   deleted cleanly while the capability host still exists - `azd down` will hang or fail on the
   account. This hook runs BEFORE azd deletes any resources, enumerates the capability hosts on
-  the project (and account, to catch any auto-created one), and deletes each. `az resource
-  delete` polls the long-running delete operation to completion, so azd only proceeds once the
-  capability hosts are gone.
+  the project (and account, to catch any auto-created one), and deletes each.
 
   Runs on the azd host (laptop / CI). Capability-host management is a control-plane (ARM)
   operation, so - unlike the private data-plane Agents API used by predeploy - it does NOT need
@@ -22,7 +20,10 @@
   Caller RBAC: permission to delete capability hosts
   (Microsoft.CognitiveServices/accounts/.../capabilityHosts/delete), e.g. Cognitive Services
   Contributor on the account/resource group.
+
+  Requires: Az.Accounts module (ships with pwsh on azd-supported platforms).
 #>
+#Requires -Modules Az.Accounts, Az.Resources
 $ErrorActionPreference = 'Stop'
 
 $apiVersion = '2025-04-01-preview'
@@ -39,9 +40,10 @@ $resourceGroup  = Get-OptionalEnv 'AZURE_RESOURCE_GROUP'
 $accountName    = Get-OptionalEnv 'AZURE_AI_ACCOUNT_NAME'
 $projectName    = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME'
 
-# Subscription can also be discovered from the logged-in az context.
+# Subscription can also be discovered from the current Az context.
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-  $subscriptionId = (az account show --query id --output tsv 2>$null)
+  $ctx = Get-AzContext -ErrorAction SilentlyContinue
+  if ($ctx) { $subscriptionId = $ctx.Subscription.Id }
 }
 
 # Best-effort gate: if we truly can't act (no subscription/RG) or Foundry was never
@@ -60,8 +62,6 @@ if (-not $hasAccount -and -not $hasProject) {
 }
 
 # The blocking capability host is created at PROJECT scope, so we MUST know the project name.
-# A half-populated env (one name present, the other missing) is anomalous - fail rather than
-# risk leaving the project capability host behind, which would make azd's Foundry delete fail.
 if (-not $hasProject) {
   throw "[predown] AZURE_AI_ACCOUNT_NAME is set but AZURE_AI_PROJECT_NAME is missing. Cannot delete the project-scope capability host. Run 'azd env refresh' and retry 'azd down'."
 }
@@ -69,29 +69,24 @@ if (-not $hasAccount) {
   throw "[predown] AZURE_AI_PROJECT_NAME is set but AZURE_AI_ACCOUNT_NAME is missing. Cannot build the capability-host resource path. Run 'azd env refresh' and retry 'azd down'."
 }
 
-$base = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
+$basePath = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
 
 function Get-CapabilityHostIds {
-  param([string]$ListUrl, [string]$Scope)
-  # Merge stderr so we can inspect the error text; az writes JSON to stdout on success.
-  $raw = az rest --method get --url "$ListUrl" --output json 2>&1
-  if ($LASTEXITCODE -ne 0) {
-    $text = ($raw | Out-String)
-    # Parent scope already gone (e.g. re-run after a partial down) - nothing to enumerate.
-    if ($text -match '(?i)ResourceNotFound|NotFound|was not found|\b404\b') {
+  param([string]$Path, [string]$Scope)
+  $response = Invoke-AzRestMethod -Method GET -Path "${Path}/capabilityHosts?api-version=$apiVersion"
+  if ($response.StatusCode -eq 404) {
+    Write-Host "[predown] No $Scope scope found (already deleted). Nothing to enumerate."
+    return @()
+  }
+  if ($response.StatusCode -ge 400) {
+    $text = $response.Content
+    if ($text -match '(?i)ResourceNotFound|NotFound|was not found') {
       Write-Host "[predown] No $Scope scope found (already deleted). Nothing to enumerate."
       return @()
     }
-    # A real failure (RBAC denial, transient/server error) must NOT be treated as "no hosts",
-    # or we could proceed and leave a blocking capability host behind.
-    throw "[predown] Failed to enumerate $Scope capability hosts (exit $LASTEXITCODE): $text"
+    throw "[predown] Failed to enumerate $Scope capability hosts (HTTP $($response.StatusCode)): $text"
   }
-  # On success $raw may be stdout JSON lines possibly mixed with stderr warning records
-  # (from 2>&1) - e.g. az CLI upgrade notices, common with -preview API versions. Keep only
-  # the string (stdout) lines before parsing, or ConvertFrom-Json would choke on a warning.
-  $json = ($raw | Where-Object { $_ -is [string] }) -join "`n"
-  if ([string]::IsNullOrWhiteSpace($json)) { return @() }
-  $parsed = $json | ConvertFrom-Json
+  $parsed = $response.Content | ConvertFrom-Json
   return @($parsed.value | Where-Object { $_ } | ForEach-Object { $_.id })
 }
 
@@ -99,10 +94,9 @@ function Remove-CapabilityHosts {
   param([string[]]$Ids, [string]$Scope)
   foreach ($id in $Ids) {
     Write-Host "[predown] Deleting $Scope capability host: $id"
-    az resource delete --ids "$id" --api-version $apiVersion --output none
-    if ($LASTEXITCODE -ne 0) {
-      throw "[predown] Failed to delete capability host '$id' (exit code $LASTEXITCODE). Resolve this before retrying 'azd down', otherwise Foundry deletion will fail."
-    }
+    # Remove-AzResource handles long-running operation polling (waits for delete to complete),
+    # which is required: project-scope hosts must be fully gone before account-scope deletion.
+    Remove-AzResource -ResourceId $id -ApiVersion $apiVersion -Force -ErrorAction Stop
     Write-Host "[predown] Deleted: $id"
   }
 }
@@ -110,19 +104,13 @@ function Remove-CapabilityHosts {
 $capHostIds = @()
 
 # --- Phase 1: PROJECT-scope capability hosts ---------------------------------------------
-# These are the blocking hosts this template creates. They MUST be deleted first - and
-# confirmed gone (az resource delete polls the LRO) - before we touch the account, or the
-# account-scope delete / azd's Foundry teardown will fail. Project name is guaranteed present
-# by the gate above.
-$projectListUrl = "$base/projects/$projectName/capabilityHosts?api-version=$apiVersion"
-$projectIds = Get-CapabilityHostIds -ListUrl $projectListUrl -Scope 'project'
+$projectPath = "$basePath/projects/$projectName"
+$projectIds = Get-CapabilityHostIds -Path $projectPath -Scope 'project'
 Remove-CapabilityHosts -Ids $projectIds -Scope 'project'
 $capHostIds += $projectIds
 
 # --- Phase 2: ACCOUNT-scope capability hosts ---------------------------------------------
-# Only after every project host is gone. Catches any auto-created account-level host.
-$accountListUrl = "$base/capabilityHosts?api-version=$apiVersion"
-$accountIds = Get-CapabilityHostIds -ListUrl $accountListUrl -Scope 'account'
+$accountIds = Get-CapabilityHostIds -Path $basePath -Scope 'account'
 Remove-CapabilityHosts -Ids $accountIds -Scope 'account'
 $capHostIds += $accountIds
 

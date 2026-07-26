@@ -120,12 +120,34 @@ param vmAdminPassword string
 param vmAdminUsername string
 
 @description('''
+Deploy the OPTIONAL Windows dev VM. Its only purpose is the human "RDP in and run
+Edge to inspect the environment behind the firewall" experience. All automation
+(agent seeding + the self-hosted Actions runner) runs on the always-on Linux
+worker VM, so this defaults to FALSE — you only pay the Windows licence, compute
+and Bastion cost when you explicitly opt in with
+`azd env set DEPLOY_WINDOWS_VM true`.
+''')
+param deployWindowsVm bool = false
+
+@description('''
+Deploy Azure Bastion. Bastion exists for INTERACTIVE human access: it is the only way
+to reach the Windows dev VM (RDP), so this DEFAULTS to deployWindowsVm — turn the
+Windows VM off and Bastion goes with it. The Linux worker VM needs no interactive
+path (seeding goes through `az vm run-command`, the Actions runner registers outbound),
+so a CI-only environment gets neither. Deliberately NOT in main.parameters.json so the
+derived default applies; override it in a .bicepparam if you want Bastion SSH into the
+Linux VM without the Windows VM.
+''')
+param deployBastion bool = deployWindowsVm
+
+@description('''
 GitHub repo URL (https://github.com/owner/repo) to register a self-hosted Actions
-runner on the dev VM against. Leave EMPTY (default) to skip runner installation.
-When set, the VM installs a runner as a Windows service, reading a fine-grained PAT
-from Key Vault via its managed identity. See docs/github-runner.md.
+runner on the Linux worker VM against. Leave EMPTY (default) to skip runner
+installation. When set, the VM installs a runner as a systemd service, reading a
+fine-grained PAT from Key Vault via its managed identity. See docs/github-runner.md.
 ''')
 param githubRunnerRepoUrl string = ''
+
 
 @description('Name of the Key Vault secret holding the runner PAT (Administration: read & write). Seeded manually.')
 param githubRunnerPatSecretName string = 'gh-runner-pat'
@@ -719,9 +741,35 @@ module cosmosContainerRoleAssignments 'modules/rbac/cosmos-container-role-assign
   ]
 }
 
-// ==================== VM + BASTION (in Foundry Spoke) ====================
+// ==================== VMs + BASTION (in Foundry Spoke) ====================
 
-module vmModule 'modules/resources/vm.bicep' = {
+// Two boxes, one job each:
+//   * linuxVmModule   - ALWAYS deployed. The in-VNet workhorse: the `az vm run-command`
+//                       target for agent seeding AND the self-hosted Actions runner host.
+//                       Linux because microsoft/ai-agent-evals is effectively Linux-only.
+//                       Holds all the private-plane RBAC (Foundry / KV / Contributor).
+//   * vmModule        - OPTIONAL Windows dev VM, human RDP + Edge inspection only, no RBAC.
+// Bastion is its own module, gated by deployBastion (which defaults to deployWindowsVm):
+// it exists purely for interactive human access, and the Linux VM needs no interactive
+// path for automation. Deploying it separately means you CAN still opt into Bastion SSH
+// on the Linux VM without paying for the Windows VM.
+
+module linuxVmModule 'modules/resources/vm-linux.bicep' = {
+  name: 'linux-vm-deployment-${uniqueSuffix}'
+  params: {
+    location: location
+    vmName: 'runner-vm-${uniqueSuffix}'
+    virtualNetworkName: foundrySpokeVnet.outputs.virtualNetworkName
+    subnetName: foundrySpokeVnet.outputs.vmSubnetName
+    adminPassword: vmAdminPassword
+    adminUsername: vmAdminUsername
+  }
+  dependsOn: [
+    privateEndpointAndDNS
+  ]
+}
+
+module vmModule 'modules/resources/vm.bicep' = if (deployWindowsVm) {
   name: 'vm-deployment-${uniqueSuffix}'
   params: {
     location: location
@@ -735,6 +783,18 @@ module vmModule 'modules/resources/vm.bicep' = {
     privateEndpointAndDNS
   ]
 }
+
+module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
+  name: 'bastion-deployment-${uniqueSuffix}'
+  params: {
+    location: location
+    virtualNetworkName: foundrySpokeVnet.outputs.virtualNetworkName
+  }
+  dependsOn: [
+    privateEndpointAndDNS
+  ]
+}
+
 
 // ==================== MODEL GATEWAY (spoke) ====================
 
@@ -941,17 +1001,18 @@ module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep'
 
 // ==================== SEED AGENTS: VM RBAC ====================
 
-// Agent seeding now runs from the azd `predeploy` hook (hooks/predeploy.ps1), which uses
-// `az vm run-command` to execute scripts/seed-agents.ps1 on the private VM (the only host
-// that can reach the Foundry private endpoint). The VM's system-assigned identity still
-// needs Foundry User on the project so the on-VM script can acquire a token and call the
+// Agent seeding runs from the azd `predeploy` hook (hooks/predeploy.ps1), which uses
+// `az vm run-command` to execute scripts/seed-agents.ps1 on the private LINUX VM (the
+// only host that can reach the Foundry private endpoint — the Windows dev VM is optional
+// and intentionally has no such access). The Linux VM's system-assigned identity needs
+// Foundry User on the project so the on-VM script can acquire a token and call the
 // Agents API — that RBAC is provisioned here.
 module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
   name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
     accountName: aiAccount.outputs.accountName
     projectName: aiProject.outputs.projectName
-    vmPrincipalId: vmModule.outputs.vmPrincipalId
+    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
   dependsOn: [
     addProjectCapabilityHost
@@ -960,10 +1021,10 @@ module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
 
 // ==================== SELF-HOSTED GITHUB ACTIONS RUNNER (opt-in) ====================
 
-// When githubRunnerRepoUrl is set, install a self-hosted runner on the dev VM so
+// When githubRunnerRepoUrl is set, install a self-hosted runner on the Linux worker VM so
 // complex, representative deployments can run INSIDE the VNet (reaching the private
 // Foundry endpoint directly) instead of being marshalled through `az vm run-command`.
-// The VM MI needs Key Vault Secrets User to read the runner PAT; the extension that
+// The VM MI needs Key Vault Secrets User to read the runner PAT; the Run Command that
 // runs the bootstrap is sequenced AFTER that role assignment. See docs/github-runner.md.
 var installGithubRunner = !empty(githubRunnerRepoUrl)
 
@@ -971,7 +1032,7 @@ module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if 
   name: 'vm-kv-secrets-role-${uniqueSuffix}'
   params: {
     keyVaultName: keyVault.outputs.keyVaultName
-    vmPrincipalId: vmModule.outputs.vmPrincipalId
+    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
 
@@ -982,7 +1043,7 @@ module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if 
 module vmContributorRole 'modules/rbac/vm-contributor-role.bicep' = if (installGithubRunner) {
   name: 'vm-contributor-role-${uniqueSuffix}'
   params: {
-    vmPrincipalId: vmModule.outputs.vmPrincipalId
+    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
 
@@ -995,7 +1056,7 @@ module vmOpenAiUserRole 'modules/rbac/vm-openai-user-role.bicep' = if (installGi
   name: 'vm-openai-user-role-${uniqueSuffix}'
   params: {
     accountName: aiAccount.outputs.accountName
-    vmPrincipalId: vmModule.outputs.vmPrincipalId
+    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
 
@@ -1014,12 +1075,13 @@ module runnerPatSecret 'modules/resources/runner-pat-secret.bicep' = if (install
 module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (installGithubRunner) {
   name: 'vm-runner-extension-${uniqueSuffix}'
   params: {
-    vmName: vmModule.outputs.vmName
+    vmName: linuxVmModule.outputs.vmName
     location: location
     githubRunnerRepoUrl: githubRunnerRepoUrl
     keyVaultName: keyVault.outputs.keyVaultName
     githubRunnerPatSecretName: githubRunnerPatSecretName
     githubRunnerLabels: githubRunnerLabels
+    runnerUser: vmAdminUsername
   }
   dependsOn: [
     vmKeyVaultSecretsRole
@@ -1027,13 +1089,15 @@ module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (ins
   ]
 }
 
+
 // ==================== OUTPUTS (consumed by the azd predeploy hook) ====================
 
 @description('Resource group the deployment targets.')
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 
-@description('Name of the private VM the seed-agents hook runs its script on.')
-output SEED_AGENTS_VM_NAME string = vmModule.outputs.vmName
+@description('Name of the private Linux VM the seed-agents hook runs its script on.')
+output SEED_AGENTS_VM_NAME string = linuxVmModule.outputs.vmName
+
 
 @description('Foundry project endpoint the seeded agents are created against.')
 output AZURE_AI_PROJECT_ENDPOINT string = aiProject.outputs.projectEndpoint

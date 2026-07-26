@@ -1,9 +1,10 @@
 <#
   Seed Foundry Agents (runs ON the private VM)
   --------------------------------------------
-  Executed on the locked-down Windows VM (inside the private VNet) by the azd `predeploy`
-  hook (hooks/predeploy.ps1) via `az vm run-command`. The VM is the only host that can reach
-  the Foundry private endpoint, so the seeding logic must run here.
+  Executed on the locked-down Linux worker VM (inside the private VNet) by the azd `predeploy`
+  hook (hooks/predeploy.ps1), which ships this file over `RunShellScript` and runs it under
+  pwsh via the hooks/vm-run-command.ps1 shim. The VM is the only host that can reach the
+  Foundry private endpoint, so the seeding logic must run here.
 
   It acquires a managed-identity token via IMDS and calls the Agents REST API. Re-running is
   safe: a new agent is created if missing; an existing agent gets a fresh version each run
@@ -37,7 +38,7 @@ function Get-HttpErrorDetail {
   $resp   = $ErrorRecord.Exception.Response
   if ($resp) {
     try { $status = [int]$resp.StatusCode } catch {}
-    # Windows PowerShell 5.1 (RunPowerShellScript on the VM): read the response stream.
+    # Some failures still carry the payload on the response stream rather than ErrorDetails.
     try {
       $reader = New-Object System.IO.StreamReader($resp.GetResponseStream())
       $body = $reader.ReadToEnd()

@@ -23,7 +23,7 @@ runs:
   using: composite
   steps:
     - name: Publish agent version
-      shell: powershell
+      shell: pwsh
       run: |
         ./scripts/publish-agent.ps1 `
           -AgentName              "${{ inputs.agent-name }}" `

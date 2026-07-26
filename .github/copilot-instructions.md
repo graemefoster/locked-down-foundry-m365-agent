@@ -13,7 +13,8 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `azure.yaml` | Wires `infra/` + the `predeploy` and `predown` hooks. |
 | `hooks/predeploy.ps1` | azd **predeploy** hook — seeds Foundry agents. |
 | `hooks/predown.ps1` | azd **predown** hook — deletes capability hosts before teardown. |
-| `scripts/seed-agents.ps1` | Runs **on the private VM** (via `az vm run-command`) to create agents. |
+| `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. |
+| `scripts/seed-agents.ps1` | Runs **on the private Linux VM** (via `hooks/vm-run-command.ps1`) to create agents. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration,
 not IaC) and do **not** reference Bicep file paths, so moving modules never breaks them.
@@ -48,8 +49,10 @@ azd down
 - Runs on the azd host (laptop / CI), triggered by `azd deploy` (once a service is defined) or
   directly via `azd hooks run predeploy`.
 - The Foundry endpoint is **private**, so the host cannot call the Agents API directly. The
-  hook instead uses `az vm run-command` to execute `scripts/seed-agents.ps1` **on the
-  locked-down VM inside the VNet**, which can reach the private endpoint.
+  hook instead uses `az vm run-command` (via the `hooks/vm-run-command.ps1` shim, which
+  wraps the script in a `RunShellScript` heredoc and executes it with `pwsh`) to run
+  `scripts/seed-agents.ps1` **on the locked-down Linux worker VM inside the VNet**, which
+  can reach the private endpoint.
 - Idempotent: existing agents (matched by name) are skipped. Edit the `$agentsToCreate` array
   in `scripts/seed-agents.ps1` to change which agents are seeded.
 - Requires these Bicep **outputs** (surfaced by azd as env vars): `AZURE_RESOURCE_GROUP`,

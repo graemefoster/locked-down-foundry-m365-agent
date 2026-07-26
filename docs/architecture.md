@@ -156,10 +156,11 @@ infra/
     │                           #   firewall, private endpoints, flow logs
     ├── foundry/                # AI account/project identity, capability host,
     │                           #   workspace-id formatting
-    ├── resources/              # ACR, Key Vault, VM, App Service, dependent resources
+    ├── resources/              # ACR, Key Vault, VMs (Linux worker + optional Windows
+    │                           #   dev VM), Bastion, App Service, dependent resources
     │                           #   (Cosmos/Storage/Search)
     ├── encryption/             # CMK encryption for ACR, AI account, Storage
-    ├── rbac/                   # All role assignments (incl. VM → Foundry User)
+    ├── rbac/                   # All role assignments (incl. Linux VM → Foundry User)
     └── model-gateway/          # Optional APIM Standard v2 + provider Foundry spoke
 ```
 

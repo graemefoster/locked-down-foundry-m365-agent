@@ -2,7 +2,7 @@
   create-agent.ps1  (runs ON the private VNet self-hosted runner)
   ---------------------------------------------------------------
   Create-or-update a Foundry agent from a normalized agent JSON file (produced from agent.yaml
-  by the workflow's `prepare` job). If the agent does not exist it is created (POST /agents);
+  by the `yq` step in the deploy job). If the agent does not exist it is created (POST /agents);
   otherwise a new version is added (POST /agents/{name}/versions). The Foundry API de-duplicates
   identical definitions, so an unchanged definition simply returns the current latest version.
 
@@ -11,7 +11,7 @@
   The resolved agent name and version are written to $GITHUB_OUTPUT (agent-name, agent-version)
   so the composite action can surface them to the publish step.
 
-  Windows PowerShell 5.1 compatible. Uses the VM managed identity via IMDS (no az login).
+  PowerShell 7 (pwsh), cross-platform. Uses the VM managed identity via IMDS (no az login).
 #>
 param(
   [Parameter(Mandatory = $true)] [string]$AgentJsonPath,

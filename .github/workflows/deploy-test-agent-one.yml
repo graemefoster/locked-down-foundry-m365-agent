@@ -19,15 +19,17 @@ name: Deploy test-agent-one (VNet self-hosted)
 # So for a prompt agent, calling the Agents REST API (create/update version + publish) from the
 # in-VNet runner is the correct and simplest path.
 #
-# Two-stage design driven by the network posture:
-#   * prepare  (GitHub-hosted) - converts agent.yaml -> normalized JSON with `yq`. Needs no
-#                                 secrets and no access to the private Foundry endpoint, so it
-#                                 runs safely on an ephemeral hosted runner.
-#   * deploy   (self-hosted, in-VNet) - the ONLY job that touches the PRIVATE Foundry endpoint.
-#                                 workflow_dispatch only + a repository guard keep fork code off
-#                                 the VM. It creates/updates the agent version, then publishes it
-#                                 (routes 100% of traffic to the new version) with no manual gate,
-#                                 authenticating as the VM managed identity via IMDS.
+# Single-job design:
+#   * deploy   (self-hosted, in-VNet) - the ONLY job, and the only thing that touches the
+#                                 PRIVATE Foundry endpoint. It converts agent.yaml ->
+#                                 agent.json with `yq` (the in-VNet runner is now LINUX and
+#                                 cloud-init installs yq, so this no longer needs a separate
+#                                 GitHub-hosted `prepare` job plus an artifact round-trip),
+#                                 creates/updates the agent version, then publishes it
+#                                 (routes 100% of traffic to the new version) with no manual
+#                                 gate, authenticating as the VM managed identity via IMDS.
+#                                 workflow_dispatch only + a repository guard keep fork code
+#                                 off the VM.
 #   * publish-teams (self-hosted, in-VNet) - OPTIONAL, MANUAL APPROVAL. Gated by the vnet-deploy
 #                                 environment (add a required reviewer) so it pauses before it
 #                                 creates the Azure Bot Service and submits the app to the M365
@@ -62,19 +64,24 @@ env:
   MANIFEST_PATH: agents/test-agent-one/agent.yaml
 
 jobs:
-  # --- Stage 1: parse agent.yaml -> agent.json on a hosted runner --------------
-  prepare:
+  # --- create/update + publish against the PRIVATE endpoint --------------------
+  deploy:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, vnet, foundry-private]
+    outputs:
+      agent-name: ${{ steps.create.outputs.agent-name }}
+      endpoint: ${{ steps.cfg.outputs.endpoint }}
     steps:
       - uses: actions/checkout@v5
 
+      # yq is installed by cloud-init on the in-VNet Linux runner
+      # (infra/modules/resources/cloud-init-linux-vm.yaml).
       - name: Convert agent.yaml -> agent.json (yq)
         env:
           MANIFEST: ${{ env.MANIFEST_PATH }}
         run: |
           if ! command -v yq >/dev/null 2>&1; then
-            echo "::error::yq is required to convert the manifest but was not found on the runner."
+            echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
             exit 1
           fi
           if [ ! -f "$MANIFEST" ]; then
@@ -90,33 +97,9 @@ jobs:
           echo "Prepared agent '$name':"
           cat agent.json
 
-      - name: Upload agent.json
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-json
-          path: agent.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # --- Stage 2: create/update + publish against the PRIVATE endpoint -----------
-  deploy:
-    needs: prepare
-    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
-    runs-on: [self-hosted, vnet, foundry-private]
-    outputs:
-      agent-name: ${{ steps.create.outputs.agent-name }}
-      endpoint: ${{ steps.cfg.outputs.endpoint }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download agent.json
-        uses: actions/download-artifact@v8
-        with:
-          name: agent-json
-
       - name: Resolve Foundry endpoint
         id: cfg
-        shell: powershell
+        shell: pwsh
         env:
           INPUT_ENDPOINT: ${{ inputs.foundryProjectEndpoint }}
           VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
@@ -157,24 +140,21 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Ensure Azure CLI is on PATH
-        shell: powershell
+      - name: Verify Azure CLI is available
+        shell: pwsh
         run: |
-          # az is installed by the runner bootstrap (SYSTEM context). The already-running
-          # runner service may hold a stale PATH, so surface az to later steps explicitly.
-          $azDir = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin'
-          if (Test-Path (Join-Path $azDir 'az.cmd')) {
-            Add-Content -Path $env:GITHUB_PATH -Value $azDir
-          } elseif (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-            throw "Azure CLI not found on the VM. Re-run 'azd provision' so the runner bootstrap installs it."
+          # az is installed by cloud-init on the Linux worker VM.
+          if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+            throw "Azure CLI not found on the VM. Re-run 'azd provision' so cloud-init installs it."
           }
+          az version
 
       # The Microsoft 365 publish step does an on-behalf-of submission and rejects an app-only /
       # managed-identity token (HTTP 502). Acquire a DELEGATED USER token interactively via the
       # device-code flow: the step prints a code + URL and blocks until you complete sign-in.
       # Nothing secret is logged (the device code alone is useless; the token is masked).
       - name: Acquire a delegated user token (device code)
-        shell: powershell
+        shell: pwsh
         env:
           TENANT_ID: ${{ vars.TEAMS_TENANT_ID }}
         run: |
@@ -191,13 +171,13 @@ jobs:
           Write-Host 'Delegated user token acquired for the publish step.'
 
       - name: Sign in with the VM managed identity
-        shell: powershell
+        shell: pwsh
         # Restore the MI as the active az context so bot-service ARM creation and the Foundry
         # read run as the VM managed identity (which holds the required RBAC).
         run: az login --identity --output none
 
       - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
-        shell: powershell
+        shell: pwsh
         env:
           FOUNDRY_ENDPOINT: ${{ needs.deploy.outputs.endpoint }}
           AGENT_NAMES:      ${{ needs.deploy.outputs.agent-name }}

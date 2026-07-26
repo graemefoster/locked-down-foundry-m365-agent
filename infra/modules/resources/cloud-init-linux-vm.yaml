@@ -1,0 +1,54 @@
+#cloud-config
+# ---------------------------------------------------------------------------
+# First-boot dependency bootstrap for the in-VNet Linux worker VM.
+#
+# This is the ONLY shell script in the repo — deliberately. Everything downstream
+# (agent seeding, Teams publish, workflow steps) stays in PowerShell and runs on
+# the `pwsh` installed here, which is cross-platform. See docs/github-runner.md.
+#
+# Installed:
+#   pwsh        - runs scripts/*.ps1 via `az vm run-command` and in workflow steps
+#   azure-cli   - control-plane work as the VM managed identity (`az login --identity`),
+#                 including `az acr build` so container builds need no Docker daemon
+#   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
+#   git, jq     - actions/checkout and general workflow plumbing
+#   yq          - agent.yaml -> agent.json in deploy-test-agent-one.yml (this is why
+#                 that conversion no longer needs a separate GitHub-hosted job)
+#
+# The runner bootstrap (bootstrap-github-runner.sh) blocks on `cloud-init status
+# --wait`, so the managed Run Command can never race this.
+# ---------------------------------------------------------------------------
+package_update: true
+
+packages:
+  - curl
+  - git
+  - jq
+  - python3
+  - python3-pip
+  - python3-venv
+  - libicu-dev
+
+runcmd:
+  # Microsoft package feed (provides powershell; also used by the az install below).
+  - |
+    set -euxo pipefail
+    . /etc/os-release
+    curl -fsSL "https://packages.microsoft.com/config/ubuntu/${VERSION_ID}/packages-microsoft-prod.deb" \
+      -o /tmp/packages-microsoft-prod.deb
+    dpkg -i /tmp/packages-microsoft-prod.deb
+    rm -f /tmp/packages-microsoft-prod.deb
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
+  # Azure CLI via the official Microsoft install script.
+  - |
+    set -euxo pipefail
+    curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
+  # yq (mikefarah) — the apt package is a different, incompatible CLI, so take the
+  # official static binary. GitHub releases are already reachable (the runner
+  # tarball comes from there too).
+  - |
+    set -euxo pipefail
+    curl -fsSL -o /usr/local/bin/yq \
+      "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
+    chmod 0755 /usr/local/bin/yq

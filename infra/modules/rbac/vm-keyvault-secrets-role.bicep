@@ -1,11 +1,11 @@
 /*
   VM -> Key Vault Secrets User RBAC
   ---------------------------------
-  Grants the dev VM's system-assigned managed identity read access to Key Vault
-  secrets, so the self-hosted GitHub Actions runner bootstrap
-  (infra/modules/resources/bootstrap-github-runner.ps1, run via the VM's
-  CustomScriptExtension) can read the fine-grained PAT over the private KV data
-  plane. Only wired when the runner is being installed.
+  Grants the Linux worker VM's system-assigned managed identity read access to Key
+  Vault secrets, so the self-hosted GitHub Actions runner bootstrap
+  (infra/modules/resources/bootstrap-github-runner.sh, run via a managed Run
+  Command) can read the fine-grained PAT over the private KV data plane. Only
+  wired when the runner is being installed.
 */
 
 @description('Name of the Key Vault holding the runner PAT secret.')

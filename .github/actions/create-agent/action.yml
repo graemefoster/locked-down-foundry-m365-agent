@@ -30,7 +30,7 @@ runs:
   steps:
     - name: Create or update agent
       id: run
-      shell: powershell
+      shell: pwsh
       run: |
         ./scripts/create-agent.ps1 `
           -AgentJsonPath          "${{ inputs.agent-json }}" `
