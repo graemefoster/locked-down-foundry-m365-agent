@@ -43,6 +43,9 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
   name: vmName
 }
 
+// Shebang + non-secret config for the bootstrap. bootstrap-github-runner.sh deliberately
+// carries NO shebang of its own so that the one emitted here stays on line 1 of the
+// concatenated script.
 var configPreamble = join(
   [
     '#!/usr/bin/env bash'

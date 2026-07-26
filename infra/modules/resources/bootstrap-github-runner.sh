@@ -1,6 +1,9 @@
-#!/usr/bin/env bash
 # ---------------------------------------------------------------------------
 # Bootstraps a self-hosted GitHub Actions runner on the in-VNet Linux worker VM.
+#
+# NOTE: intentionally NO shebang. vm-runner-extension.bicep prepends a preamble
+# (shebang + `export` config lines) and this file is concatenated after it, so a
+# shebang here would end up mid-script.
 #
 # Runs ON the VM via a managed Run Command at provision time (NOT via
 # `az vm run-command` from a hook, and it does NOT call the Foundry API — it is
@@ -87,17 +90,25 @@ if [[ -z "$reg_token" || "$reg_token" == "null" ]]; then
 fi
 
 # --- 5. Download + configure + install as a systemd service -------------------
+# The idempotency check above only proves no runner SERVICE exists — a previous run
+# could still have extracted (or half-configured) the tree before failing. Start from
+# a clean directory so re-runs are deterministic, keeping only the cached tarball.
+tarball="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
+cache_dir='/var/cache/actions-runner'
+mkdir -p "$cache_dir"
+
+if [[ ! -f "${cache_dir}/${tarball}" ]]; then
+  log "Downloading runner ${RUNNER_VERSION}..."
+  curl -fsSL -o "${cache_dir}/${tarball}" \
+    "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${tarball}"
+fi
+
+rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
-tarball="actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
-if [[ ! -f "$tarball" ]]; then
-  log "Downloading runner ${RUNNER_VERSION}..."
-  curl -fsSL -o "$tarball" \
-    "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/${tarball}"
-fi
 log 'Extracting runner...'
-tar xzf "$tarball"
+tar xzf "${cache_dir}/${tarball}"
 
 # The runner refuses to configure or run as root, so it is owned and executed by
 # the VM admin user; svc.sh then installs the systemd unit for that account.

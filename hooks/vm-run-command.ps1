@@ -16,6 +16,11 @@
 
   Nothing secret is embedded: callers pass only endpoints, names and flags. The VM
   authenticates to Foundry with its own managed identity via IMDS.
+
+  Parameter values must be STRINGS. `pwsh -File` only ever passes string arguments, so a
+  [switch] parameter on the target script could not be satisfied by `-Name 'true'`. Every
+  script invoked this way (scripts/seed-agents.ps1, scripts/publish-teams-runner.ps1)
+  declares [string] parameters for exactly that reason; the guard below keeps it that way.
 #>
 
 Set-StrictMode -Version Latest
@@ -39,7 +44,10 @@ function Invoke-VmPwshScript {
   # Single-quote each value for the shell. PowerShell parameter names are restricted to
   # word characters, so only the values need escaping ('\'' is the POSIX idiom).
   $argList = foreach ($name in ($Parameters.Keys | Sort-Object)) {
-    $value = [string]$Parameters[$name]
+    $value = $Parameters[$name]
+    if ($value -isnot [string]) {
+      throw "Parameter '-$name' for '$scriptName' is [$($value.GetType().Name)]. Invoke-VmPwshScript passes values through 'pwsh -File', which supplies only strings — declare the target parameter as [string] and pass a string."
+    }
     "-$name '$($value -replace "'", "'\''")'"
   }
 
