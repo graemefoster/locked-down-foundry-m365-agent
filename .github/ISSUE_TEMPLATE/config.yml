@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Project backlog
+    url: https://github.com/graemefoster/locked-down-foundry-m365-agent/blob/main/BACKLOG.md
+    about: Browse the full project backlog (aim, goals, and epics) before opening a new issue.
