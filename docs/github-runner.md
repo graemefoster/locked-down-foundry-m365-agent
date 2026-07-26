@@ -14,13 +14,21 @@ It is **off by default**: the runner is only installed when `githubRunnerRepoUrl
 | **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/modules/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
 | **Windows dev VM** | `infra/modules/resources/vm.bicep` | only when `deployWindowsVm` is true | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
 
-Azure Bastion lives in its own module (`infra/modules/resources/bastion.bicep`) and is
-always deployed, so the Linux VM stays reachable over Bastion SSH even with the Windows
-VM switched off:
+Azure Bastion lives in its own module (`infra/modules/resources/bastion.bicep`) and exists
+purely for **interactive human access**. It is the only way into the Windows dev VM (RDP),
+so it is gated by `deployBastion`, which **defaults to `deployWindowsVm`** — turn the
+Windows VM off and Bastion goes with it. The Linux worker needs no interactive path (agent
+seeding goes through `az vm run-command`, and the runner registers *outbound*), so a
+CI-only environment gets neither:
 
 ```bash
-azd env set DEPLOY_WINDOWS_VM false   # CI-only environment: skip the Windows licence + compute
+azd env set DEPLOY_WINDOWS_VM false   # CI-only: skip the Windows licence + compute, and Bastion
 ```
+
+`deployBastion` is deliberately **not** listed in `infra/main.parameters.json` (azd always
+supplies params it finds there, which would hardcode a value and defeat the derived
+default). If you want Bastion SSH into the Linux VM *without* the Windows VM, set
+`deployBastion: true` explicitly in a `.bicepparam` or a direct `az deployment` call.
 
 ### Dependencies on the Linux VM
 

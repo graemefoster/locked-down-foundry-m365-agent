@@ -129,6 +129,17 @@ licence and compute cost.
 param deployWindowsVm bool = true
 
 @description('''
+Deploy Azure Bastion. Bastion exists for INTERACTIVE human access: it is the only way
+to reach the Windows dev VM (RDP), so this DEFAULTS to deployWindowsVm — turn the
+Windows VM off and Bastion goes with it. The Linux worker VM needs no interactive
+path (seeding goes through `az vm run-command`, the Actions runner registers outbound),
+so a CI-only environment gets neither. Deliberately NOT in main.parameters.json so the
+derived default applies; override it in a .bicepparam if you want Bastion SSH into the
+Linux VM without the Windows VM.
+''')
+param deployBastion bool = deployWindowsVm
+
+@description('''
 GitHub repo URL (https://github.com/owner/repo) to register a self-hosted Actions
 runner on the Linux worker VM against. Leave EMPTY (default) to skip runner
 installation. When set, the VM installs a runner as a systemd service, reading a
@@ -737,8 +748,10 @@ module cosmosContainerRoleAssignments 'modules/rbac/cosmos-container-role-assign
 //                       Linux because microsoft/ai-agent-evals is effectively Linux-only.
 //                       Holds all the private-plane RBAC (Foundry / KV / Contributor).
 //   * vmModule        - OPTIONAL Windows dev VM, human RDP + Edge inspection only, no RBAC.
-// Bastion is its own module so it survives deployWindowsVm=false (the Linux VM is still
-// reachable over Bastion SSH for troubleshooting).
+// Bastion is its own module, gated by deployBastion (which defaults to deployWindowsVm):
+// it exists purely for interactive human access, and the Linux VM needs no interactive
+// path for automation. Deploying it separately means you CAN still opt into Bastion SSH
+// on the Linux VM without paying for the Windows VM.
 
 module linuxVmModule 'modules/resources/vm-linux.bicep' = {
   name: 'linux-vm-deployment-${uniqueSuffix}'
@@ -770,7 +783,7 @@ module vmModule 'modules/resources/vm.bicep' = if (deployWindowsVm) {
   ]
 }
 
-module bastionModule 'modules/resources/bastion.bicep' = {
+module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
   name: 'bastion-deployment-${uniqueSuffix}'
   params: {
     location: location

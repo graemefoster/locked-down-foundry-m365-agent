@@ -1,9 +1,14 @@
 /*
-  Azure Bastion — browser/CLI access to the VMs behind the firewall.
-  -----------------------------------------------------------------
-  Extracted from vm.bicep so it is independent of the OPTIONAL Windows dev VM:
-  the always-on Linux worker VM (vm-linux.bicep) is reachable over Bastion SSH
-  for troubleshooting even when deployWindowsVm=false.
+  Azure Bastion — browser access to the VMs behind the firewall.
+  --------------------------------------------------------------
+  Extracted from vm.bicep and gated by main.bicep's `deployBastion` param, which
+  DEFAULTS to `deployWindowsVm`. Bastion is an INTERACTIVE-access concern only:
+    * Windows dev VM  -> Bastion is the only way in (RDP), so it must be deployed.
+    * Linux worker VM -> needs no interactive path. Agent seeding goes through
+      `az vm run-command` and the Actions runner registers OUTBOUND, so a CI-only
+      environment (deployWindowsVm=false) skips Bastion too.
+  Keeping it a separate param means you can still opt into Bastion SSH on the Linux
+  VM for troubleshooting without paying for the Windows VM.
 */
 
 @description('Location for the Bastion host.')
