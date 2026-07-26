@@ -2,7 +2,7 @@
   azd predeploy hook: seed Foundry agents
   ---------------------------------------
   Runs on the azd host (laptop / CI). The Foundry endpoint is private, so this hook cannot
-  call the Agents API directly. Instead it uses `az vm run-command` to execute
+  call the Agents API directly. Instead it uses `Invoke-AzVMRunCommand` to execute
   scripts/seed-agents.ps1 ON the locked-down VM inside the VNet, which can reach the private
   endpoint. Agent definitions live in scripts/seed-agents.ps1.
 
@@ -17,7 +17,10 @@
   Caller RBAC: permission to invoke VM run-commands
   (Microsoft.Compute/virtualMachines/runCommands/*), e.g. Virtual Machine Contributor on the
   VM/resource group.
+
+  Requires: Az.Compute module.
 #>
+#Requires -Modules Az.Compute
 $ErrorActionPreference = 'Stop'
 
 function Get-RequiredEnv {
@@ -49,35 +52,26 @@ if (-not (Test-Path $seedScript)) {
 Write-Host "[predeploy] Seeding agents on VM '$vmName' (resource group '$resourceGroup')..."
 Write-Host "[predeploy] Foundry endpoint: $projectEndpoint"
 
-$azArgs = @(
-  'vm', 'run-command', 'invoke',
-  '--command-id', 'RunPowerShellScript',
-  '--name', $vmName,
-  '--resource-group', $resourceGroup,
-  '--scripts', "@$seedScript",
-  '--parameters',
-  "FoundryProjectEndpoint=$projectEndpoint",
-  "ModelDeploymentName=$modelName",
-  "EnableSecondAgent=$enableSecond",
-  "SecondAgentModel=$secondModel",
-  '--output', 'json'
-)
+$result = Invoke-AzVMRunCommand `
+  -ResourceGroupName $resourceGroup `
+  -VMName $vmName `
+  -CommandId 'RunPowerShellScript' `
+  -ScriptPath $seedScript `
+  -Parameter @{
+    FoundryProjectEndpoint = $projectEndpoint
+    ModelDeploymentName    = $modelName
+    EnableSecondAgent      = $enableSecond
+    SecondAgentModel       = $secondModel
+  }
 
-$raw = az @azArgs
-if ($LASTEXITCODE -ne 0) {
-  Write-Host $raw
-  throw "[predeploy] 'az vm run-command invoke' failed with exit code $LASTEXITCODE."
-}
-
-$result = $raw | ConvertFrom-Json
-$message = ($result.value | ForEach-Object { $_.message }) -join "`n"
+$message = ($result.Value | ForEach-Object { $_.Message }) -join "`n"
 
 Write-Host '----- seed-agents output (from VM) -----'
 Write-Host $message
 Write-Host '----------------------------------------'
 
 # The on-VM script has $ErrorActionPreference='Stop' and prints '[seed-agents] Done.' only on
-# success. az invoke returns exit 0 even when the remote script throws, so gate on the marker.
+# success. The run-command returns success even when the remote script throws, so gate on the marker.
 if ($message -notmatch '\[seed-agents\] Done\.') {
   throw '[predeploy] Agent seeding did not complete successfully (missing completion marker). See VM output above.'
 }
