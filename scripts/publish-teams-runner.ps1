@@ -29,7 +29,7 @@
   here — it is a best-effort control-plane step that remains available host-side via
   `azd hooks run postdeploy`. This script focuses on the publish flow itself.
 
-  Windows PowerShell 5.1 compatible (the self-hosted runner has no pwsh).
+  PowerShell 7 (pwsh) — cloud-init installs it on the Linux worker VM.
 #>
 [CmdletBinding()]
 param(

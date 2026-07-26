@@ -5,7 +5,7 @@
   the Foundry private endpoint). They acquire a managed-identity token via IMDS and call the
   Agents REST API, mirroring the proven pattern in scripts/seed-agents.ps1.
 
-  Windows PowerShell 5.1 compatible: no external modules, no ConvertFrom-Yaml.
+  PowerShell 7 (pwsh) and cross-platform: no external modules, no ConvertFrom-Yaml.
 
   Callers set the script-scoped $script:FoundryEndpoint and $script:ApiVersion before use, or
   pass them through the functions below.
