@@ -123,10 +123,11 @@ param vmAdminUsername string
 Deploy the OPTIONAL Windows dev VM. Its only purpose is the human "RDP in and run
 Edge to inspect the environment behind the firewall" experience. All automation
 (agent seeding + the self-hosted Actions runner) runs on the always-on Linux
-worker VM, so set this to false in CI-only environments to skip the Windows
-licence and compute cost.
+worker VM, so this defaults to FALSE — you only pay the Windows licence, compute
+and Bastion cost when you explicitly opt in with
+`azd env set DEPLOY_WINDOWS_VM true`.
 ''')
-param deployWindowsVm bool = true
+param deployWindowsVm bool = false
 
 @description('''
 Deploy Azure Bastion. Bastion exists for INTERACTIVE human access: it is the only way
