@@ -138,7 +138,8 @@ function Install-Python {
   param([string]$Version = '3.10.11')
   if (Get-Command python -ErrorAction SilentlyContinue) {
     $current = (python --version 2>&1) -replace 'Python '
-    if ($current -like "$($Version.Substring(0,4))*") {
+    $majorMinor = "$($Version.Split('.')[0]).$($Version.Split('.')[1])"
+    if ($current -like "$majorMinor*") {
       Write-Log "Python $current already installed - skipping."
       return
     }

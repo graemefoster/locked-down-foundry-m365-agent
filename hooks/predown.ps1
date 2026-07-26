@@ -23,7 +23,7 @@
 
   Requires: Az.Accounts module (ships with pwsh on azd-supported platforms).
 #>
-#Requires -Modules Az.Accounts
+#Requires -Modules Az.Accounts, Az.Resources
 $ErrorActionPreference = 'Stop'
 
 $apiVersion = '2025-04-01-preview'
@@ -94,10 +94,9 @@ function Remove-CapabilityHosts {
   param([string[]]$Ids, [string]$Scope)
   foreach ($id in $Ids) {
     Write-Host "[predown] Deleting $Scope capability host: $id"
-    $response = Invoke-AzRestMethod -Method DELETE -Path "${id}?api-version=$apiVersion"
-    if ($response.StatusCode -ge 400) {
-      throw "[predown] Failed to delete capability host '$id' (HTTP $($response.StatusCode)). Resolve this before retrying 'azd down', otherwise Foundry deletion will fail."
-    }
+    # Remove-AzResource handles long-running operation polling (waits for delete to complete),
+    # which is required: project-scope hosts must be fully gone before account-scope deletion.
+    Remove-AzResource -ResourceId $id -ApiVersion $apiVersion -Force -ErrorAction Stop
     Write-Host "[predown] Deleted: $id"
   }
 }
