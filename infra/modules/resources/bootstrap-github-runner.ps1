@@ -144,12 +144,12 @@ function Install-Python {
       return
     }
   }
-  Write-Log "Installing Python $Version (MSI, system-wide)..."
-  $msi = Join-Path $env:TEMP "python-$Version-amd64.exe"
+  Write-Log "Installing Python $Version (system-wide)..."
+  $installer = Join-Path $env:TEMP "python-$Version-amd64.exe"
   $url = "https://www.python.org/ftp/python/$Version/python-$Version-amd64.exe"
-  Invoke-WebRequest -Uri $url -OutFile $msi -UseBasicParsing
-  $p = Start-Process $msi -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_pip=1' -Wait -PassThru
-  Remove-Item $msi -Force -ErrorAction SilentlyContinue
+  Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+  $p = Start-Process $installer -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1', 'Include_pip=1' -Wait -PassThru
+  Remove-Item $installer -Force -ErrorAction SilentlyContinue
   if ($p.ExitCode -ne 0) { throw "Python installer failed with exit code $($p.ExitCode)." }
   Write-Log "Python $Version installed system-wide."
 }

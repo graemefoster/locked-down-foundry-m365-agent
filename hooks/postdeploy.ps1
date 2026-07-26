@@ -120,8 +120,8 @@ $logAnalyticsId  = Get-OptionalEnv 'TEAMS_LOG_ANALYTICS_ID'
 
 $subscriptionId  = Get-OptionalEnv 'AZURE_SUBSCRIPTION_ID'
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-  $ctx = Get-AzContext
-  $subscriptionId = $ctx.Subscription.Id
+  $ctx = Get-AzContext -ErrorAction SilentlyContinue
+  if ($ctx) { $subscriptionId = $ctx.Subscription.Id }
 }
 
 $namePrefix      = Get-OptionalEnv 'TEAMS_NAME_PREFIX'
