@@ -280,7 +280,6 @@ module appServiceSpokeVnet 'modules/network/appservice-spoke-vnet.bicep' = {
     vnetName: '${vnetName}-appservice-spoke'
     firewallPrivateIp: firewall.outputs.firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
-    apimSubnetCidr: modelGatewayApimSubnetCidr
   }
 }
 
