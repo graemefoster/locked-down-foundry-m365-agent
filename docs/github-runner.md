@@ -1,11 +1,40 @@
 # Self-hosted GitHub Actions runner (in-VNet)
 
-An **opt-in** self-hosted Actions runner on the dev VM so complex, representative
-deployments can run *inside the VNet* — reaching the **private** Foundry endpoint
-directly — instead of being marshalled through `az vm run-command`.
+An **opt-in** self-hosted Actions runner on the in-VNet **Linux worker VM** so complex,
+representative deployments can run *inside the VNet* — reaching the **private** Foundry
+endpoint directly — instead of being marshalled through `az vm run-command`.
 
 It is **off by default**: the runner is only installed when `githubRunnerRepoUrl`
 (env var `GITHUB_RUNNER_REPO_URL`) is non-empty. Leave it unset and nothing changes.
+
+## The two VMs
+
+| VM | Module | When | Purpose |
+|---|---|---|---|
+| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/modules/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
+| **Windows dev VM** | `infra/modules/resources/vm.bicep` | only when `deployWindowsVm` is true | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
+
+Azure Bastion lives in its own module (`infra/modules/resources/bastion.bicep`) and is
+always deployed, so the Linux VM stays reachable over Bastion SSH even with the Windows
+VM switched off:
+
+```bash
+azd env set DEPLOY_WINDOWS_VM false   # CI-only environment: skip the Windows licence + compute
+```
+
+### Dependencies on the Linux VM
+
+`infra/modules/resources/cloud-init-linux-vm.yaml` installs everything at first boot:
+`pwsh`, `azure-cli` (so `az acr build` covers container builds without a Docker daemon),
+`python3`/`pip`/`venv` (the `microsoft/ai-agent-evals` action pip-installs into a venv),
+plus `git`, `jq` and `yq`. That cloud-init file is the **only** shell script in the repo
+— all downstream logic stays in cross-platform PowerShell.
+
+Because the in-VNet runner is now Linux, two GitHub-hosted workarounds are gone:
+`deploy-test-agent-one.yml` no longer needs a separate `ubuntu-latest` `prepare` job to
+convert `agent.yaml` → `agent.json` (plus an artifact round-trip), and
+`nightly-eval-agent-one.yml` consumes `microsoft/ai-agent-evals@v3-beta` directly instead
+of checking the action out and invoking `action.py` by hand.
 
 ## Security model — "Posture A" (trusted-only)
 
@@ -31,7 +60,7 @@ untrusted job.
 The runner does not store a GitHub credential. The VM's **managed identity** reads a
 **fine-grained PAT** from **Key Vault** (private data plane, over the VM's private DNS),
 then mints a short-lived, single-use runner **registration token** to register once as a
-Windows service.
+**systemd** service.
 
 The PAT is written into Key Vault by Bicep (`runner-pat-secret.bicep`) as an ARM
 **control-plane** operation, which succeeds even though the vault has
@@ -42,13 +71,15 @@ in-VNet seeding, temporary roles, or `az vm run-command` are needed.
 azd (GITHUB_RUNNER_PAT) --ARM control plane--> Key Vault secret gh-runner-pat
 VM managed identity --(IMDS)--> KV token --> read PAT (data plane, private endpoint)
    --> POST /repos/{owner}/{repo}/actions/runners/registration-token
-   --> config.cmd --runasservice   (persistent, non-ephemeral)
+   --> config.sh --unattended + svc.sh install   (persistent, non-ephemeral)
 ```
 
-Bootstrap: `infra/modules/resources/bootstrap-github-runner.ps1`, embedded (base64) into
-a `CustomScriptExtension` by `infra/modules/resources/vm-runner-extension.bicep`. The VM
-MI is granted **Key Vault Secrets User** by `infra/modules/rbac/vm-keyvault-secrets-role.bicep`,
-and the extension is sequenced **after** both that assignment and the PAT-secret write.
+Bootstrap: `infra/modules/resources/bootstrap-github-runner.sh`, run on the VM as a
+managed **Run Command** by `infra/modules/resources/vm-runner-extension.bicep` (config is
+injected as an `export` preamble; the PAT is never in the template). It blocks on
+`cloud-init status --wait`, so it can never race the dependency install. The VM MI is
+granted **Key Vault Secrets User** by `infra/modules/rbac/vm-keyvault-secrets-role.bicep`,
+and the Run Command is sequenced **after** both that assignment and the PAT-secret write.
 
 ## One-time setup
 
@@ -94,7 +125,7 @@ empty on later provisions reuses the already-seeded Key Vault secret (the secret
 conditional and ARM never deletes it).
 
 On first provision the RBAC role assignment can take 1–5 min to propagate to the KV
-data plane (same class of delay noted for CMK enablement). If the extension fails
+data plane (same class of delay noted for CMK enablement). If the Run Command fails
 reading the PAT, re-run `azd provision` — the bootstrap is idempotent (it skips if the
 runner service already exists).
 
@@ -102,6 +133,6 @@ runner service already exists).
 
 - Repo → Settings → Actions → Runners shows an **Idle** runner with labels
   `vnet,foundry-private`.
-- On the VM: `Get-Service actions.runner.*` is **Running**.
+- On the VM: `systemctl status 'actions.runner.*'` is **active (running)**.
 - Run **Deploy (VNet self-hosted)** via *Actions → Run workflow*; approve the
   `vnet-deploy` gate; it seeds agents against the private endpoint using the VM MI.

@@ -1,5 +1,20 @@
+/*
+  Windows dev VM — OPTIONAL, human-inspection only.
+  -------------------------------------------------
+  Deployed only when `deployWindowsVm` is true (see main.bicep). Its sole purpose
+  is the human "RDP in and run Edge to see the environment behind the firewall"
+  experience, reached via the Bastion in bastion.bicep.
+
+  It deliberately holds NO private-plane RBAC. All automation — agent seeding via
+  `az vm run-command` and the self-hosted GitHub Actions runner — now lives on the
+  always-on Linux worker VM (vm-linux.bicep), which is where the Foundry / Key
+  Vault / Contributor role assignments are made. Set deployWindowsVm=false in
+  CI-only environments to skip the Windows licence and compute cost entirely.
+*/
+
 @description('Username for the Virtual Machine.')
 param adminUsername string
+
 
 @description('Password for the Virtual Machine.')
 @minLength(12)
@@ -167,15 +182,3 @@ resource vm 'Microsoft.Compute/virtualMachines@2022-03-01' = {
 
 output vmName string = vm.name
 output vmPrincipalId string = vm.identity.principalId
-
-resource bastion 'Microsoft.Network/bastionHosts@2025-01-01' = {
-  name: 'agent-vnet-test-bastion'
-  location: location
-  sku: { name: 'Developer' }
-  properties: {
-    virtualNetwork: {
-      id: resourceId('Microsoft.Network/virtualNetworks', virtualNetworkName)
-    }
-  }
-}
-

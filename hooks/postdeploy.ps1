@@ -147,18 +147,21 @@ foreach ($f in @($publishScript, $botTemplate)) {
   if (-not (Test-Path $f)) { throw "[postdeploy] Required file not found: '$f'." }
 }
 
+# Runs the .ps1 under pwsh on the LINUX worker VM (RunShellScript + a heredoc shim).
+. (Join-Path $PSScriptRoot 'vm-run-command.ps1')
+
 # Runs scripts/publish-teams.ps1 on the VM and returns its combined stdout.
 function Invoke-OnVm {
   param([hashtable]$ScriptParameters)
-  $result = Invoke-AzVMRunCommand `
-    -ResourceGroupName $resourceGroup `
-    -VMName $vmName `
-    -CommandId 'RunPowerShellScript' `
+  $result = Invoke-VmPwshScript `
+    -ResourceGroup $resourceGroup `
+    -VmName $vmName `
     -ScriptPath $publishScript `
-    -Parameter $ScriptParameters
+    -Parameters $ScriptParameters
 
   return (($result.Value | ForEach-Object { $_.Message }) -join "`n")
 }
+
 
 Write-Host '[postdeploy] Registering Microsoft.BotService resource provider (idempotent)...'
 Register-AzResourceProvider -ProviderNamespace Microsoft.BotService | Out-Null

@@ -49,20 +49,23 @@ if (-not (Test-Path $seedScript)) {
   throw "[predeploy] Seed script not found at '$seedScript'."
 }
 
+# Runs the .ps1 under pwsh on the LINUX worker VM (RunShellScript + a heredoc shim).
+. (Join-Path $PSScriptRoot 'vm-run-command.ps1')
+
 Write-Host "[predeploy] Seeding agents on VM '$vmName' (resource group '$resourceGroup')..."
 Write-Host "[predeploy] Foundry endpoint: $projectEndpoint"
 
-$result = Invoke-AzVMRunCommand `
-  -ResourceGroupName $resourceGroup `
-  -VMName $vmName `
-  -CommandId 'RunPowerShellScript' `
+$result = Invoke-VmPwshScript `
+  -ResourceGroup $resourceGroup `
+  -VmName $vmName `
   -ScriptPath $seedScript `
-  -Parameter @{
+  -Parameters @{
     FoundryProjectEndpoint = $projectEndpoint
     ModelDeploymentName    = $modelName
     EnableSecondAgent      = $enableSecond
     SecondAgentModel       = $secondModel
   }
+
 
 $message = ($result.Value | ForEach-Object { $_.Message }) -join "`n"
 

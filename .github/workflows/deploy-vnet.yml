@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Seed Foundry agents (in-VNet, via VM managed identity)
-        shell: powershell
+        shell: pwsh
         env:
           # Prefer the dispatch input, fall back to a repo/environment variable.
           FOUNDRY_ENDPOINT: ${{ inputs.foundryProjectEndpoint != '' && inputs.foundryProjectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
@@ -65,18 +65,15 @@ jobs:
             -ModelDeploymentName    $env:MODEL_DEPLOYMENT
 
       # --- Optional: publish to Teams / M365 (as the VM managed identity) -------
-      - name: Ensure Azure CLI is on PATH
+      - name: Verify Azure CLI is available
         if: ${{ inputs.publishToTeams }}
-        shell: powershell
+        shell: pwsh
         run: |
-          # az is installed by the runner bootstrap (SYSTEM context). The already-running
-          # runner service may hold a stale PATH, so surface az to later steps explicitly.
-          $azDir = Join-Path $env:ProgramFiles 'Microsoft SDKs\Azure\CLI2\wbin'
-          if (Test-Path (Join-Path $azDir 'az.cmd')) {
-            Add-Content -Path $env:GITHUB_PATH -Value $azDir
-          } elseif (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-            throw "Azure CLI not found on the VM. Re-run 'azd provision' so the runner bootstrap installs it."
+          # az is installed by cloud-init on the Linux worker VM.
+          if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
+            throw "Azure CLI not found on the VM. Re-run 'azd provision' so cloud-init installs it."
           }
+          az version
 
       # The Microsoft 365 publish step (Step 4) does an on-behalf-of submission and
       # rejects an app-only / managed-identity token (HTTP 502). Acquire a DELEGATED
@@ -86,7 +83,7 @@ jobs:
       # safe on a public repo. This token is used ONLY for the publish call.
       - name: Acquire a delegated user token (device code)
         if: ${{ inputs.publishToTeams }}
-        shell: powershell
+        shell: pwsh
         env:
           TENANT_ID: ${{ vars.TEAMS_TENANT_ID }}
         run: |
@@ -104,14 +101,14 @@ jobs:
 
       - name: Sign in with the VM managed identity
         if: ${{ inputs.publishToTeams }}
-        shell: powershell
+        shell: pwsh
         # Restore the MI as the active az context so bot-service ARM creation and the
         # Foundry read run as the VM managed identity (which holds the required RBAC).
         run: az login --identity --output none
 
       - name: Publish agent(s) to Teams / M365 (in-VNet, via VM managed identity)
         if: ${{ inputs.publishToTeams }}
-        shell: powershell
+        shell: pwsh
         env:
           FOUNDRY_ENDPOINT: ${{ inputs.foundryProjectEndpoint != '' && inputs.foundryProjectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}

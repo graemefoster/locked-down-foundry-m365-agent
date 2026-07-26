@@ -156,9 +156,17 @@ by name) are skipped, so re-running is safe.
   `azd hooks run predeploy` works regardless and is the quickest way to (re)seed.
 
 To (re)seed agents manually — for example outside the hook or from another host inside the
-VNet — run the seeding script yourself, e.g. `az vm run-command invoke --command-id
-RunPowerShellScript --name <vm-name> -g <rg> --scripts @scripts/seed-agents.ps1 --parameters
-"FoundryProjectEndpoint=<endpoint>" "ModelDeploymentName=<model>"`.
+VNet — run the seeding script yourself. The seed target is the **Linux** worker VM, so use
+`RunShellScript` and invoke `pwsh` explicitly (which is exactly what the
+`hooks/vm-run-command.ps1` shim does on the hooks' behalf):
+
+```bash
+az vm run-command invoke --command-id RunShellScript --name <linux-vm-name> -g <rg> \
+  --scripts "pwsh -NoProfile -File /tmp/seed-agents.ps1 -FoundryProjectEndpoint '<endpoint>' -ModelDeploymentName '<model>'"
+```
+
+(copy `scripts/seed-agents.ps1` to `/tmp` on the VM first — or just run
+`azd hooks run predeploy`, which handles the copy for you).
 
 ## Maintenance
 
