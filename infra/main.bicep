@@ -1145,3 +1145,17 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 
 @description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
+
+// ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
+
+@description('GitHub repo URL the self-hosted runner registered against. Empty when the runner was not installed; gates the predown hook deregistration phase.')
+output GITHUB_RUNNER_REPO_URL string = githubRunnerRepoUrl
+
+@description('Key Vault (DNS) name holding the runner PAT. The predown hook reads it on the VM (private data plane) to mint a runner remove-token before teardown.')
+output KEY_VAULT_NAME string = keyVaultName
+
+@description('Name of the Key Vault secret holding the runner PAT.')
+output GITHUB_RUNNER_PAT_SECRET_NAME string = githubRunnerPatSecretName
+
+@description('Local account the runner service runs as (the VM admin user). The predown hook runs `config.sh remove` as this user.')
+output GITHUB_RUNNER_USER string = vmAdminUsername

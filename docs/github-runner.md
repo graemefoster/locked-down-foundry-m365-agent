@@ -151,3 +151,18 @@ runner service already exists).
 - On the VM: `systemctl status 'actions.runner.*'` is **active (running)**.
 - Run **Deploy (VNet self-hosted)** via *Actions → Run workflow*; approve the
   `vnet-deploy` gate; it seeds agents against the private endpoint using the VM MI.
+
+## Teardown
+
+`azd down`'s **predown hook** (`hooks/predown.ps1`) automatically deregisters the runner
+before the VM is deleted, so it doesn't linger as a permanently **offline** runner in the
+repo. Because the PAT lives in Key Vault behind a private endpoint, the work runs **on the
+VM** (`scripts/deregister-runner.ps1`, shipped via the `vm-run-command.ps1` shim): it reads
+the PAT with the VM managed identity, mints a GitHub **remove-token**, then runs
+`svc.sh uninstall` + `config.sh remove`.
+
+This phase is **best-effort** and never fails the teardown — it only runs when
+`GITHUB_RUNNER_REPO_URL` is set, and a lingering offline runner is harmless (GitHub prunes
+it, or remove it manually under *Settings → Actions → Runners*). It relies on the
+`GITHUB_RUNNER_REPO_URL`, `KEY_VAULT_NAME`, `GITHUB_RUNNER_PAT_SECRET_NAME` and
+`GITHUB_RUNNER_USER` Bicep outputs; run `azd env refresh` if they're missing.
