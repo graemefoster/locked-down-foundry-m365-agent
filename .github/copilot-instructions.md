@@ -98,3 +98,19 @@ azd down
 The model gateway is always deployed: an APIM-fronted provider Foundry and a
 second seeded agent routed through it. See `apim-model-gateway.md`. Networking deep-dive:
 `NETWORKING.md`.
+
+## MCP compliance (agent → APIM allowlist)
+`mcp/mcp-policy.json` is the **name-only** source of truth (deny-by-default). At apply time,
+`scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its Entra
+`ServiceIdentity` SP AppId via the **control plane** (`az ad sp list` on display name
+`<account>-<project>-<agent>-AgentIdentity`, newest `createdDateTime` wins on duplicates), then
+`infra/modules/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. This runs
+automatically on `azd up` (`hooks/postdeploy.ps1` → `hooks/apply-mcp-compliance.ps1`,
+non-fatal + loud) and on-demand via `.github/workflows/deploy-compliancy.yml`.
+
+> **⚠️ NOTE (per @graemefoster, 2026-07-27): if the `azd`/postdeploy flow is ever removed,
+> switch MCP AppId resolution from the control plane back to the Foundry DATA plane** (the
+> in-VNet VM reading `instance_identity.client_id`, i.e. DISCOVERY mode in
+> `scripts/list-agent-appids.ps1`). The data plane is the authoritative identity source and
+> avoids the control-plane display-name trust model — see the SECURITY header block in that
+> script.
