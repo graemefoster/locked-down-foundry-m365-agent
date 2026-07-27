@@ -186,40 +186,10 @@ var logAnalyticsName = toLower('${uniqueSuffix}-la')
 var appInsightsName = toLower('${uniqueSuffix}-appi')
 var acrName = toLower('${uniqueSuffix}acr')
 
-resource lanalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
-  name: logAnalyticsName
-  location: location
-  properties: {
-    sku: {
-      name: 'PerGB2018'
-    }
-  }
-}
-
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
-  kind: 'web'
-  location: location
-  name: appInsightsName
-  properties: {
-    Application_Type: 'web'
-    Flow_Type: 'BlueField'
-    WorkspaceResourceId: lanalytics.id
-    RetentionInDays: 30
-  }
-}
-
-// ==================== NETWORKING (Hub-Spoke) ====================
-
-// Step 1: Deploy Hub VNet + DNS Resolver
-module hubNetwork 'modules/network/network-agent-vnet.bicep' = {
-  name: 'hub-network-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    vnetName: vnetName
-  }
-}
-
-// Step 2: Deploy Firewall into Hub VNet
+// ==================== ADDRESSING & NAMING (shared scheme) ====================
+// The deterministic firewall-policy name + subnet CIDR scheme. Kept on main (the single
+// source of truth) and threaded to stage 00 (network build) and stage 30 (gateway firewall
+// rules) as params, so neither stage recomputes — and there is no spoke<->firewall cycle.
 var firewallPolicyName = '${uniqueSuffix}fwallpol'
 
 // CIDRs allowed to call the agent ingress (/invoke path). The YARP proxy is an
@@ -233,9 +203,6 @@ var appServiceDelegatedSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24,
 // subnet is allowed to reach it (NSG + firewall) and its return path is force-tunnelled back
 // through the firewall (appservice-spoke-vnet.bicep pe-subnet UDR).
 var appServicePeSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24, 1)
-var agentInboundAllowedCidrs = [
-  appServiceDelegatedSubnetCidr
-]
 
 // Foundry spoke address space (module default). Agent subnet is locked down at the
 // firewall; the dev VM subnet stays unrestricted alongside the App Service spoke.
@@ -250,7 +217,7 @@ var firewallUnrestrictedSourceCidrs = [
   deploymentScriptsSubnetCidr
 ]
 
-// Model-gateway spoke (optional). CIDRs are deterministic so they can be passed to
+// Model-gateway spoke (always deployed). CIDRs are deterministic so they can be passed to
 // the firewall without depending on the spoke VNet module (avoids a dependency cycle:
 // the spoke VNet needs the firewall private IP, the firewall needs these CIDRs).
 var modelGatewaySpokeAddressPrefix = '10.3.0.0/16'
@@ -265,108 +232,30 @@ var apimGatewayUrl = 'https://${apimName}.azure-api.net'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
 
-module firewall 'modules/network/firewall.bicep' = {
-  name: '${deployment().name}-fwall'
-  params: {
-    firewallPipName: '${uniqueSuffix}-fwall-pip'
-    firewallMgmtPipName: '${uniqueSuffix}-fwallmgmt-pip'
-    firewallName: '${uniqueSuffix}-fwall'
-    firewallPolicyName: firewallPolicyName
-    firewallSubnetId: hubNetwork.outputs.firewallSubnetId
-    firewallManagementSubnetId: hubNetwork.outputs.firewallManagementSubnetId
-    location: location
-    logAnalyticsId: lanalytics.id
-    yarpProxyFqdn: 'yarp-${appServicePlanName}.azurewebsites.net'
-    agentSubnetCidr: agentSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
-    unrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
-  }
-}
-
-// Step 3: Deploy Foundry Spoke VNet (needs firewall IP + DNS resolver IP)
-module foundrySpokeVnet 'modules/network/foundry-spoke-vnet.bicep' = {
-  name: 'foundry-spoke-${uniqueSuffix}-deployment'
+// ==================== STAGE 00 — FOUNDATION ====================
+// The substrate (zero dependencies): networking (hub + 3 spokes, firewall, DNS resolver,
+// peerings, flow logs) + observability sink (Log Analytics + App Insights).
+module stage00 'stages/00-foundation/00-foundation.bicep' = {
+  name: 'stage00-foundation-${uniqueSuffix}'
   params: {
     location: location
-    vnetName: '${vnetName}-foundry-spoke'
+    uniqueSuffix: uniqueSuffix
+    vnetName: vnetName
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
-    dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
-    agentInboundAllowedCidrs: agentInboundAllowedCidrs
-    modelGatewayPeCidr: modelGatewayPeSubnetCidr
-    appServicePeCidr: appServicePeSubnetCidr
-    apimSubnetCidr: enableTeamsPublish ? modelGatewayApimSubnetCidr : ''
-  }
-}
-
-// Step 4: Deploy App Service Spoke VNet (needs firewall IP + DNS resolver IP)
-module appServiceSpokeVnet 'modules/network/appservice-spoke-vnet.bicep' = {
-  name: 'appservice-spoke-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    vnetName: '${vnetName}-appservice-spoke'
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
-    dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
-  }
-}
-
-// Step 4b: Flow logs for the locked-down agent subnet (observability of over-blocking).
-// Storage account for raw VNet flow logs — no anonymous blob access, HTTPS only, TLS 1.2.
-resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
-  name: toLower('${uniqueSuffix}flowlogs')
-  location: location
-  sku: {
-    name: storageSkuName
-  }
-  kind: 'StorageV2'
-  properties: {
-    allowBlobPublicAccess: false
-    supportsHttpsTrafficOnly: true
-    minimumTlsVersion: 'TLS1_2'
-    allowSharedKeyAccess: true
-    networkAcls: {
-      bypass: 'AzureServices'
-      defaultAction: 'Allow'
-    }
-  }
-}
-
-// VNet flow logs live under the regional Network Watcher in NetworkWatcherRG.
-module agentFlowLogs 'modules/network/agent-flow-logs.bicep' = {
-  name: 'agent-flow-logs-${uniqueSuffix}-deployment'
-  scope: resourceGroup('NetworkWatcherRG')
-  params: {
-    location: location
-    targetSubnetId: foundrySpokeVnet.outputs.agentSubnetId
-    flowLogsStorageId: flowLogsStorage.id
-    flowLogName: '${uniqueSuffix}-agent-subnet-flowlog'
-    workspaceResourceId: lanalytics.id
-    workspaceGuid: lanalytics.properties.customerId
-    workspaceRegion: location
-  }
-}
-
-
-// Step 5: VNet Peerings (Hub ↔ Foundry Spoke)
-module hubToFoundryPeering 'modules/network/vnet-peering.bicep' = {
-  name: 'hub-foundry-peering-${uniqueSuffix}'
-  params: {
-    hubVnetName: hubNetwork.outputs.hubVnetName
-    spokeVnetName: foundrySpokeVnet.outputs.virtualNetworkName
-    hubVnetId: hubNetwork.outputs.hubVnetId
-    spokeVnetId: foundrySpokeVnet.outputs.virtualNetworkId
-  }
-}
-
-// Step 6: VNet Peerings (Hub ↔ App Service Spoke)
-module hubToAppServicePeering 'modules/network/vnet-peering.bicep' = {
-  name: 'hub-appservice-peering-${uniqueSuffix}'
-  params: {
-    hubVnetName: hubNetwork.outputs.hubVnetName
-    spokeVnetName: appServiceSpokeVnet.outputs.virtualNetworkName
-    hubVnetId: hubNetwork.outputs.hubVnetId
-    spokeVnetId: appServiceSpokeVnet.outputs.virtualNetworkId
+    enableTeamsPublish: enableTeamsPublish
+    logAnalyticsName: logAnalyticsName
+    appInsightsName: appInsightsName
+    appServicePlanName: appServicePlanName
+    firewallPolicyName: firewallPolicyName
+    storageSkuName: storageSkuName
+    agentSubnetCidr: agentSubnetCidr
+    appServiceDelegatedSubnetCidr: appServiceDelegatedSubnetCidr
+    appServicePeSubnetCidr: appServicePeSubnetCidr
+    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
+    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
+    modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
+    firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
   }
 }
 
@@ -393,10 +282,10 @@ module aiAccount 'modules/foundry/ai-account-identity.bicep' = {
     modelVersion: modelVersion
     modelSkuName: modelSkuName
     modelCapacity: modelCapacity
-    agentSubnetId: foundrySpokeVnet.outputs.agentSubnetId
-    logAnalyticsWorkspaceId: lanalytics.id
-    appInsightsConnectionString: appInsights.properties.ConnectionString
-    appInsightsResourceId: appInsights.id
+    agentSubnetId: stage00.outputs.agentSubnetId
+    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
+    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
+    appInsightsResourceId: stage00.outputs.appInsightsId
     mcpServerName: 'mcp-${appServicePlanName}.azurewebsites.net'
     restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
     allowedFqdnList: foundryAllowedFqdnList
@@ -410,7 +299,7 @@ module keyVault 'modules/resources/keyvault.bicep' = {
   params: {
     keyVaultName: keyVaultName
     location: location
-    logAnalyticsId: lanalytics.id
+    logAnalyticsId: stage00.outputs.logAnalyticsId
   }
 }
 
@@ -423,11 +312,11 @@ module aiDependencies 'modules/resources/standard-dependent-resources.bicep' = {
     aiSearchName: aiSearchName
     cosmosDBName: cosmosDBName
 
-    logAnalyticsId: lanalytics.id
+    logAnalyticsId: stage00.outputs.logAnalyticsId
     appServicePlanName: appServicePlanName
 
     appInsightsName: appInsightsName
-    appServiceDelegationSubnetId: appServiceSpokeVnet.outputs.appServiceDelegatedSubnetId
+    appServiceDelegationSubnetId: stage00.outputs.appServiceDelegatedSubnetId
 
     //wire up the YARP proxy
     foundryName: aiAccount.outputs.accountName
@@ -454,7 +343,7 @@ module acr './modules/resources/acr.bicep' = {
   params: {
     location: location
     acrName: acrName
-    logAnalyticsWorkspaceId: lanalytics.id
+    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
   }
 }
 
@@ -481,7 +370,7 @@ module aiAccountEncryption 'modules/encryption/ai-account-encryption.bicep' = {
     keyVaultUri: keyVault.outputs.keyVaultUri
     keyName: keyVault.outputs.keyName
     keyVersion: last(split(keyVault.outputs.keyUriWithVersion, '/'))
-    agentSubnetId: foundrySpokeVnet.outputs.agentSubnetId
+    agentSubnetId: stage00.outputs.agentSubnetId
     restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
     allowedFqdnList: foundryAllowedFqdnList
   }
@@ -519,15 +408,15 @@ module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = 
     cosmosDBName: aiDependencies.outputs.cosmosDBName
 
     // Hub VNet (DNS zones linked here for resolver)
-    hubVnetName: hubNetwork.outputs.hubVnetName
+    hubVnetName: stage00.outputs.hubVnetName
 
     // Foundry Spoke (Foundry PEs go here)
-    foundrySpokeVnetName: foundrySpokeVnet.outputs.virtualNetworkName
-    foundryPeSubnetName: foundrySpokeVnet.outputs.peSubnetName
+    foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
+    foundryPeSubnetName: stage00.outputs.foundryPeSubnetName
 
     // App Service Spoke (App Service PEs go here)
-    appServiceSpokeVnetName: appServiceSpokeVnet.outputs.virtualNetworkName
-    appServicePeSubnetName: appServiceSpokeVnet.outputs.peSubnetName
+    appServiceSpokeVnetName: stage00.outputs.appServiceSpokeVnetName
+    appServicePeSubnetName: stage00.outputs.appServicePeSubnetName
 
     suffix: uniqueSuffix
     // When Teams publish is enabled the YARP proxy is public (its own FQDN + managed cert is
@@ -543,8 +432,7 @@ module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = 
     aiSearch
     storage
     cosmosDB
-    hubToFoundryPeering
-    hubToAppServicePeering
+    stage00
   ]
 }
 
@@ -606,7 +494,7 @@ module aiProject 'modules/foundry/ai-project-identity.bicep' = {
     // dependent resources
     accountName: aiAccount.outputs.accountName
 
-    logAnalyticsWorkspaceId: lanalytics.id
+    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
 
     // One project connection per governed MCP server, built from the APIM server outputs below.
     // The agent's tool token is minted for our own app registration audience (an audience we
@@ -795,8 +683,8 @@ module linuxVmModule 'modules/resources/vm-linux.bicep' = {
   params: {
     location: location
     vmName: 'runner-vm-${uniqueSuffix}'
-    virtualNetworkName: foundrySpokeVnet.outputs.virtualNetworkName
-    subnetName: foundrySpokeVnet.outputs.vmSubnetName
+    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
+    subnetName: stage00.outputs.vmSubnetName
     adminPassword: vmAdminPassword
     adminUsername: vmAdminUsername
   }
@@ -810,8 +698,8 @@ module vmModule 'modules/resources/vm.bicep' = if (deployWindowsVm) {
   params: {
     location: location
     vmName: 'test-vm-${uniqueSuffix}'
-    virtualNetworkName: foundrySpokeVnet.outputs.virtualNetworkName
-    subnetName: foundrySpokeVnet.outputs.vmSubnetName
+    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
+    subnetName: stage00.outputs.vmSubnetName
     adminPassword: vmAdminPassword
     adminUsername: vmAdminUsername
   }
@@ -824,7 +712,7 @@ module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
   name: 'bastion-deployment-${uniqueSuffix}'
   params: {
     location: location
-    virtualNetworkName: foundrySpokeVnet.outputs.virtualNetworkName
+    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
   }
   dependsOn: [
     privateEndpointAndDNS
@@ -845,31 +733,6 @@ module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
   by force-tunnelling through the Azure Firewall (no spoke-to-spoke peering).
 */
 
-// Step 7: model-gateway spoke VNet.
-// ALWAYS deployed: APIM (which lives in this spoke) is now shared by the optional
-// model gateway AND the optional Teams/M365 publish inbound path.
-module modelGatewaySpokeVnet 'modules/model-gateway/model-gateway-spoke-vnet.bicep' = {
-  name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    vnetName: '${vnetName}-model-gateway-spoke'
-    vnetAddressPrefix: modelGatewaySpokeAddressPrefix
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
-    dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
-  }
-}
-
-// Step 8: peer hub <-> model-gateway spoke (always, alongside the spoke VNet)
-module hubToModelGatewayPeering 'modules/network/vnet-peering.bicep' = {
-  name: 'hub-model-gateway-peering-${uniqueSuffix}'
-  params: {
-    hubVnetName: hubNetwork.outputs.hubVnetName
-    spokeVnetName: modelGatewaySpokeVnet.outputs.virtualNetworkName
-    hubVnetId: hubNetwork.outputs.hubVnetId
-    spokeVnetId: modelGatewaySpokeVnet.outputs.virtualNetworkId
-  }
-}
-
 // Provider AI Foundry (the "real" model provider) — minimal, locked-down.
 module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = {
   name: 'provider-foundry-${uniqueSuffix}-deployment'
@@ -881,7 +744,7 @@ module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = {
     modelVersion: gatewayModelVersion
     modelSkuName: gatewayModelSkuName
     modelCapacity: gatewayModelCapacity
-    logAnalyticsWorkspaceId: lanalytics.id
+    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
   }
 }
 
@@ -891,10 +754,10 @@ module apim 'modules/model-gateway/apim.bicep' = {
   params: {
     apimName: apimName
     location: location
-    apimOutboundSubnetId: modelGatewaySpokeVnet.outputs.apimSubnetId
-    logAnalyticsWorkspaceId: lanalytics.id
-    appInsightsResourceId: appInsights.id
-    appInsightsConnectionString: appInsights.properties.ConnectionString
+    apimOutboundSubnetId: stage00.outputs.modelGatewayApimSubnetId
+    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
+    appInsightsResourceId: stage00.outputs.appInsightsId
+    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
   }
 }
 
@@ -908,8 +771,8 @@ module apimPrivateEndpoint 'modules/model-gateway/apim-private-endpoint.bicep' =
     suffix: uniqueSuffix
     apimId: apim.outputs.apimId
     apimName: apim.outputs.apimName
-    peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
-    hubVnetId: hubNetwork.outputs.hubVnetId
+    peSubnetId: stage00.outputs.modelGatewayPeSubnetId
+    hubVnetId: stage00.outputs.hubVnetId
   }
 }
 
@@ -920,7 +783,7 @@ module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private
     location: location
     providerAccountId: providerFoundry.outputs.accountId
     providerAccountName: providerFoundry.outputs.accountName
-    peSubnetId: modelGatewaySpokeVnet.outputs.peSubnetId
+    peSubnetId: stage00.outputs.modelGatewayPeSubnetId
   }
   dependsOn: [
     privateEndpointAndDNS
@@ -1035,7 +898,7 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
   params: {
     apimName: apim.outputs.apimName
     location: location
-    apimOutboundSubnetId: modelGatewaySpokeVnet.outputs.apimSubnetId
+    apimOutboundSubnetId: stage00.outputs.modelGatewayApimSubnetId
   }
   dependsOn: [
     apimPrivateEndpoint
@@ -1064,7 +927,7 @@ module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep'
     appServicePeSubnetCidr: appServicePeSubnetCidr
   }
   dependsOn: [
-    firewall
+    stage00
     apim
   ]
 }
@@ -1220,7 +1083,7 @@ output TEAMS_BOT_NAME string = 'bot-${uniqueSuffix}'
 output TEAMS_NAME_PREFIX string = uniqueSuffix
 
 @description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
-output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
+output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
 output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
