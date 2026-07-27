@@ -8,7 +8,7 @@
   Split of responsibilities (strict boundary):
     * The private VM may ONLY call Foundry REST APIs. Steps 1/3/4 hit the PRIVATE
       Foundry endpoint, so they are delegated to the VM inside the VNet via
-      `Invoke-AzVMRunCommand` (scripts/publish-teams.ps1) — which does nothing but
+      `az vm run-command invoke` (scripts/publish-teams.ps1) — which does nothing but
       Invoke-RestMethod against Foundry.
     * EVERYTHING else runs HOST-SIDE, outside the VNet, using the caller's Azure
       credentials: the Bot Service Bicep deployment (hooks/bot-service.bicep), the
@@ -16,7 +16,7 @@
       USER token used for publishing. No ARM / Bicep / az control-plane work is ever
       executed on the VM.
 
-  IMPORTANT - the caller MUST be signed in as a USER (`Connect-AzAccount` interactively), not a
+  IMPORTANT - the caller MUST be signed in as a USER (`az login` interactively), not a
   service principal / managed identity. The Foundry Microsoft 365 publish step performs
   an on-behalf-of exchange with the caller's token to submit the app to the M365 catalog;
   an app-only token has no user context and the publish call fails server-side with a bare
@@ -49,9 +49,8 @@
   Bot Service Contributor (create the bot) + Foundry User on the project. The caller
   must be a USER identity (see the on-behalf-of note above), not a service principal.
 
-  Requires: Az.Compute, Az.Accounts, Az.Resources modules.
+  Requires: the `az` CLI, signed in as a user (`az login`). No Az PowerShell modules are needed.
 #>
-#Requires -Modules Az.Compute, Az.Accounts, Az.Resources
 $ErrorActionPreference = 'Stop'
 
 $enableTeams = [Environment]::GetEnvironmentVariable('SEED_ENABLE_TEAMS_PUBLISH')
@@ -77,14 +76,48 @@ function Get-OptionalEnv {
   return $value.Trim('"')
 }
 
+# Invokes an ARM management REST call via the az CLI, returning a normalised object with
+# .StatusCode and .Content so callers keep their existing status/JSON handling. stdout (the
+# JSON body) and stderr (az errors) are captured separately so a success-with-warning never
+# pollutes the parsed body. A PUT body is passed via a temp file (@file) to avoid shell
+# quoting issues with the rawxml-in-JSON payload.
+function Invoke-ArmRest {
+  param([string]$Method, [string]$Url, [string]$Payload)
+  $tempErr  = Join-Path ([System.IO.Path]::GetTempPath()) "postdeploy-err-$([guid]::NewGuid().ToString('N')).log"
+  $tempBody = $null
+  try {
+    $azArgs = @('rest', '--method', $Method, '--url', $Url, '--output', 'json')
+    if ($PSBoundParameters.ContainsKey('Payload') -and $Payload) {
+      $tempBody = Join-Path ([System.IO.Path]::GetTempPath()) "postdeploy-body-$([guid]::NewGuid().ToString('N')).json"
+      Set-Content -LiteralPath $tempBody -Value $Payload -Encoding utf8
+      $azArgs += @('--headers', 'Content-Type=application/json', '--body', "@$tempBody")
+    }
+    $out = az @azArgs 2>$tempErr
+    $code = $LASTEXITCODE
+    $errText = (Get-Content -LiteralPath $tempErr -Raw -ErrorAction SilentlyContinue)
+  }
+  finally {
+    Remove-Item -LiteralPath $tempErr -Force -ErrorAction SilentlyContinue
+    if ($tempBody) { Remove-Item -LiteralPath $tempBody -Force -ErrorAction SilentlyContinue }
+  }
+  if ($code -eq 0) {
+    return [pscustomobject]@{ StatusCode = 200; Content = ($out | Out-String) }
+  }
+  $status = 500
+  $m = [regex]::Match($errText, '\((?<c>[45]\d\d)\)')
+  if (-not $m.Success) { $m = [regex]::Match($errText, '\b(?<c>[45]\d\d)\b') }
+  if ($m.Success) { $status = [int]$m.Groups['c'].Value }
+  return [pscustomobject]@{ StatusCode = $status; Content = $errText }
+}
+
 # ARM control-plane calls to APIM v2 entity sub-resources can intermittently return
 # HTTP 502/503/504. Retry those transient failures with backoff.
 function Invoke-AzRestWithRetry {
-  param([string]$Method, [string]$Path, [string]$Payload, [int]$MaxAttempts = 5)
+  param([string]$Method, [string]$Url, [string]$Payload, [int]$MaxAttempts = 5)
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-    $params = @{ Method = $Method; Path = $Path }
+    $params = @{ Method = $Method; Url = $Url }
     if ($Payload) { $params.Payload = $Payload }
-    $response = Invoke-AzRestMethod @params
+    $response = Invoke-ArmRest @params
     if ($response.StatusCode -lt 400) {
       return $response
     }
@@ -120,8 +153,10 @@ $logAnalyticsId  = Get-OptionalEnv 'TEAMS_LOG_ANALYTICS_ID'
 
 $subscriptionId  = Get-OptionalEnv 'AZURE_SUBSCRIPTION_ID'
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-  $ctx = Get-AzContext -ErrorAction SilentlyContinue
-  if ($ctx) { $subscriptionId = $ctx.Subscription.Id }
+  $subFromCli = az account show --query id --output tsv 2>$null
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($subFromCli)) {
+    $subscriptionId = $subFromCli.Trim()
+  }
 }
 
 $namePrefix      = Get-OptionalEnv 'TEAMS_NAME_PREFIX'
@@ -164,15 +199,18 @@ function Invoke-OnVm {
 
 
 Write-Host '[postdeploy] Registering Microsoft.BotService resource provider (idempotent)...'
-Register-AzResourceProvider -ProviderNamespace Microsoft.BotService | Out-Null
+az provider register --namespace Microsoft.BotService --output none
+if ($LASTEXITCODE -ne 0) {
+  throw '[postdeploy] Failed to register the Microsoft.BotService resource provider.'
+}
 
 # --- Acquire a USER (delegated) token (used by every publish-teams call on the VM) ---
 Write-Host '[postdeploy] Acquiring a user access token (aud https://ai.azure.com)...'
-$tokenResult = Get-AzAccessToken -ResourceUrl 'https://ai.azure.com'
-$publishToken = $tokenResult.Token
-if ([string]::IsNullOrWhiteSpace($publishToken)) {
-  throw "[postdeploy] Failed to acquire an access token. Run 'Connect-AzAccount' as a user (not a service principal)."
+$publishToken = az account get-access-token --resource 'https://ai.azure.com' --query accessToken --output tsv 2>$null
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($publishToken)) {
+  throw "[postdeploy] Failed to acquire an access token. Run 'az login' as a user (not a service principal)."
 }
+$publishToken = $publishToken.Trim()
 # Sanity-check that this is a delegated user token, not an app-only token.
 try {
   $payloadSeg = $publishToken.Split('.')[1].Replace('-', '+').Replace('_', '/')
@@ -180,7 +218,7 @@ try {
   $claims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payloadSeg)) | ConvertFrom-Json
   $claimNames = $claims.PSObject.Properties.Name
   if ($claims.idtyp -eq 'app' -or -not ($claimNames -contains 'upn' -or $claimNames -contains 'unique_name')) {
-    Write-Warning "[postdeploy] The acquired token looks app-only (idtyp='$($claims.idtyp)'). Foundry's publish OBO step needs a USER token, so publish may fail with HTTP 502. Run 'Connect-AzAccount' interactively as a user."
+    Write-Warning "[postdeploy] The acquired token looks app-only (idtyp='$($claims.idtyp)'). Foundry's publish OBO step needs a USER token, so publish may fail with HTTP 502. Run 'az login' interactively as a user."
   }
   else {
     Write-Host "[postdeploy] Using delegated user token (upn=$($claims.upn))."
@@ -223,21 +261,16 @@ foreach ($agentName in $agentNames) {
 
   # --- Step 2: create the agent's Azure Bot Service (host-side ARM) ---
   Write-Host "[postdeploy] ($agentName) Step 2: creating Azure Bot Service '$agentBotName' (endpoint $botEndpoint)..."
-  $deployment = New-AzResourceGroupDeployment `
-    -ResourceGroupName $resourceGroup `
-    -Name "bot-$agentName" `
-    -TemplateFile $botTemplate `
-    -botName $agentBotName `
-    -displayName $displayName `
-    -msaAppId $principalId `
-    -tenantId $tenantId `
-    -endpoint $botEndpoint `
-    -logAnalyticsWorkspaceId $logAnalyticsId `
-    -ErrorAction Stop
-  $botArmId = $deployment.Outputs['botServiceArmId'].Value
-  if ([string]::IsNullOrWhiteSpace($botArmId)) {
-    throw "[postdeploy] Bot Service deployment did not return botServiceArmId for '$agentName'."
+  $botArmId = az deployment group create `
+    --resource-group $resourceGroup `
+    --name "bot-$agentName" `
+    --template-file $botTemplate `
+    --parameters "botName=$agentBotName" "displayName=$displayName" "msaAppId=$principalId" "tenantId=$tenantId" "endpoint=$botEndpoint" "logAnalyticsWorkspaceId=$logAnalyticsId" `
+    --query 'properties.outputs.botServiceArmId.value' --output tsv 2>$null
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botArmId)) {
+    throw "[postdeploy] Bot Service deployment did not return botServiceArmId for '$agentName' (az deployment group create exit $LASTEXITCODE)."
   }
+  $botArmId = $botArmId.Trim()
   Write-Host "[postdeploy] ($agentName) Bot Service ARM ID: $botArmId"
 
   $published += [pscustomobject]@{ Name = $agentName; PrincipalId = $principalId; BotArmId = $botArmId; BotName = $agentBotName }
@@ -250,9 +283,9 @@ foreach ($agentName in $agentNames) {
 try {
   $appIds = @($published | ForEach-Object { $_.PrincipalId } | Sort-Object -Unique)
   Write-Host "[postdeploy] Setting APIM validate-jwt audience allowlist to $($appIds.Count) bot App ID(s)..."
-  $policyPath = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.ApiManagement/service/$apimName/apis/$apimApiName/policies/policy?api-version=2024-05-01"
+  $policyPath = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.ApiManagement/service/$apimName/apis/$apimApiName/policies/policy?api-version=2024-05-01"
 
-  $get = Invoke-AzRestWithRetry -Method GET -Path "${policyPath}&format=rawxml"
+  $get = Invoke-AzRestWithRetry -Method GET -Url "${policyPath}&format=rawxml"
   $current = ''
   if ($get.StatusCode -lt 400) {
     $parsed = $get.Content | ConvertFrom-Json
@@ -276,7 +309,7 @@ try {
     }
     else {
       $bodyObj = @{ properties = @{ format = 'rawxml'; value = $updated } } | ConvertTo-Json -Depth 10 -Compress
-      $put = Invoke-AzRestWithRetry -Method PUT -Path $policyPath -Payload $bodyObj
+      $put = Invoke-AzRestWithRetry -Method PUT -Url $policyPath -Payload $bodyObj
       if ($put.StatusCode -lt 400) { Write-Host "[postdeploy] APIM audience allowlist set to: $($appIds -join ', ')." }
       else { Write-Warning '[postdeploy] APIM audience allowlist PUT failed after retries. Re-run `azd hooks run postdeploy` to complete the pin.' }
     }

@@ -3,11 +3,11 @@
   ---------------------------------------------------------------
   Dot-sourced by hooks/predeploy.ps1 and hooks/postdeploy.ps1.
 
-  Why a shim instead of calling Invoke-AzVMRunCommand directly:
+  Why a shim instead of calling `az vm run-command invoke` directly:
     The in-VNet worker VM is now LINUX (see infra/modules/resources/vm-linux.bicep),
     so the 'RunPowerShellScript' command id no longer applies — Linux VMs only accept
-    'RunShellScript', whose -Parameter values are POSITIONAL shell arguments rather
-    than the named PowerShell parameters our scripts declare.
+    'RunShellScript', whose --scripts value is a shell script, not the named PowerShell
+    parameters our scripts declare.
 
     The scripts themselves stay in PowerShell (cloud-init installs pwsh), so this
     helper wraps them: it emits a small shell script that materialises the .ps1 on
@@ -16,6 +16,10 @@
 
   Nothing secret is embedded: callers pass only endpoints, names and flags. The VM
   authenticates to Foundry with its own managed identity via IMDS.
+
+  Uses the `az` CLI (`az vm run-command invoke`) so no Az PowerShell modules are required —
+  azd already depends on the az CLI for auth. The return value is normalised to the same
+  shape the old Invoke-AzVMRunCommand produced (.Value[].Message) so callers are unchanged.
 
   Parameter values must be STRINGS. `pwsh -File` only ever passes string arguments, so a
   [switch] parameter on the target script could not be satisfied by `-Name 'true'`. Every
@@ -66,11 +70,32 @@ function Invoke-VmPwshScript {
   $tempWrapper = Join-Path ([System.IO.Path]::GetTempPath()) "run-$scriptName-$([guid]::NewGuid().ToString('N')).sh"
   try {
     Set-Content -LiteralPath $tempWrapper -Value $wrapper -Encoding utf8
-    return Invoke-AzVMRunCommand `
-      -ResourceGroupName $ResourceGroup `
-      -VMName $VmName `
-      -CommandId 'RunShellScript' `
-      -ScriptPath $tempWrapper
+
+    # stdout carries the JSON result; stderr (az warnings / errors) is kept separate so a
+    # success-with-warning never pollutes the JSON we parse.
+    $tempErr = Join-Path ([System.IO.Path]::GetTempPath()) "err-$scriptName-$([guid]::NewGuid().ToString('N')).log"
+    try {
+      $json = az vm run-command invoke `
+        --resource-group $ResourceGroup `
+        --name $VmName `
+        --command-id 'RunShellScript' `
+        --scripts "@$tempWrapper" `
+        --output json 2>$tempErr
+      if ($LASTEXITCODE -ne 0) {
+        $errText = (Get-Content -LiteralPath $tempErr -Raw -ErrorAction SilentlyContinue)
+        throw "az vm run-command invoke failed (exit $LASTEXITCODE) on VM '$VmName' (resource group '$ResourceGroup'): $errText"
+      }
+    }
+    finally {
+      Remove-Item -LiteralPath $tempErr -Force -ErrorAction SilentlyContinue
+    }
+
+    $parsed = ($json | Out-String) | ConvertFrom-Json
+    # Normalise to the legacy Invoke-AzVMRunCommand shape: an object with a .Value array
+    # whose elements expose .Message (the combined stdout/stderr from RunShellScript).
+    return [pscustomobject]@{
+      Value = @($parsed.value | ForEach-Object { [pscustomobject]@{ Message = $_.message } })
+    }
   }
   finally {
     Remove-Item -LiteralPath $tempWrapper -Force -ErrorAction SilentlyContinue

@@ -19,7 +19,8 @@ purely for **interactive human access**. It is the only way into the Windows dev
 so it is gated by `deployBastion`, which **defaults to `deployWindowsVm`** — bring the
 Windows VM up and Bastion comes with it. The Linux worker needs no interactive path (agent
 seeding goes through `az vm run-command`, and the runner registers *outbound*), so the
-default deployment gets neither:
+default deployment gets neither. `azd up`'s preprovision hook prompts whether to deploy
+the Windows VM; you can also set it non-interactively:
 
 ```bash
 azd env set DEPLOY_WINDOWS_VM true   # opt in to the RDP box (and the Bastion to reach it)
@@ -119,6 +120,9 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
 
 ## Enable it
 
+`azd up`'s **preprovision hook** (`hooks/preprovision.ps1`) prompts once for the runner
+repo URL (leave it blank to skip). Alternatively set it non-interactively:
+
 ```bash
 azd env set GITHUB_RUNNER_REPO_URL https://github.com/<owner>/<repo>
 azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>   # written to Key Vault by Bicep
@@ -126,6 +130,9 @@ azd provision
 # optional: clear the PAT from the local azd env — the KV secret persists
 azd env set GITHUB_RUNNER_PAT ""
 ```
+
+The **PAT is a secret and is never prompted** — supply it with `azd env set GITHUB_RUNNER_PAT`
+before provisioning (the hook reminds you when you enter a repo URL without one set).
 
 `GITHUB_RUNNER_PAT` is a `@secure()` param sourced from `${GITHUB_RUNNER_PAT}` (empty by
 default). While set, it lives in the local, gitignored `.azure/<env>/.env`. Leaving it

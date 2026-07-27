@@ -21,9 +21,8 @@
   (Microsoft.CognitiveServices/accounts/.../capabilityHosts/delete), e.g. Cognitive Services
   Contributor on the account/resource group.
 
-  Requires: Az.Accounts module (ships with pwsh on azd-supported platforms).
+  Requires: the `az` CLI, signed in (`az login`). No Az PowerShell modules are needed.
 #>
-#Requires -Modules Az.Accounts, Az.Resources
 $ErrorActionPreference = 'Stop'
 
 $apiVersion = '2025-04-01-preview'
@@ -40,10 +39,12 @@ $resourceGroup  = Get-OptionalEnv 'AZURE_RESOURCE_GROUP'
 $accountName    = Get-OptionalEnv 'AZURE_AI_ACCOUNT_NAME'
 $projectName    = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME'
 
-# Subscription can also be discovered from the current Az context.
+# Subscription can also be discovered from the current az CLI account.
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-  $ctx = Get-AzContext -ErrorAction SilentlyContinue
-  if ($ctx) { $subscriptionId = $ctx.Subscription.Id }
+  $subFromCli = az account show --query id --output tsv 2>$null
+  if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($subFromCli)) {
+    $subscriptionId = $subFromCli.Trim()
+  }
 }
 
 # Best-effort gate: if we truly can't act (no subscription/RG) or Foundry was never
@@ -71,9 +72,34 @@ if (-not $hasAccount) {
 
 $basePath = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
 
+# Invokes an ARM management REST call via the az CLI. Returns a normalised object with
+# .StatusCode and .Content so the callers keep their existing status/JSON handling. stdout
+# (the JSON body) and stderr (az errors) are captured separately so a success-with-warning
+# never pollutes the parsed body.
+function Invoke-ArmRest {
+  param([string]$Method, [string]$Url)
+  $tempErr = Join-Path ([System.IO.Path]::GetTempPath()) "predown-$([guid]::NewGuid().ToString('N')).log"
+  try {
+    $out = az rest --method $Method --url $Url --output json 2>$tempErr
+    $code = $LASTEXITCODE
+    $errText = (Get-Content -LiteralPath $tempErr -Raw -ErrorAction SilentlyContinue)
+  }
+  finally {
+    Remove-Item -LiteralPath $tempErr -Force -ErrorAction SilentlyContinue
+  }
+  if ($code -eq 0) {
+    return [pscustomobject]@{ StatusCode = 200; Content = ($out | Out-String) }
+  }
+  $status = 500
+  $m = [regex]::Match($errText, '\((?<c>[45]\d\d)\)')
+  if (-not $m.Success) { $m = [regex]::Match($errText, '\b(?<c>[45]\d\d)\b') }
+  if ($m.Success) { $status = [int]$m.Groups['c'].Value }
+  return [pscustomobject]@{ StatusCode = $status; Content = $errText }
+}
+
 function Get-CapabilityHostIds {
   param([string]$Path, [string]$Scope)
-  $response = Invoke-AzRestMethod -Method GET -Path "${Path}/capabilityHosts?api-version=$apiVersion"
+  $response = Invoke-ArmRest -Method GET -Url "https://management.azure.com${Path}/capabilityHosts?api-version=$apiVersion"
   if ($response.StatusCode -eq 404) {
     Write-Host "[predown] No $Scope scope found (already deleted). Nothing to enumerate."
     return @()
@@ -94,9 +120,12 @@ function Remove-CapabilityHosts {
   param([string[]]$Ids, [string]$Scope)
   foreach ($id in $Ids) {
     Write-Host "[predown] Deleting $Scope capability host: $id"
-    # Remove-AzResource handles long-running operation polling (waits for delete to complete),
-    # which is required: project-scope hosts must be fully gone before account-scope deletion.
-    Remove-AzResource -ResourceId $id -ApiVersion $apiVersion -Force -ErrorAction Stop
+    # `az resource delete` polls the long-running delete to completion, which is required:
+    # project-scope hosts must be fully gone before account-scope deletion.
+    az resource delete --ids $id --api-version $apiVersion --output none
+    if ($LASTEXITCODE -ne 0) {
+      throw "[predown] Failed to delete $Scope capability host (az resource delete exit $LASTEXITCODE): $id"
+    }
     Write-Host "[predown] Deleted: $id"
   }
 }

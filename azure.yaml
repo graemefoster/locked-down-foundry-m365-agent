@@ -8,6 +8,11 @@ infra:
   module: main
 
 hooks:
+  preprovision:
+    shell: pwsh
+    run: ./hooks/preprovision.ps1
+    continueOnError: false
+    interactive: true
   predeploy:
     shell: pwsh
     run: ./hooks/predeploy.ps1

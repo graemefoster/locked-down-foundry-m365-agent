@@ -2,7 +2,8 @@
   azd predeploy hook: seed Foundry agents
   ---------------------------------------
   Runs on the azd host (laptop / CI). The Foundry endpoint is private, so this hook cannot
-  call the Agents API directly. Instead it uses `Invoke-AzVMRunCommand` to execute
+  call the Agents API directly. Instead it uses `az vm run-command invoke` (via the shared
+  hooks/vm-run-command.ps1 shim) to execute
   scripts/seed-agents.ps1 ON the locked-down VM inside the VNet, which can reach the private
   endpoint. Agent definitions live in scripts/seed-agents.ps1.
 
@@ -18,9 +19,8 @@
   (Microsoft.Compute/virtualMachines/runCommands/*), e.g. Virtual Machine Contributor on the
   VM/resource group.
 
-  Requires: Az.Compute module.
+  Requires: the `az` CLI, signed in (`az login`). No Az PowerShell modules are needed.
 #>
-#Requires -Modules Az.Compute
 $ErrorActionPreference = 'Stop'
 
 function Get-RequiredEnv {

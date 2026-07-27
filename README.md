@@ -47,7 +47,9 @@ assign RBAC (Azure AI Account Owner + Role Based Access Administrator or Owner),
 **[docs/deployment.md](./docs/deployment.md)**.
 
 ```bash
-# 1. Provision all infrastructure (azd prompts for the VM admin password)
+# 1. Provision all infrastructure
+#    azd prompts for the VM admin password, and a preprovision hook asks (once)
+#    whether to deploy the Windows dev VM and/or the in-VNet self-hosted runner.
 azd up
 
 # 2. Seed agents on the private VM (runs the predeploy hook)
@@ -71,12 +73,14 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
   [deep dive](./apim-model-gateway.md).
 - **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
   the in-VNet **Linux** worker VM so complex deployments run *inside the VNet*, reaching
-  the private Foundry endpoint directly instead of via `az vm run-command`. Opt in with
-  `GITHUB_RUNNER_REPO_URL`. **[docs/github-runner.md](./docs/github-runner.md)**.
+  the private Foundry endpoint directly instead of via `az vm run-command`. `azd up`'s
+  preprovision hook prompts for the repo URL (or set `GITHUB_RUNNER_REPO_URL` directly).
+  **[docs/github-runner.md](./docs/github-runner.md)**.
 - **Optional Windows dev VM** *(off by default)* — the RDP-in-and-run-Edge box for
   inspecting the environment from behind the firewall. All automation lives on the Linux
-  worker VM, so this stays off unless you want that interactive session: opt in with
-  `azd env set DEPLOY_WINDOWS_VM true`, which also brings up Azure Bastion to reach it.
+  worker VM, so this stays off unless you want that interactive session: `azd up`'s
+  preprovision hook prompts for it (or set `DEPLOY_WINDOWS_VM true`), which also brings up
+  Azure Bastion to reach it.
 
 ## Documentation
 

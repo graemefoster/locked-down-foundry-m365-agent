@@ -400,7 +400,7 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           // We accept this at the NSG only because all egress is force-tunnelled (UDR
           // 0.0.0.0/0) through the Azure Firewall, where an SNI application rule can pin the
           // exact FQDN. See NETWORKING.md "Known limitation: Agent 365 telemetry egress".
-          description: 'A365 observability telemetry to agent365.svc.cloud.microsoft (AFD anycast). OVER-BROAD tag; tighten at firewall via SNI. See NETWORKING.md.'
+          description: 'A365 observability telemetry to agent365.svc.cloud.microsoft (AFD anycast). tighten at firewall via SNI. See NETWORKING.md.'
         }
       }
       {
@@ -472,7 +472,7 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           sourcePortRange: '*'
           destinationAddressPrefix: appServicePeCidr
           destinationPortRange: '443'
-          description: 'HTTPS to the App Service spoke PE subnet (MCP web app). Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so this explicit allow is required.'
+          description: 'HTTPS to App Service spoke PE subnet (MCP web app). Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so allow required.'
         }
       }
     ])

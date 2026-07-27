@@ -30,25 +30,34 @@ packages:
   - libicu-dev
 
 runcmd:
+  # Each item is a LIST so cloud-init runs it via execve under bash — NOT the default
+  # /bin/sh (dash), which rejects `set -o pipefail`. Keeping bash preserves pipefail on
+  # the `curl | bash` az install below.
   # Microsoft package feed (provides powershell; also used by the az install below).
-  - |
-    set -euxo pipefail
-    . /etc/os-release
-    curl -fsSL "https://packages.microsoft.com/config/ubuntu/${VERSION_ID}/packages-microsoft-prod.deb" \
-      -o /tmp/packages-microsoft-prod.deb
-    dpkg -i /tmp/packages-microsoft-prod.deb
-    rm -f /tmp/packages-microsoft-prod.deb
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
+  - - bash
+    - -c
+    - |
+      set -euxo pipefail
+      . /etc/os-release
+      curl -fsSL "https://packages.microsoft.com/config/ubuntu/${VERSION_ID}/packages-microsoft-prod.deb" \
+        -o /tmp/packages-microsoft-prod.deb
+      dpkg -i /tmp/packages-microsoft-prod.deb
+      rm -f /tmp/packages-microsoft-prod.deb
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -y powershell
   # Azure CLI via the official Microsoft install script.
-  - |
-    set -euxo pipefail
-    curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
+  - - bash
+    - -c
+    - |
+      set -euxo pipefail
+      curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
   # yq (mikefarah) — the apt package is a different, incompatible CLI, so take the
   # official static binary. GitHub releases are already reachable (the runner
   # tarball comes from there too).
-  - |
-    set -euxo pipefail
-    curl -fsSL -o /usr/local/bin/yq \
-      "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
-    chmod 0755 /usr/local/bin/yq
+  - - bash
+    - -c
+    - |
+      set -euxo pipefail
+      curl -fsSL -o /usr/local/bin/yq \
+        "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
+      chmod 0755 /usr/local/bin/yq
