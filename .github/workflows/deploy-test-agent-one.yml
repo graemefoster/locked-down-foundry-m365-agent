@@ -19,6 +19,12 @@ name: Deploy test-agent-one (VNet self-hosted)
 # So for a prompt agent, calling the Agents REST API (create/update version + publish) from the
 # in-VNet runner is the correct and simplest path.
 #
+# Environment-agnostic MCP: agent.yaml deliberately omits the MCP tool's `server_url` and sets
+#   only `project_connection_id: testweathermcpserver`. Foundry resolves the target URL + auth
+#   from that per-environment project connection (Bicep creates it under the same literal name in
+#   every env, pointing at that env's APIM MCP gateway), so this manifest promotes across
+#   environments unchanged. Do NOT reintroduce a hardcoded server_url here.
+#
 # Single-job design:
 #   * deploy   (self-hosted, in-VNet) - the ONLY job, and the only thing that touches the
 #                                 PRIVATE Foundry endpoint. It converts agent.yaml ->
