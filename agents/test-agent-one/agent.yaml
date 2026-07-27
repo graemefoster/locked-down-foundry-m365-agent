@@ -10,7 +10,12 @@ definition:
   tools:
     - type: mcp
       server_label: testweathermcpserver
-      server_url: https://mcp-qodk-asp.azurewebsites.net/
+      # No server_url: the target MCP endpoint and auth are resolved from the per-environment
+      # Foundry project connection referenced below. That connection is created by Bicep in
+      # every environment under the SAME literal name (infra/main.bicep -> mcpServerName:
+      # 'testweathermcpserver'), with an env-specific `target` (the APIM MCP gateway URL) and
+      # AgenticIdentityToken auth. Keeping the URL out of the manifest lets this agent be
+      # promoted across environments unchanged.
       project_connection_id: testweathermcpserver
       # Auto-approve MCP tool calls. MCP tools default to require_approval "always",
       # which pauses the run on an mcp_approval_request. The nightly eval samples the
