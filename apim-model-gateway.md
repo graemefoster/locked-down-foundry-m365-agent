@@ -238,11 +238,14 @@ response with no auth error → confirms discovery + v1 inference through APIM e
   safe-access (`mod.?outputs.x ?? default`) or BCP318 hard-references the non-deployed module.
 - Bicep does **not** interpolate `${...}` inside triple-quoted (`'''...'''`) strings — hence the
   `@@TOKEN@@` + `replace()` pattern in `apim-api-policy.bicep`.
-- **MCP tool in an agent manifest = connection, not URL.** `agents/test-agent-one/agent.yaml`
-  omits `server_url` and sets only `project_connection_id: testweathermcpserver`. Foundry
-  resolves the target endpoint + auth from that per-env project connection (created by
-  `main.bicep`/`ai-project-identity.bicep` under the **same literal name** in every env, with an
-  env-specific `target` = the APIM MCP gateway URL + `AgenticIdentityToken`). This lets the
-  manifest be promoted across environments unchanged; a hardcoded `server_url` would pin it to
-  one env (and, if pointed straight at the App Service, bypass the APIM gateway). Verified live:
-  Foundry accepts a `type: mcp` tool with no `server_url` (deploy `30234771068`, version 2).
+- **MCP tool in an agent manifest = connection for auth + injected per-env URL.**
+  `agents/test-agent-one/agent.yaml` keeps `project_connection_id: testweathermcpserver` (supplies
+  `AgenticIdentityToken` auth via the per-env connection) but **omits `server_url`**; the deploy
+  workflow injects the concrete per-env URL (from the `MCP_SERVER_URL` repo variable /
+  `mcpServerUrl` input / Bicep output `MCP_GATEWAY_URL` = the APIM MCP gateway) so the manifest
+  promotes across environments unchanged. **Gotcha:** create/publish *accepts* a `type: mcp` tool
+  with no `server_url`, but an actual **run rejects it** — `Missing mutually exclusive parameters:
+  'tools[0]'. Ensure you are providing exactly one of: 'server_url', 'connector_id', or
+  'tunnel_id'`. So the URL must be present in the *deployed* definition (connection-only is not
+  enough); we inject it rather than hardcode it. The old bug was a hardcoded URL that was both
+  stale (wrong env) and pointed straight at the App Service instead of the APIM gateway.

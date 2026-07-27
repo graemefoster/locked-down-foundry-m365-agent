@@ -1146,6 +1146,9 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 @description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
 
+@description('Per-environment MCP server URL (the APIM MCP gateway), identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
+output MCP_GATEWAY_URL string = '${apimMcpApi.outputs.mcpGatewayUrl}/'
+
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 
 @description('GitHub repo URL the self-hosted runner registered against. Empty when the runner was not installed; gates the predown hook deregistration phase.')

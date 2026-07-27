@@ -20,10 +20,11 @@ name: Deploy test-agent-one (VNet self-hosted)
 # in-VNet runner is the correct and simplest path.
 #
 # Environment-agnostic MCP: agent.yaml deliberately omits the MCP tool's `server_url` and sets
-#   only `project_connection_id: testweathermcpserver`. Foundry resolves the target URL + auth
-#   from that per-environment project connection (Bicep creates it under the same literal name in
-#   every env, pointing at that env's APIM MCP gateway), so this manifest promotes across
-#   environments unchanged. Do NOT reintroduce a hardcoded server_url here.
+#   only `project_connection_id: testweathermcpserver` (auth). The concrete per-env endpoint is
+#   INJECTED into the deployed definition below (from the mcpServerUrl input or the MCP_SERVER_URL
+#   repo variable, defaulting to that env's APIM MCP gateway), because the Foundry MCP tool schema
+#   requires exactly one of server_url/connector_id/tunnel_id. This keeps the manifest promotable
+#   across environments unchanged. Do NOT hardcode a server_url in the manifest.
 #
 # Single-job design:
 #   * deploy   (self-hosted, in-VNet) - the ONLY job, and the only thing that touches the
@@ -51,6 +52,10 @@ on:
     inputs:
       foundryProjectEndpoint:
         description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
+        required: false
+        default: ""
+      mcpServerUrl:
+        description: "MCP server URL to inject into the agent (defaults to repo variable MCP_SERVER_URL)"
         required: false
         default: ""
       apiVersion:
@@ -85,6 +90,8 @@ jobs:
       - name: Convert agent.yaml -> agent.json (yq)
         env:
           MANIFEST: ${{ env.MANIFEST_PATH }}
+          INPUT_MCP_URL: ${{ inputs.mcpServerUrl }}
+          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
         run: |
           if ! command -v yq >/dev/null 2>&1; then
             echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
@@ -99,6 +106,18 @@ jobs:
           if [ -z "$name" ] || [ "$name" = "null" ]; then
             echo "::error::Manifest '$MANIFEST' has no 'name'."
             exit 1
+          fi
+          # Inject the per-environment MCP server URL into every MCP tool. The manifest is kept
+          # env-agnostic (no server_url); the Foundry MCP tool schema requires one of
+          # server_url/connector_id/tunnel_id, so we set it here from the input or repo variable.
+          if grep -q '"type": "mcp"' agent.json; then
+            MCP_URL="${INPUT_MCP_URL:-$VAR_MCP_URL}"
+            if [ -z "$MCP_URL" ]; then
+              echo "::error::The manifest has an MCP tool but no MCP server URL was provided. Set repo variable MCP_SERVER_URL (from 'azd env get-value MCP_GATEWAY_URL') or pass the mcpServerUrl dispatch input."
+              exit 1
+            fi
+            MCP_URL="$MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
+            echo "Injected MCP server_url: $MCP_URL"
           fi
           echo "Prepared agent '$name':"
           cat agent.json

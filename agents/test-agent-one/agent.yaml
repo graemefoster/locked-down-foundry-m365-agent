@@ -10,12 +10,12 @@ definition:
   tools:
     - type: mcp
       server_label: testweathermcpserver
-      # No server_url: the target MCP endpoint and auth are resolved from the per-environment
-      # Foundry project connection referenced below. That connection is created by Bicep in
-      # every environment under the SAME literal name (infra/main.bicep -> mcpServerName:
-      # 'testweathermcpserver'), with an env-specific `target` (the APIM MCP gateway URL) and
-      # AgenticIdentityToken auth. Keeping the URL out of the manifest lets this agent be
-      # promoted across environments unchanged.
+      # server_url is intentionally omitted here and INJECTED at deploy time by
+      # .github/workflows/deploy-test-agent-one.yml (from the MCP_SERVER_URL repo variable /
+      # dispatch input), so this manifest can be promoted across environments unchanged. The
+      # Foundry MCP tool schema still requires exactly one of server_url/connector_id/tunnel_id
+      # for the endpoint, so it cannot be left out of the deployed definition; project_connection_id
+      # below supplies auth (AgenticIdentityToken) via the per-env 'testweathermcpserver' connection.
       project_connection_id: testweathermcpserver
       # Auto-approve MCP tool calls. MCP tools default to require_approval "always",
       # which pauses the run on an mcp_approval_request. The nightly eval samples the
