@@ -16,10 +16,6 @@ param cosmosDBName string
 param acrName string
 param appServicePlanName string
 param appInsightsName string
-param enableTeamsPublish bool
-
-// Foundry account name (wires the YARP proxy).
-param foundryName string
 
 // Deterministic gateway URL (threaded so no dependency on the APIM module).
 param apimGatewayUrl string
@@ -53,8 +49,6 @@ module aiDependencies '../../modules/resources/standard-dependent-resources.bice
     appServiceDelegationSubnetId: appServiceDelegatedSubnetId
 
     //wire up the YARP proxy
-    foundryName: foundryName
-    enableTeamsPublish: enableTeamsPublish
     apimGatewayUrl: apimGatewayUrl
 
   }

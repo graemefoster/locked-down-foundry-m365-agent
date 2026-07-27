@@ -345,9 +345,9 @@ service-scoped `applicationinsights` diagnostic, W3C correlation, 100% sampling)
 
 ---
 
-## Optional: Teams / M365 publish inbound path
+## Teams / M365 publish inbound path
 
-Enabled by default (`enableTeamsPublish=true`; set `false` to opt out). Publishes the primary
+Always deployed. Publishes the primary
 agent to Microsoft Teams / M365 Copilot per the Learn article
 [Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network).
 Reuses the (now always-on) shared APIM gateway spoke.
@@ -410,10 +410,11 @@ exists after seeding, so the audience is pinned live by the postdeploy hook.
   > ⚠️ The `AzureBotService` service tag is the wrong allow-list here — it covers
   > DirectLine + the Bot Service token cache, **not** the Teams channel adapter's
   > source IPs, so using it silently blocks all Teams traffic.
-  > ⚠️ **Orphan-PE trap:** flipping `enableTeamsPublish` on an *already-provisioned*
-  > environment leaves the pre-flag YARP private endpoint behind, unmanaged by azd. It
-  > keeps YARP effectively private (PNA Disabled) and blocks inbound. Delete the PE and
-  > set `publicNetworkAccess=Enabled` manually (the Bicep is correct for fresh deploys).
+  > ⚠️ **Legacy orphan-PE trap:** environments provisioned before Teams publish became
+  > always-on (i.e. with the removed `enableTeamsPublish=false` opt-out) may have a pre-flag
+  > YARP private endpoint left behind, unmanaged by azd. It keeps YARP effectively private
+  > (PNA Disabled) and blocks inbound. Delete the PE and set `publicNetworkAccess=Enabled`
+  > manually (the Bicep is correct for fresh deploys).
 - **APIM → Bot Framework IdP** (`login.botframework.com`, HTTPS:443) — a new firewall
   **application rule** (`AllowApimBotFrameworkOidc`, source apim-subnet) so `validate-jwt`
   can fetch the OIDC signing keys. Without it, inbound activities 401 (see the trap above).

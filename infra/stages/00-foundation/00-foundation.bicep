@@ -14,7 +14,6 @@ param uniqueSuffix string
 param vnetName string
 param agentSubnetName string
 param peSubnetName string
-param enableTeamsPublish bool
 
 param logAnalyticsName string
 param appInsightsName string
@@ -48,7 +47,6 @@ module networking 'networking.bicep' = {
     vnetName: vnetName
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
-    enableTeamsPublish: enableTeamsPublish
     appServicePlanName: appServicePlanName
     firewallPolicyName: firewallPolicyName
     storageSkuName: storageSkuName

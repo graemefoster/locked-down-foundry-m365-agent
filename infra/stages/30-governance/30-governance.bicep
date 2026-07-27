@@ -50,8 +50,7 @@ param modelGatewayApimSubnetCidr string
 param foundryPeSubnetCidr string
 param appServicePeSubnetCidr string
 
-// ---- Teams / M365 publish (optional) ----
-param enableTeamsPublish bool
+// ---- Teams / M365 publish ----
 param teamsBotAppIds array
 
 // ---- RAI guardrail (optional) ----
@@ -139,8 +138,8 @@ module apimConnection '../../modules/model-gateway/apim-connection.bicep' = {
 }
 
 // APIM Teams / M365 inbound API + policy (validate Bot Framework JWT, forward to the
-// agent activityProtocol endpoint on the primary Foundry PE). Teams path only.
-module apimTeamsApi '../../modules/model-gateway/apim-teams-api.bicep' = if (enableTeamsPublish) {
+// agent activityProtocol endpoint on the primary Foundry PE). Always deployed.
+module apimTeamsApi '../../modules/model-gateway/apim-teams-api.bicep' = {
   name: 'teams-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -197,7 +196,7 @@ output nonCompliantDeploymentName string = enableNonCompliantModelDemo ? nonComp
 output agentModelReference string = apimConnection.outputs.agentModelReference
 
 @description('APIM Teams inbound API name (defaults to "teams" when Teams publish is disabled).')
-output teamsApiName string = apimTeamsApi.?outputs.apiName ?? 'teams'
+output teamsApiName string = apimTeamsApi.outputs.apiName
 
 @description('Number of MCP servers governed by the applied compliance policies.')
 output governedServerCount int = apimMcpComplianceAll.outputs.governedServerCount

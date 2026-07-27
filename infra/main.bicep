@@ -82,10 +82,11 @@ param gatewayModelCapacity int = 30
 @description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
 param gatewayCallerAppId string = ''
 
-// ==================== TEAMS / M365 PUBLISH (optional) ====================
-@description('Deploy the Teams / M365 Copilot inbound publish path: a new APIM API that forwards to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by the postdeploy hook (scripts/publish-teams.ps1). Default true.')
-param enableTeamsPublish bool = true
-
+// ==================== TEAMS / M365 PUBLISH ====================
+// The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
+// to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
+// the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by
+// the postdeploy hook (scripts/publish-teams.ps1).
 @description('Names of the seeded agents to publish to Teams / M365. Each gets its own Azure Bot Service whose messaging endpoint is https://<yarp>/teams/<agentName>; the single path-routed APIM Teams API rewrites to each agent activityProtocol endpoint. Defaults to all three seeded agents.')
 param teamsPublishAgentNames array = [
   'hello-world-agent'
@@ -243,7 +244,6 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
     vnetName: vnetName
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
-    enableTeamsPublish: enableTeamsPublish
     logAnalyticsName: logAnalyticsName
     appInsightsName: appInsightsName
     appServicePlanName: appServicePlanName
@@ -289,7 +289,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     cosmosDBName: cosmosDBName
     acrName: acrName
     appInsightsName: appInsightsName
-    enableTeamsPublish: enableTeamsPublish
     apimGatewayUrl: apimGatewayUrl
     projectName: projectName
     projectDescription: projectDescription
@@ -377,7 +376,6 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     foundryPeSubnetCidr: foundryPeSubnetCidr
     appServicePeSubnetCidr: appServicePeSubnetCidr
-    enableTeamsPublish: enableTeamsPublish
     teamsBotAppIds: teamsBotAppIds
     enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
     enableNonCompliantModelDemo: enableNonCompliantModelDemo
@@ -459,8 +457,8 @@ output SEED_SECOND_AGENT_MODEL string = stage30.outputs.agentModelReference
 
 // ---- Teams / M365 publish (consumed by the postdeploy hook) ----
 
-@description('Whether the Teams / M365 publish path was deployed (gates the postdeploy hook).')
-output SEED_ENABLE_TEAMS_PUBLISH bool = enableTeamsPublish
+@description('Whether the Teams / M365 publish path was deployed (gates the postdeploy hook). Always true.')
+output SEED_ENABLE_TEAMS_PUBLISH bool = true
 
 @description('Comma-separated names of the seeded agents to publish to Teams / M365 (the postdeploy hook creates one bot per agent, endpoint /teams/<agentName>).')
 output TEAMS_PUBLISH_AGENT_NAMES string = join(teamsPublishAgentNames, ',')

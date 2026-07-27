@@ -35,7 +35,6 @@ param aiSearchName string
 param cosmosDBName string
 param acrName string
 param appInsightsName string
-param enableTeamsPublish bool
 param apimGatewayUrl string
 
 // Project.
@@ -118,8 +117,6 @@ module dataResources 'data-resources.bicep' = {
     acrName: acrName
     appServicePlanName: appServicePlanName
     appInsightsName: appInsightsName
-    enableTeamsPublish: enableTeamsPublish
-    foundryName: foundryAccount.outputs.accountName
     apimGatewayUrl: apimGatewayUrl
     logAnalyticsId: logAnalyticsId
     appServiceDelegatedSubnetId: appServiceDelegatedSubnetId

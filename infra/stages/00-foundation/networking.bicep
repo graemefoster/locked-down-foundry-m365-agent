@@ -11,7 +11,6 @@ param uniqueSuffix string
 param vnetName string
 param agentSubnetName string
 param peSubnetName string
-param enableTeamsPublish bool
 param appServicePlanName string
 param firewallPolicyName string
 param storageSkuName string
@@ -72,7 +71,7 @@ module foundrySpokeVnet '../../modules/network/foundry-spoke-vnet.bicep' = {
     ]
     modelGatewayPeCidr: modelGatewayPeSubnetCidr
     appServicePeCidr: appServicePeSubnetCidr
-    apimSubnetCidr: enableTeamsPublish ? modelGatewayApimSubnetCidr : ''
+    apimSubnetCidr: modelGatewayApimSubnetCidr
   }
 }
 

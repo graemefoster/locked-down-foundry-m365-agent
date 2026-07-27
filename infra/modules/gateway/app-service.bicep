@@ -3,12 +3,8 @@ param logAnalyticsId string
 param appInsightsName string
 param appServiceDelegationSubnetId string
 param aspName string
-param foundryName string
 
-@description('When true, the YARP proxy is flipped PUBLIC (Teams/M365 inbound entry point), reverse-proxies to the APIM Teams API instead of Foundry directly, and inbound is IP-restricted to the Microsoft Teams "Required" published IP ranges.')
-param enableTeamsPublish bool = false
-
-@description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to. Only used when enableTeamsPublish=true.')
+@description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to.')
 param apimGatewayUrl string = ''
 
 // Microsoft Teams "Required" published IP ranges — the source ranges the Bot Channel Adapter
@@ -31,13 +27,12 @@ var teamsInboundIpRanges = [
   '2620:1ec:6::/48'
 ]
 
-// Teams inbound: YARP is the public messaging entry point and forwards to the APIM Teams
-// API (which validates the Bot Framework JWT and forwards to the agent activityProtocol
-// endpoint). Otherwise it stays private and reverse-proxies to Foundry directly (legacy).
-var yarpPublicNetworkAccess = enableTeamsPublish ? 'Enabled' : 'Disabled'
-var yarpReverseProxyAddress = enableTeamsPublish
-  ? '${apimGatewayUrl}/'
-  : 'https://${foundryName}.services.ai.azure.com/'
+// YARP is the PUBLIC Teams/M365 messaging entry point (never private-endpointed — this is the
+// way in from the outside). It forwards to the APIM Teams API (which validates the Bot Framework
+// JWT and forwards to the agent activityProtocol endpoint), with inbound IP-restricted to the
+// Microsoft Teams "Required" published ranges.
+var yarpPublicNetworkAccess = 'Enabled'
+var yarpReverseProxyAddress = '${apimGatewayUrl}/'
 var teamsInboundIpRules = [
   for (cidr, i) in teamsInboundIpRanges: {
     ipAddress: cidr
@@ -47,7 +42,7 @@ var teamsInboundIpRules = [
     description: 'Microsoft Teams Required inbound range'
   }
 ]
-var yarpIpRestrictions = enableTeamsPublish ? teamsInboundIpRules : []
+var yarpIpRestrictions = teamsInboundIpRules
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: appInsightsName
@@ -77,7 +72,7 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
     siteConfig: {
       linuxFxVersion: 'DOCKER|docker.io/graemefoster/teams-proxy:0.3'
       publicNetworkAccess: yarpPublicNetworkAccess
-      ipSecurityRestrictionsDefaultAction: enableTeamsPublish ? 'Deny' : 'Allow'
+      ipSecurityRestrictionsDefaultAction: 'Deny'
       ipSecurityRestrictions: yarpIpRestrictions
       appSettings: [
         {

@@ -1,9 +1,8 @@
 # Publish an agent to Teams / M365 Copilot
 
-> Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#optional-teams--m365-publish-inbound-path).
+> Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
 
-The Teams / M365 publish path is **on by default** (`enableTeamsPublish=true`; set it
-`false` to opt out). It publishes **every seeded agent** (`hello-world-agent`,
+The Teams / M365 publish path is **always deployed**. It publishes **every seeded agent** (`hello-world-agent`,
 `gateway-model-agent`, `teams-agent`) to Teams / M365, each with its own Azure Bot
 Service. A **single, path-routed APIM Teams API** listens on `/teams/{agentName}` and
 rewrites each request to the matching agent's activityProtocol endpoint, so one API
@@ -130,7 +129,6 @@ Key parameters:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `enableTeamsPublish` | `true` | Master switch: Teams APIM API + public YARP flip + the postdeploy publish hook. Set `false` to opt out. |
 | `teamsPublishAgentNames` | `['hello-world-agent','gateway-model-agent','teams-agent']` | Seeded agents to publish. Each gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
 | `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by the hook once all agents are seeded. |
 
@@ -148,5 +146,5 @@ Optional publish metadata is read from env by the hook (`azd env set`):
 > *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.
 > The `Microsoft.BotService` resource provider is registered by the hook.
 
-See [NETWORKING.md](../NETWORKING.md#optional-teams--m365-publish-inbound-path) for
+See [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path) for
 the inbound/return firewall and routing details.
