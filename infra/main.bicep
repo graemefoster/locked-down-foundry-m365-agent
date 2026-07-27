@@ -369,6 +369,13 @@ module hubToAppServicePeering 'modules/network/vnet-peering.bicep' = {
 /*
   Create the AI Services account and gpt-4o model deployment
 */
+// Foundry account egress posture — shared by BOTH the identity (create) and encryption
+// (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
+// so both declarations must agree on these network properties or they silently drift (the
+// encryption module deploys last and wins). Define once here and pass to both modules.
+var foundryRestrictOutboundNetworkAccess = false
+var foundryAllowedFqdnList = []
+
 module aiAccount 'modules/foundry/ai-account-identity.bicep' = {
   name: 'ai-${accountName}-${uniqueSuffix}-deployment'
   params: {
@@ -385,7 +392,8 @@ module aiAccount 'modules/foundry/ai-account-identity.bicep' = {
     appInsightsConnectionString: appInsights.properties.ConnectionString
     appInsightsResourceId: appInsights.id
     mcpServerName: 'mcp-${appServicePlanName}.azurewebsites.net'
-    keyVaultName: keyVaultName
+    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
+    allowedFqdnList: foundryAllowedFqdnList
   }
 }
 
@@ -468,7 +476,8 @@ module aiAccountEncryption 'modules/encryption/ai-account-encryption.bicep' = {
     keyName: keyVault.outputs.keyName
     keyVersion: last(split(keyVault.outputs.keyUriWithVersion, '/'))
     agentSubnetId: foundrySpokeVnet.outputs.agentSubnetId
-    keyVaultName: keyVault.outputs.keyVaultName
+    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
+    allowedFqdnList: foundryAllowedFqdnList
   }
   dependsOn: [
     keyVaultRoleAssignments

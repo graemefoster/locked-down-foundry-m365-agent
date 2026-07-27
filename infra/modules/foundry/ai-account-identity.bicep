@@ -9,7 +9,12 @@ param agentSubnetId string
 param networkInjection string = 'true'
 param logAnalyticsWorkspaceId string
 param mcpServerName string
-param keyVaultName string = ''
+
+@description('Restrict outbound network access to the allowedFqdnList. Shared with the CMK encryption module so both declarations of the account agree (a CognitiveServices update is a full PUT).')
+param restrictOutboundNetworkAccess bool
+
+@description('Allowed outbound FQDNs (only enforced when restrictOutboundNetworkAccess is true). Shared with the CMK encryption module.')
+param allowedFqdnList array
 
 @secure()
 param appInsightsConnectionString string
@@ -48,10 +53,8 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
       : null)
     // Set disable local auth to true or false. Agent service does not support API key based authentication
     disableLocalAuth: false
-    restrictOutboundNetworkAccess: false //to further restrict tool calls to specific endpoints, set to true then use the allowedFqdnList property
-    allowedFqdnList: empty(keyVaultName) ? [] : [
-      '${keyVaultName}.vault.azure.net'
-    ]
+    restrictOutboundNetworkAccess: restrictOutboundNetworkAccess //to further restrict tool calls to specific endpoints, set to true then populate allowedFqdnList
+    allowedFqdnList: allowedFqdnList
   }
 
   //wire up app-insights

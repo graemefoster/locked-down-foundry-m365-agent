@@ -18,8 +18,11 @@ param keyVersion string
 @description('Agent subnet resource ID for network injection')
 param agentSubnetId string
 
-@description('Key Vault name (used to construct FQDN for allowed outbound list)')
-param keyVaultName string
+@description('Restrict outbound network access to the allowedFqdnList. Shared with the identity module so both full-PUT declarations of the account agree.')
+param restrictOutboundNetworkAccess bool
+
+@description('Allowed outbound FQDNs (only enforced when restrictOutboundNetworkAccess is true). Shared with the identity module.')
+param allowedFqdnList array
 
 resource existingAccount 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
   name: accountName
@@ -49,10 +52,11 @@ resource accountUpdate 'Microsoft.CognitiveServices/accounts@2025-04-01-preview'
     customSubDomainName: accountName
     publicNetworkAccess: 'Disabled'
     disableLocalAuth: false
-    restrictOutboundNetworkAccess: true
-    allowedFqdnList: [
-      '${keyVaultName}.vault.azure.net'
-    ]
+    restrictOutboundNetworkAccess: restrictOutboundNetworkAccess
+    // allowedFqdnList only applies when restrictOutboundNetworkAccess is true. Egress is left
+    // unrestricted (network isolation is still enforced via publicNetworkAccess: Disabled +
+    // networkInjections + private endpoints), so no FQDN allow-list is needed for CMK/Key Vault.
+    allowedFqdnList: allowedFqdnList
     networkAcls: {
       defaultAction: 'Allow'
       virtualNetworkRules: []
