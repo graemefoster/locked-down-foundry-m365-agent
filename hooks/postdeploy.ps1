@@ -288,8 +288,12 @@ try {
   $get = Invoke-AzRestWithRetry -Method GET -Url "${policyPath}&format=rawxml"
   $current = ''
   if ($get.StatusCode -lt 400) {
-    $parsed = $get.Content | ConvertFrom-Json
-    $current = $parsed.properties.value
+    # A policy GET with format=rawxml returns the raw XML document DIRECTLY - the response
+    # Content-Type is not JSON, so `az rest` prints the body verbatim (and warns "Not a json
+    # response, outputting to stdout"), typically prefixed with a UTF-8 BOM. It is NOT a JSON
+    # envelope, so do NOT ConvertFrom-Json (that fails at position 0 on the BOM). Strip any
+    # leading BOM/whitespace and use the XML as-is.
+    $current = ($get.Content -replace '^\uFEFF', '').Trim()
   }
 
   if ($get.StatusCode -ge 400) {
