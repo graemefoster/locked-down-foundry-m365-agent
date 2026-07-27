@@ -224,7 +224,6 @@ module appService '../gateway/app-service.bicep' = {
     aspName: appServicePlanName
     appInsightsName: appInsightsName
     appServiceDelegationSubnetId: appServiceDelegationSubnetId
-    storageName: storage.name
     foundryName: foundryName
     enableTeamsPublish: enableTeamsPublish
     apimGatewayUrl: apimGatewayUrl
@@ -249,11 +248,7 @@ output cosmosDBSubscriptionId string = subscription().subscriptionId
 
 output appServicePlanId string = appService.outputs.aspId
 output yarpWebAppName string = appService.outputs.yarpWebAppName
-output mcpWebAppName string = appService.outputs.mcpWebAppName
 output yarpWebAppFqdn string = appService.outputs.yarpWebAppFqdn
-output mcpWebAppFqdn string = appService.outputs.mcpWebAppFqdn
-output mcpWebAppIdentityPrincipalId string = appService.outputs.mcpWebAppIdentityPrincipalId
-output mcpWebAppIdentityClientId string = appService.outputs.mcpWebAppIdentityClientId
 
 output storagePrincipalId string = storage.identity.principalId
 output aiSearchPrincipalId string = aiSearch.identity.principalId

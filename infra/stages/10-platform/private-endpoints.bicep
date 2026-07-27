@@ -1,9 +1,9 @@
 /*
 Stage 10 slice — Private endpoints & DNS.
-Foundry account, AI Search, Storage, CosmosDB, ACR, Key Vault and the MCP App Service
-web app all get private endpoints; the privatelink DNS zones are linked to the hub VNet
-for the DNS resolver. The YARP proxy is the public ingress, so it never gets a private
-endpoint — only the MCP web app does.
+Foundry account, AI Search, Storage, CosmosDB, ACR and Key Vault all get private
+endpoints; the privatelink DNS zones are linked to the hub VNet for the DNS resolver.
+The MCP web app PE lives in stage 20 (with the MCP workload); the YARP proxy is the
+public ingress, so it never gets a private endpoint.
 */
 
 param uniqueSuffix string
@@ -15,13 +15,10 @@ param storageName string
 param cosmosDBName string
 param acrName string
 param keyVaultName string
-param mcpWebAppName string
 
 // From stage 00 networking.
 param foundrySpokeVnetName string
 param foundryPeSubnetName string
-param appServiceSpokeVnetName string
-param appServicePeSubnetName string
 
 // Private DNS zone ids (created early in stage 00).
 param aiServicesDnsZoneId string
@@ -30,7 +27,6 @@ param cognitiveServicesDnsZoneId string
 param aiSearchDnsZoneId string
 param storageDnsZoneId string
 param cosmosDBDnsZoneId string
-param appServiceDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
@@ -77,16 +73,4 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     storage
     cosmosDB
   ]
-}
-
-// The YARP proxy is the public ingress (its own FQDN + managed cert is the Bot Channel
-// Adapter entry point), so it gets NO private endpoint — only the MCP web app does.
-module appServicePrivateEndpoint '../../modules/network/app-service-private-endpoint.bicep' = {
-  name: '${uniqueSuffix}-app-service-private-endpoint'
-  params: {
-    appServiceSpokeVnetName: appServiceSpokeVnetName
-    appServicePeSubnetName: appServicePeSubnetName
-    appServiceWebAppNames: [mcpWebAppName]
-    appServiceDnsZoneId: appServiceDnsZoneId
-  }
 }

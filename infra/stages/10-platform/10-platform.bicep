@@ -65,8 +65,6 @@ param appServiceDelegatedSubnetId string
 param hubVnetId string
 param foundrySpokeVnetName string
 param foundryPeSubnetName string
-param appServiceSpokeVnetName string
-param appServicePeSubnetName string
 param modelGatewayApimSubnetId string
 param modelGatewayPeSubnetId string
 
@@ -77,7 +75,6 @@ param cognitiveServicesDnsZoneId string
 param aiSearchDnsZoneId string
 param storageDnsZoneId string
 param cosmosDBDnsZoneId string
-param appServiceDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
@@ -139,18 +136,14 @@ module privateEndpoints 'private-endpoints.bicep' = {
     cosmosDBName: dataResources.outputs.cosmosDBName
     acrName: dataResources.outputs.acrName
     keyVaultName: dataResources.outputs.keyVaultName
-    mcpWebAppName: dataResources.outputs.mcpWebAppName
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
-    appServiceSpokeVnetName: appServiceSpokeVnetName
-    appServicePeSubnetName: appServicePeSubnetName
     aiServicesDnsZoneId: aiServicesDnsZoneId
     openAiDnsZoneId: openAiDnsZoneId
     cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
     aiSearchDnsZoneId: aiSearchDnsZoneId
     storageDnsZoneId: storageDnsZoneId
     cosmosDBDnsZoneId: cosmosDBDnsZoneId
-    appServiceDnsZoneId: appServiceDnsZoneId
     acrDnsZoneId: acrDnsZoneId
     keyVaultDnsZoneId: keyVaultDnsZoneId
   }
@@ -259,9 +252,6 @@ output keyVaultName string = dataResources.outputs.keyVaultName
 
 // Dependent resources (App Service)
 output yarpWebAppFqdn string = dataResources.outputs.yarpWebAppFqdn
-output mcpWebAppName string = dataResources.outputs.mcpWebAppName
-output mcpWebAppFqdn string = dataResources.outputs.mcpWebAppFqdn
-output mcpWebAppIdentityPrincipalId string = dataResources.outputs.mcpWebAppIdentityPrincipalId
 
 // Project
 output projectName string = project.outputs.projectName
