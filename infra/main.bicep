@@ -344,11 +344,6 @@ module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
   }
 }
 
-// One Foundry project connection per governed MCP server: connection name from mcp/mcp.json
-// (via the module output), target = that server's APIM gateway URL, audience = the shared MCP
-// app registration audience (per-server audiences would slot in here later). Building this from
-// the module output (a single map, no nested lambda) means there is no "primary server" to
-// special-case — every server is wired symmetrically, and projectMcpConnections consumes the array.
 // URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
 // workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
 // server, and the sample 'mcp' server is the first entry by convention.
@@ -399,149 +394,32 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
 }
 
 
-// ==================== VMs + BASTION (in Foundry Spoke) ====================
-
-// Two boxes, one job each:
-//   * linuxVmModule   - ALWAYS deployed. The in-VNet workhorse: the `az vm run-command`
-//                       target for agent seeding AND the self-hosted Actions runner host.
-//                       Linux because microsoft/ai-agent-evals is effectively Linux-only.
-//                       Holds all the private-plane RBAC (Foundry / KV / Contributor).
-//   * vmModule        - OPTIONAL Windows dev VM, human RDP + Edge inspection only, no RBAC.
-// Bastion is its own module, gated by deployBastion (which defaults to deployWindowsVm):
-// it exists purely for interactive human access, and the Linux VM needs no interactive
-// path for automation. Deploying it separately means you CAN still opt into Bastion SSH
-// on the Linux VM without paying for the Windows VM.
-
-module linuxVmModule 'modules/resources/vm-linux.bicep' = {
-  name: 'linux-vm-deployment-${uniqueSuffix}'
+// ==================== STAGE 40 — RUNNER ====================
+// In-VNet compute: the always-on Linux worker VM (seed-agents run-command target + self-hosted
+// runner host), optional Windows dev VM / Bastion, the Linux VM's seeding RBAC, and the opt-in
+// self-hosted GitHub runner (RBAC + PAT secret + runner extension LAST). Depends on 00/10.
+module stage40 'stages/40-runner/40-runner.bicep' = {
+  name: 'stage40-runner-${uniqueSuffix}'
   params: {
     location: location
-    vmName: 'runner-vm-${uniqueSuffix}'
-    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
-    subnetName: stage00.outputs.vmSubnetName
-    adminPassword: vmAdminPassword
-    adminUsername: vmAdminUsername
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-module vmModule 'modules/resources/vm.bicep' = if (deployWindowsVm) {
-  name: 'vm-deployment-${uniqueSuffix}'
-  params: {
-    location: location
-    vmName: 'test-vm-${uniqueSuffix}'
-    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
-    subnetName: stage00.outputs.vmSubnetName
-    adminPassword: vmAdminPassword
-    adminUsername: vmAdminUsername
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
-  name: 'bastion-deployment-${uniqueSuffix}'
-  params: {
-    location: location
-    virtualNetworkName: stage00.outputs.foundrySpokeVnetName
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-
-
-// ==================== SEED AGENTS: VM RBAC ====================
-
-// Agent seeding runs from the azd `predeploy` hook (hooks/predeploy.ps1), which uses
-// `az vm run-command` to execute scripts/seed-agents.ps1 on the private LINUX VM (the
-// only host that can reach the Foundry private endpoint — the Windows dev VM is optional
-// and intentionally has no such access). The Linux VM's system-assigned identity needs
-// Foundry User on the project so the on-VM script can acquire a token and call the
-// Agents API — that RBAC is provisioned here.
-module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
-  name: 'vm-foundry-role-${uniqueSuffix}'
-  params: {
-    accountName: stage10.outputs.aiAccountName
+    uniqueSuffix: uniqueSuffix
+    foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
+    vmSubnetName: stage00.outputs.vmSubnetName
+    aiAccountName: stage10.outputs.aiAccountName
     projectName: stage10.outputs.projectName
-    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-// ==================== SELF-HOSTED GITHUB ACTIONS RUNNER (opt-in) ====================
-
-// When githubRunnerRepoUrl is set, install a self-hosted runner on the Linux worker VM so
-// complex, representative deployments can run INSIDE the VNet (reaching the private
-// Foundry endpoint directly) instead of being marshalled through `az vm run-command`.
-// The VM MI needs Key Vault Secrets User to read the runner PAT; the Run Command that
-// runs the bootstrap is sequenced AFTER that role assignment. See docs/github-runner.md.
-var installGithubRunner = !empty(githubRunnerRepoUrl)
-
-module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
-  name: 'vm-kv-secrets-role-${uniqueSuffix}'
-  params: {
     keyVaultName: stage10.outputs.keyVaultName
-    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
-  }
-}
-
-// Grant the VM MI Contributor over the resource group so the runner (which runs AS the
-// VM MI) can do control-plane work for representative end-to-end deployments — e.g.
-// create the Azure Bot Service in the gated Teams / M365 publish workflow. Opt-in
-// (runner only) and scoped to the resource group to bound the blast radius.
-module vmContributorRole 'modules/rbac/vm-contributor-role.bicep' = if (installGithubRunner) {
-  name: 'vm-contributor-role-${uniqueSuffix}'
-  params: {
-    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
-  }
-}
-
-// Grant the VM MI Cognitive Services OpenAI User on the AI Services account so the nightly
-// eval workflow's AI-assisted evaluators can call the judge model's inference API. This is a
-// data-plane action neither Contributor (management-plane) nor Foundry User (Agents API)
-// covers — without it the judge calls fail with 401 PermissionDenied. See the module header
-// for the full rationale. Opt-in (runner only) and scoped to the account.
-module vmOpenAiUserRole 'modules/rbac/vm-openai-user-role.bicep' = if (installGithubRunner) {
-  name: 'vm-openai-user-role-${uniqueSuffix}'
-  params: {
-    accountName: stage10.outputs.aiAccountName
-    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
-  }
-}
-
-// Write the PAT into Key Vault via ARM (control plane) — only when a value is
-// supplied. Skipped (leaving any existing secret intact) when GITHUB_RUNNER_PAT
-// is empty, so the secret can be seeded once and the env var cleared afterward.
-module runnerPatSecret 'modules/resources/runner-pat-secret.bicep' = if (installGithubRunner && !empty(githubRunnerPat)) {
-  name: 'runner-pat-secret-${uniqueSuffix}'
-  params: {
-    keyVaultName: stage10.outputs.keyVaultName
-    secretName: githubRunnerPatSecretName
-    patValue: githubRunnerPat
-  }
-}
-
-module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (installGithubRunner) {
-  name: 'vm-runner-extension-${uniqueSuffix}'
-  params: {
-    vmName: linuxVmModule.outputs.vmName
-    location: location
+    vmAdminPassword: vmAdminPassword
+    vmAdminUsername: vmAdminUsername
+    deployWindowsVm: deployWindowsVm
+    deployBastion: deployBastion
     githubRunnerRepoUrl: githubRunnerRepoUrl
-    keyVaultName: stage10.outputs.keyVaultName
+    githubRunnerPat: githubRunnerPat
     githubRunnerPatSecretName: githubRunnerPatSecretName
     githubRunnerLabels: githubRunnerLabels
-    runnerUser: vmAdminUsername
   }
   dependsOn: [
-    vmKeyVaultSecretsRole
-    runnerPatSecret
+    stage00
+    stage10
   ]
 }
 
@@ -552,7 +430,7 @@ module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (ins
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 
 @description('Name of the private Linux VM the seed-agents hook runs its script on.')
-output SEED_AGENTS_VM_NAME string = linuxVmModule.outputs.vmName
+output SEED_AGENTS_VM_NAME string = stage40.outputs.vmName
 
 
 @description('Foundry project endpoint the seeded agents are created against.')
