@@ -259,195 +259,63 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
   }
 }
 
-// ==================== AI SERVICES ====================
+// ==================== STAGE 10 — PLATFORM ====================
+// The Foundry platform on the stage 00 substrate: the AI Services account + model,
+// Key Vault (CMK) + dependent resources (Storage/Cosmos/Search/App Service) + ACR,
+// private endpoints & DNS, the model gateway (provider Foundry + APIM + the MCP
+// gateway wiring), the AI project, data-plane RBAC + capability host, and the CMK
+// re-PUT of the account/storage.
 
-/*
-  Create the AI Services account and gpt-4o model deployment
-*/
-// Foundry account egress posture — shared by BOTH the identity (create) and encryption
-// (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
-// so both declarations must agree on these network properties or they silently drift (the
-// encryption module deploys last and wins). Define once here and pass to both modules.
-var foundryRestrictOutboundNetworkAccess = false
-var foundryAllowedFqdnList = []
+// Storage SKU — no-ZRS regions fall back to GRS. Computed in main because stage 00
+// (flow-logs storage) consumes it too; also threaded into stage 10 (storage CMK re-PUT).
+var noZRSRegions = ['southindia', 'westus', 'northcentralus']
+var storageSkuName = contains(noZRSRegions, location) ? 'Standard_GRS' : 'Standard_ZRS'
 
-module aiAccount 'modules/foundry/ai-account-identity.bicep' = {
-  name: 'ai-${accountName}-${uniqueSuffix}-deployment'
+module stage10 'stages/10-platform/10-platform.bicep' = {
+  name: 'stage10-platform-${uniqueSuffix}'
   params: {
-    // workspace organization
-    accountName: accountName
     location: location
+    uniqueSuffix: uniqueSuffix
+    accountName: accountName
     modelName: modelName
     modelFormat: modelFormat
     modelVersion: modelVersion
     modelSkuName: modelSkuName
     modelCapacity: modelCapacity
-    agentSubnetId: stage00.outputs.agentSubnetId
-    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
-    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
-    appInsightsResourceId: stage00.outputs.appInsightsId
-    mcpServerName: 'mcp-${appServicePlanName}.azurewebsites.net'
-    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
-    allowedFqdnList: foundryAllowedFqdnList
-  }
-}
-
-// ==================== KEY VAULT (CMK) ====================
-
-module keyVault 'modules/resources/keyvault.bicep' = {
-  name: 'keyvault-${uniqueSuffix}-deployment'
-  params: {
+    appServicePlanName: appServicePlanName
     keyVaultName: keyVaultName
-    location: location
-    logAnalyticsId: stage00.outputs.logAnalyticsId
-  }
-}
-
-// Create agent dependent resources (Storage, CosmosDB, AI Search, App Service)
-module aiDependencies 'modules/resources/standard-dependent-resources.bicep' = {
-  name: 'dependencies-${uniqueSuffix}-deployment'
-  params: {
-    location: location
     azureStorageName: azureStorageName
     aiSearchName: aiSearchName
     cosmosDBName: cosmosDBName
-
-    logAnalyticsId: stage00.outputs.logAnalyticsId
-    appServicePlanName: appServicePlanName
-
+    acrName: acrName
     appInsightsName: appInsightsName
-    appServiceDelegationSubnetId: stage00.outputs.appServiceDelegatedSubnetId
-
-    //wire up the YARP proxy
-    foundryName: aiAccount.outputs.accountName
     enableTeamsPublish: enableTeamsPublish
     apimGatewayUrl: apimGatewayUrl
-
-  }
-}
-
-resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
-  name: aiDependencies.outputs.azureStorageName
-}
-
-resource aiSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
-  name: aiDependencies.outputs.aiSearchName
-}
-
-resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = {
-  name: aiDependencies.outputs.cosmosDBName
-}
-
-module acr './modules/resources/acr.bicep' = {
-  name: 'acr-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    acrName: acrName
-    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
-  }
-}
-
-// ==================== CMK RBAC & ENCRYPTION ====================
-
-// Assign Key Vault Crypto Service Encryption User to service identities (post-creation)
-module keyVaultRoleAssignments 'modules/rbac/keyvault-role-assignments.bicep' = {
-  name: 'keyvault-rbac-${uniqueSuffix}-deployment'
-  params: {
-    keyVaultName: keyVault.outputs.keyVaultName
-    aiServicesPrincipalId: aiAccount.outputs.accountPrincipalId
-    storagePrincipalId: aiDependencies.outputs.storagePrincipalId
-    aiSearchPrincipalId: aiDependencies.outputs.aiSearchPrincipalId
-    aiServicesProjectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-}
-
-// Update AI Services account with CMK encryption (must be after RBAC assignment)
-module aiAccountEncryption 'modules/encryption/ai-account-encryption.bicep' = {
-  name: 'ai-encryption-${uniqueSuffix}-deployment'
-  params: {
-    accountName: aiAccount.outputs.accountName
-    location: location
-    keyVaultUri: keyVault.outputs.keyVaultUri
-    keyName: keyVault.outputs.keyName
-    keyVersion: last(split(keyVault.outputs.keyUriWithVersion, '/'))
+    projectName: projectName
+    projectDescription: projectDescription
+    displayName: displayName
+    projectCapHost: projectCapHost
+    storageSkuName: storageSkuName
+    providerAccountName: providerAccountName
+    apimName: apimName
+    gatewayModelName: gatewayModelName
+    gatewayModelFormat: gatewayModelFormat
+    gatewayModelVersion: gatewayModelVersion
+    gatewayModelSkuName: gatewayModelSkuName
+    gatewayModelCapacity: gatewayModelCapacity
     agentSubnetId: stage00.outputs.agentSubnetId
-    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
-    allowedFqdnList: foundryAllowedFqdnList
-  }
-  dependsOn: [
-    keyVaultRoleAssignments
-  ]
-}
-
-// Update Storage Account with CMK encryption (must be after RBAC assignment)
-var noZRSRegions = ['southindia', 'westus', 'northcentralus']
-var storageSkuName = contains(noZRSRegions, location) ? 'Standard_GRS' : 'Standard_ZRS'
-
-module storageEncryption 'modules/encryption/storage-encryption.bicep' = {
-  name: 'storage-encryption-${uniqueSuffix}-deployment'
-  params: {
-    storageName: aiDependencies.outputs.azureStorageName
-    location: location
-    keyVaultUri: keyVault.outputs.keyVaultUri
-    keyVaultKeyName: keyVault.outputs.keyName
-    skuName: storageSkuName
-  }
-  dependsOn: [
-    keyVaultRoleAssignments
-  ]
-}
-
-// ==================== PRIVATE ENDPOINTS & DNS ====================
-
-module privateEndpointAndDNS 'modules/network/private-endpoint-and-dns.bicep' = {
-  name: '${uniqueSuffix}-private-endpoint'
-  params: {
-    aiAccountName: aiAccount.outputs.accountName
-    aiSearchName: aiDependencies.outputs.aiSearchName
-    storageName: aiDependencies.outputs.azureStorageName
-    cosmosDBName: aiDependencies.outputs.cosmosDBName
-
-    // Hub VNet (DNS zones linked here for resolver)
+    logAnalyticsId: stage00.outputs.logAnalyticsId
+    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
+    appInsightsId: stage00.outputs.appInsightsId
+    appServiceDelegatedSubnetId: stage00.outputs.appServiceDelegatedSubnetId
     hubVnetName: stage00.outputs.hubVnetName
-
-    // Foundry Spoke (Foundry PEs go here)
+    hubVnetId: stage00.outputs.hubVnetId
     foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
     foundryPeSubnetName: stage00.outputs.foundryPeSubnetName
-
-    // App Service Spoke (App Service PEs go here)
     appServiceSpokeVnetName: stage00.outputs.appServiceSpokeVnetName
     appServicePeSubnetName: stage00.outputs.appServicePeSubnetName
-
-    suffix: uniqueSuffix
-    // When Teams publish is enabled the YARP proxy is public (its own FQDN + managed cert is
-    // the Bot Channel Adapter entry point), so it gets NO private endpoint — only the MCP web
-    // app does. Otherwise both get private endpoints (legacy private-only posture).
-    appServiceWebAppNames: enableTeamsPublish
-      ? [aiDependencies.outputs.mcpWebAppName]
-      : [aiDependencies.outputs.yarpWebAppName, aiDependencies.outputs.mcpWebAppName]
-    acrName: acr.outputs.acrName
-    keyVaultName: keyVault.outputs.keyVaultName
-  }
-  dependsOn: [
-    aiSearch
-    storage
-    cosmosDB
-    stage00
-  ]
-}
-
-// ==================== GATEWAY: OAUTH ON THE MCP WEB APP ====================
-
-/*
-  Entra app registration guarding the private MCP web app. Federated to the MCP web app's
-  user-assigned managed identity (MI-as-FIC) so App Service built-in auth is secretless.
-*/
-module mcpAppRegistration 'modules/gateway/app-registration.bicep' = {
-  name: 'mcp-appreg-${uniqueSuffix}-deployment'
-  params: {
-    clientAppName: 'mcp-gateway-${uniqueSuffix}'
-    clientAppDisplayName: 'MCP Gateway (${uniqueSuffix})'
-    webAppIdentityPrincipalId: aiDependencies.outputs.mcpWebAppIdentityPrincipalId
+    modelGatewayApimSubnetId: stage00.outputs.modelGatewayApimSubnetId
+    modelGatewayPeSubnetId: stage00.outputs.modelGatewayPeSubnetId
   }
 }
 
@@ -459,163 +327,13 @@ module mcpAppRegistration 'modules/gateway/app-registration.bicep' = {
 module mcpBuiltinAuth 'modules/gateway/builtin-auth.bicep' = {
   name: 'mcp-auth-${uniqueSuffix}-deployment'
   params: {
-    appServiceName: aiDependencies.outputs.mcpWebAppName
-    clientId: mcpAppRegistration.outputs.clientAppId
-    issuer: mcpAppRegistration.outputs.issuer
-    allowedAudience: mcpAppRegistration.outputs.audience
+    appServiceName: stage10.outputs.mcpWebAppName
+    clientId: stage10.outputs.mcpClientAppId
+    issuer: stage10.outputs.mcpIssuer
+    allowedAudience: stage10.outputs.mcpAudience
   }
 }
 
-// ==================== AI PROJECT ====================
-
-/*
-  Creates a new project (sub-resource of the AI Services account)
-*/
-module aiProject 'modules/foundry/ai-project-identity.bicep' = {
-  name: 'ai-${projectName}-${uniqueSuffix}-deployment'
-  params: {
-    // workspace organization
-    projectName: projectName
-    projectDescription: projectDescription
-    displayName: displayName
-    location: location
-
-    aiSearchName: aiDependencies.outputs.aiSearchName
-    aiSearchServiceResourceGroupName: aiDependencies.outputs.aiSearchServiceResourceGroupName
-    aiSearchServiceSubscriptionId: aiDependencies.outputs.aiSearchServiceSubscriptionId
-
-    cosmosDBName: aiDependencies.outputs.cosmosDBName
-    cosmosDBSubscriptionId: aiDependencies.outputs.cosmosDBSubscriptionId
-    cosmosDBResourceGroupName: aiDependencies.outputs.cosmosDBResourceGroupName
-
-    azureStorageName: aiDependencies.outputs.azureStorageName
-    azureStorageSubscriptionId: aiDependencies.outputs.azureStorageSubscriptionId
-    azureStorageResourceGroupName: aiDependencies.outputs.azureStorageResourceGroupName
-    // dependent resources
-    accountName: aiAccount.outputs.accountName
-
-    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
-
-    // One project connection per governed MCP server, built from the APIM server outputs below.
-    // The agent's tool token is minted for our own app registration audience (an audience we
-    // control), so App Service built-in auth on the MCP web app accepts it. Shared audience for
-    // now; per-server audiences would flow through this same array.
-    mcpConnections: mcpConnections
-
-  }
-  dependsOn: [
-    privateEndpointAndDNS
-    cosmosDB
-    aiSearch
-    storage
-  ]
-}
-
-module formatProjectWorkspaceId 'modules/foundry/format-project-workspace-id.bicep' = {
-  name: 'format-project-workspace-id-${uniqueSuffix}-deployment'
-  params: {
-    projectWorkspaceId: aiProject.outputs.projectWorkspaceId
-  }
-}
-
-/*
-  Assigns the project SMI the storage blob data contributor role on the storage account
-*/
-module storageAccountRoleAssignment 'modules/rbac/azure-storage-account-role-assignment.bicep' = {
-  name: 'storage-ra-${uniqueSuffix}-deployment'
-  params: {
-    azureStorageName: aiDependencies.outputs.azureStorageName
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-  dependsOn: [
-    storage
-    privateEndpointAndDNS
-  ]
-}
-
-/*
-  Assigns the project SMI Reader role on Application Insights.
-  This supports running Evaluations on existing traces.
-*/
-module appInsightsRoleAssignment 'modules/rbac/app-insights-role-assignment.bicep' = {
-  name: 'appi-ra-${uniqueSuffix}-deployment'
-  params: {
-    appInsightsName: appInsightsName
-    accountPrincipalId: aiAccount.outputs.accountPrincipalId
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-}
-
-/*
-  Assigns the project SMI Container Registry Repository Reader role on ACR.
-*/
-module acrRoleAssignment 'modules/rbac/acr-role-assignment.bicep' = {
-  name: 'acr-ra-${uniqueSuffix}-deployment'
-  params: {
-    acrName: acr.outputs.acrName
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-}
-
-/*
-  Assigns Foundry User role to the project SMI on the Foundry project resource.
-*/
-module foundryProjectRoleAssignment 'modules/rbac/foundry-project-role-assignment.bicep' = {
-  name: 'foundry-project-ra-${uniqueSuffix}-deployment'
-  params: {
-    accountName: aiAccount.outputs.accountName
-    projectName: aiProject.outputs.projectName
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-}
-
-// The Comos DB Operator role must be assigned before the caphost is created
-module cosmosAccountRoleAssignments 'modules/rbac/cosmosdb-account-role-assignment.bicep' = {
-  name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
-  params: {
-    cosmosDBName: aiDependencies.outputs.cosmosDBName
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-  dependsOn: [
-    cosmosDB
-    privateEndpointAndDNS
-  ]
-}
-
-// This role can be assigned before or after the caphost is created
-module aiSearchRoleAssignments 'modules/rbac/ai-search-role-assignments.bicep' = {
-  name: 'ai-search-ra-${uniqueSuffix}-deployment'
-  params: {
-    aiSearchName: aiDependencies.outputs.aiSearchName
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-  dependsOn: [
-    aiSearch
-    privateEndpointAndDNS
-  ]
-}
-
-// This module creates the capability host for the project and account
-module addProjectCapabilityHost 'modules/foundry/add-project-capability-host.bicep' = {
-  name: 'capabilityHost-configuration-${uniqueSuffix}-deployment'
-  params: {
-    accountName: aiAccount.outputs.accountName
-    projectName: aiProject.outputs.projectName
-    cosmosDBConnection: aiProject.outputs.cosmosDBConnection
-    azureStorageConnection: aiProject.outputs.azureStorageConnection
-    aiSearchConnection: aiProject.outputs.aiSearchConnection
-    projectCapHost: projectCapHost
-  }
-  dependsOn: [
-    aiSearch
-    storage
-    cosmosDB
-    privateEndpointAndDNS
-    cosmosAccountRoleAssignments
-    storageAccountRoleAssignment
-    aiSearchRoleAssignments
-  ]
-}
 
 // ==================== RAI GUARDRAIL POLICY (AUDIT) ====================
 // Assigns the built-in "[Preview]: Guardrail for Cognitive Services Deployments"
@@ -630,7 +348,7 @@ module raiGuardrail 'modules/governance/rai-guardrail-assignment.bicep' = if (en
 module nonCompliantModelDemo 'modules/governance/noncompliant-model-demo.bicep' = if (enableNonCompliantModelDemo) {
   name: 'noncompliant-demo-${uniqueSuffix}-deployment'
   params: {
-    accountName: aiAccount.outputs.accountName
+    accountName: stage10.outputs.aiAccountName
     modelName: modelName
     modelFormat: modelFormat
     modelVersion: modelVersion
@@ -638,32 +356,6 @@ module nonCompliantModelDemo 'modules/governance/noncompliant-model-demo.bicep' 
   }
 }
 
-// The Storage Blob Data Owner role must be assigned after the caphost is created
-module storageContainersRoleAssignment 'modules/rbac/blob-storage-container-role-assignments.bicep' = {
-  name: 'storage-containers-ra-${uniqueSuffix}-deployment'
-  params: {
-    aiProjectPrincipalId: aiProject.outputs.projectPrincipalId
-    storageName: aiDependencies.outputs.azureStorageName
-    workspaceId: formatProjectWorkspaceId.outputs.projectWorkspaceIdGuid
-  }
-  dependsOn: [
-    addProjectCapabilityHost
-  ]
-}
-
-// The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
-module cosmosContainerRoleAssignments 'modules/rbac/cosmos-container-role-assignments.bicep' = {
-  name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
-  params: {
-    cosmosAccountName: aiDependencies.outputs.cosmosDBName
-    projectWorkspaceId: formatProjectWorkspaceId.outputs.projectWorkspaceIdGuid
-    projectPrincipalId: aiProject.outputs.projectPrincipalId
-  }
-  dependsOn: [
-    addProjectCapabilityHost
-    storageContainersRoleAssignment
-  ]
-}
 
 // ==================== VMs + BASTION (in Foundry Spoke) ====================
 
@@ -689,7 +381,7 @@ module linuxVmModule 'modules/resources/vm-linux.bicep' = {
     adminUsername: vmAdminUsername
   }
   dependsOn: [
-    privateEndpointAndDNS
+    stage10
   ]
 }
 
@@ -704,7 +396,7 @@ module vmModule 'modules/resources/vm.bicep' = if (deployWindowsVm) {
     adminUsername: vmAdminUsername
   }
   dependsOn: [
-    privateEndpointAndDNS
+    stage10
   ]
 }
 
@@ -715,122 +407,11 @@ module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
     virtualNetworkName: stage00.outputs.foundrySpokeVnetName
   }
   dependsOn: [
-    privateEndpointAndDNS
+    stage10
   ]
 }
 
 
-// ==================== MODEL GATEWAY (spoke) ====================
-
-/*
-  Enterprise model gateway (always deployed). In a NEW spoke (10.3.0.0/16) peered
-  only to the hub this deploys:
-    - an APIM Standard v2 instance (inbound PE + outbound VNet integration),
-    - a locked-down "provider" AI Foundry that actually hosts the model,
-  then advertises APIM to the primary Foundry project as an ApiManagement
-  connection (ProjectManagedIdentity / keyless). A second agent is seeded that
-  uses the '<connection>/<model>' reference. The agent reaches APIM's inbound PE
-  by force-tunnelling through the Azure Firewall (no spoke-to-spoke peering).
-*/
-
-// Provider AI Foundry (the "real" model provider) — minimal, locked-down.
-module providerFoundry 'modules/model-gateway/provider-foundry.bicep' = {
-  name: 'provider-foundry-${uniqueSuffix}-deployment'
-  params: {
-    accountName: providerAccountName
-    location: location
-    modelName: gatewayModelName
-    modelFormat: gatewayModelFormat
-    modelVersion: gatewayModelVersion
-    modelSkuName: gatewayModelSkuName
-    modelCapacity: gatewayModelCapacity
-    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
-  }
-}
-
-// APIM Standard v2 in the gateway spoke. ALWAYS deployed (shared gateway).
-module apim 'modules/model-gateway/apim.bicep' = {
-  name: 'model-gateway-apim-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apimName
-    location: location
-    apimOutboundSubnetId: stage00.outputs.modelGatewayApimSubnetId
-    logAnalyticsWorkspaceId: stage00.outputs.logAnalyticsId
-    appInsightsResourceId: stage00.outputs.appInsightsId
-    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
-  }
-}
-
-// APIM inbound private endpoint + privatelink.azure-api.net DNS. ALWAYS deployed:
-// callers (model-gateway connection AND the Teams inbound YARP path) reach APIM only
-// through this PE once apim-lockdown flips publicNetworkAccess to 'Disabled'.
-module apimPrivateEndpoint 'modules/model-gateway/apim-private-endpoint.bicep' = {
-  name: 'apim-pe-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    suffix: uniqueSuffix
-    apimId: apim.outputs.apimId
-    apimName: apim.outputs.apimName
-    peSubnetId: stage00.outputs.modelGatewayPeSubnetId
-    hubVnetId: stage00.outputs.hubVnetId
-  }
-}
-
-// Provider Foundry private endpoint + DNS in the gateway spoke (model gateway only).
-module modelGatewayPrivateEndpoints 'modules/model-gateway/model-gateway-private-endpoints.bicep' = {
-  name: 'model-gateway-pe-${uniqueSuffix}-deployment'
-  params: {
-    location: location
-    providerAccountId: providerFoundry.outputs.accountId
-    providerAccountName: providerFoundry.outputs.accountName
-    peSubnetId: stage00.outputs.modelGatewayPeSubnetId
-  }
-  dependsOn: [
-    privateEndpointAndDNS
-  ]
-}
-
-// Grant APIM MI Cognitive Services User on the provider Foundry (backend MI auth).
-module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assignment.bicep' = {
-  name: 'model-gateway-apim-rbac-${uniqueSuffix}-deployment'
-  params: {
-    providerAccountName: providerFoundry.outputs.accountName
-    apimPrincipalId: apim.outputs.apimPrincipalId
-  }
-}
-
-// APIM MCP server APIs — exposes each private MCP web app in mcp/mcp.json through the APIM
-// gateway. The Foundry MCP connection points at these APIM endpoints instead of directly at
-// the App Service private endpoints, so all MCP tool traffic flows through the gateway.
-// Backend FQDNs are generated at provision time, so they are NOT stored in mcp/mcp.json — they
-// are flowed in here, keyed by server name. The existing sample is the server named 'mcp'.
-var mcpServerFqdns = {
-  mcp: aiDependencies.outputs.mcpWebAppFqdn
-}
-module apimMcpServers 'modules/model-gateway/apim-mcp-servers.bicep' = {
-  name: 'mcp-apim-servers-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apim.outputs.apimName
-    serverFqdns: mcpServerFqdns
-  }
-  dependsOn: [
-    apimProviderRoleAssignment
-  ]
-}
-// One Foundry project connection per governed MCP server: connection name from mcp/mcp.json
-// (via the module output), target = that server's APIM gateway URL, audience = the shared MCP
-// app registration audience (per-server audiences would slot in here later). Building this from
-// the module output (a single map, no nested lambda) means there is no "primary server" to
-// special-case — every server is wired symmetrically, and aiProject consumes the whole array.
-var mcpConnections = map(apimMcpServers.outputs.servers, srv => {
-  name: srv.connectionName
-  url: '${srv.url}/'
-  audience: mcpAppRegistration.outputs.audience
-})
-// URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
-// workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
-// server, and the sample 'mcp' server is the first entry by convention.
-var mcpSampleGatewayUrl = '${first(apimMcpServers.outputs.servers).url}/'
 
 // MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
 // each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
@@ -839,25 +420,25 @@ var mcpSampleGatewayUrl = '${first(apimMcpServers.outputs.servers).url}/'
 module apimMcpComplianceAll 'modules/model-gateway/apim-mcp-compliance-all.bicep' = {
   name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {
-    apimName: apim.outputs.apimName
-    mcpAudience: mcpAppRegistration.outputs.audience
+    apimName: stage10.outputs.apimName
+    mcpAudience: stage10.outputs.mcpAudience
     tenantId: tenant().tenantId
   }
   dependsOn: [
-    apimMcpServers
+    stage10
   ]
 }
 module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
   params: {
-    apimName: apim.outputs.apimName
+    apimName: stage10.outputs.apimName
     backendBaseUrl: providerBackendBaseUrl
-    providerAccountResourceId: providerFoundry.outputs.accountId
+    providerAccountResourceId: stage10.outputs.providerAccountId
     projectMiClientId: gatewayCallerAppId
-    callerProjectResourceId: aiProject.outputs.projectId
+    callerProjectResourceId: stage10.outputs.projectId
   }
   dependsOn: [
-    apimProviderRoleAssignment
+    stage10
   ]
 }
 
@@ -865,15 +446,15 @@ module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
 module apimConnection 'modules/model-gateway/apim-connection.bicep' = {
   name: 'model-gateway-connection-${uniqueSuffix}-deployment'
   params: {
-    aiFoundryName: aiAccount.outputs.accountName
-    projectName: aiProject.outputs.projectName
+    aiFoundryName: stage10.outputs.aiAccountName
+    projectName: stage10.outputs.projectName
     connectionName: modelGatewayConnectionName
-    apimGatewayUrl: apim.outputs.gatewayUrl
+    apimGatewayUrl: stage10.outputs.gatewayUrl
     apiPath: apimApiPolicy.outputs.apiPath
     exposedModelName: gatewayModelName
   }
   dependsOn: [
-    addProjectCapabilityHost
+    stage10
   ]
 }
 
@@ -882,9 +463,9 @@ module apimConnection 'modules/model-gateway/apim-connection.bicep' = {
 module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTeamsPublish) {
   name: 'teams-apim-api-${uniqueSuffix}-deployment'
   params: {
-    apimName: apim.outputs.apimName
-    foundryAccountName: aiAccount.outputs.accountName
-    projectName: aiProject.outputs.projectName
+    apimName: stage10.outputs.apimName
+    foundryAccountName: stage10.outputs.aiAccountName
+    projectName: stage10.outputs.projectName
     botAppIds: teamsBotAppIds
     expectedTenantId: tenant().tenantId
   }
@@ -896,15 +477,14 @@ module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTea
 module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
   name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
   params: {
-    apimName: apim.outputs.apimName
+    apimName: stage10.outputs.apimName
     location: location
     apimOutboundSubnetId: stage00.outputs.modelGatewayApimSubnetId
   }
   dependsOn: [
-    apimPrivateEndpoint
+    stage10
     apimApiPolicy
     apimTeamsApi
-    apimMcpServers
     apimMcpComplianceAll
   ]
 }
@@ -928,7 +508,7 @@ module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep'
   }
   dependsOn: [
     stage00
-    apim
+    stage10
   ]
 }
 
@@ -943,12 +523,12 @@ module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep'
 module vmFoundryRole 'modules/rbac/vm-foundry-role.bicep' = {
   name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
-    accountName: aiAccount.outputs.accountName
-    projectName: aiProject.outputs.projectName
+    accountName: stage10.outputs.aiAccountName
+    projectName: stage10.outputs.projectName
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
   dependsOn: [
-    addProjectCapabilityHost
+    stage10
   ]
 }
 
@@ -964,7 +544,7 @@ var installGithubRunner = !empty(githubRunnerRepoUrl)
 module vmKeyVaultSecretsRole 'modules/rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
   name: 'vm-kv-secrets-role-${uniqueSuffix}'
   params: {
-    keyVaultName: keyVault.outputs.keyVaultName
+    keyVaultName: stage10.outputs.keyVaultName
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
@@ -988,7 +568,7 @@ module vmContributorRole 'modules/rbac/vm-contributor-role.bicep' = if (installG
 module vmOpenAiUserRole 'modules/rbac/vm-openai-user-role.bicep' = if (installGithubRunner) {
   name: 'vm-openai-user-role-${uniqueSuffix}'
   params: {
-    accountName: aiAccount.outputs.accountName
+    accountName: stage10.outputs.aiAccountName
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
@@ -999,7 +579,7 @@ module vmOpenAiUserRole 'modules/rbac/vm-openai-user-role.bicep' = if (installGi
 module runnerPatSecret 'modules/resources/runner-pat-secret.bicep' = if (installGithubRunner && !empty(githubRunnerPat)) {
   name: 'runner-pat-secret-${uniqueSuffix}'
   params: {
-    keyVaultName: keyVault.outputs.keyVaultName
+    keyVaultName: stage10.outputs.keyVaultName
     secretName: githubRunnerPatSecretName
     patValue: githubRunnerPat
   }
@@ -1011,7 +591,7 @@ module vmRunnerExtension 'modules/resources/vm-runner-extension.bicep' = if (ins
     vmName: linuxVmModule.outputs.vmName
     location: location
     githubRunnerRepoUrl: githubRunnerRepoUrl
-    keyVaultName: keyVault.outputs.keyVaultName
+    keyVaultName: stage10.outputs.keyVaultName
     githubRunnerPatSecretName: githubRunnerPatSecretName
     githubRunnerLabels: githubRunnerLabels
     runnerUser: vmAdminUsername
@@ -1033,13 +613,13 @@ output SEED_AGENTS_VM_NAME string = linuxVmModule.outputs.vmName
 
 
 @description('Foundry project endpoint the seeded agents are created against.')
-output AZURE_AI_PROJECT_ENDPOINT string = aiProject.outputs.projectEndpoint
+output AZURE_AI_PROJECT_ENDPOINT string = stage10.outputs.projectEndpoint
 
 @description('Foundry (Cognitive Services) account name. Used by the predown hook to delete capability hosts before teardown.')
-output AZURE_AI_ACCOUNT_NAME string = aiAccount.outputs.accountName
+output AZURE_AI_ACCOUNT_NAME string = stage10.outputs.aiAccountName
 
 @description('Foundry project name. Used by the predown hook to delete capability hosts before teardown.')
-output AZURE_AI_PROJECT_NAME string = aiProject.outputs.projectName
+output AZURE_AI_PROJECT_NAME string = stage10.outputs.projectName
 
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
@@ -1065,7 +645,7 @@ output SEED_ENABLE_TEAMS_PUBLISH bool = enableTeamsPublish
 output TEAMS_PUBLISH_AGENT_NAMES string = join(teamsPublishAgentNames, ',')
 
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
-output TEAMS_YARP_FQDN string = aiDependencies.outputs.yarpWebAppFqdn
+output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn
 
 @description('APIM instance name (hook pins the Teams API validate-jwt audience live once the bot App ID is known).')
 output TEAMS_APIM_NAME string = apimName
@@ -1086,7 +666,7 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
-output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
+output MCP_GATEWAY_URL string = stage10.outputs.mcpSampleGatewayUrl
 
 // --- MCP compliance (deploy-compliancy workflow) ---------------------------------
 @description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')
@@ -1094,7 +674,7 @@ output MCP_COMPLIANCE_APIM_NAME string = apimName
 @description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
 output MCP_COMPLIANCE_SERVER_COUNT int = apimMcpComplianceAll.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
-output MCP_COMPLIANCE_AUDIENCE string = mcpAppRegistration.outputs.audience
+output MCP_COMPLIANCE_AUDIENCE string = stage10.outputs.mcpAudience
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 
