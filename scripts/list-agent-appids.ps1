@@ -5,41 +5,57 @@
   mcp/mcp-policy.json — the allowlist is curated by a human (deny-by-default governance).
 
   Two modes:
-    1. DISCOVERY (default): prints, for each agent, the AppId (instance_identity.client_id).
-       Handy for eyeballing which identities exist.
-    2. RESOLVE (-ResolvePolicyPath <name-only policy>): reads the name-only mcp-policy.json,
-       joins each agent NAME to its live AppId, DROPS any name with no matching live agent,
-       and emits the RESOLVED (AppId-enriched) policy JSON. This is what the deploy-compliancy
-       workflow runs on the in-VNet runner and feeds to apim-mcp-compliance-all.bicep as the
-       mcpPolicy parameter. Resolution happens here (runtime) because Bicep cannot call Foundry,
-       and agent identities do not exist until the agents are seeded post-provision.
+    1. DISCOVERY (default): prints, for each agent, the AppId (instance_identity.client_id) read
+       from the Foundry data plane. Handy for eyeballing which identities exist. Needs a REACHABLE
+       project endpoint (run on the in-VNet VM for the repo's private project).
+    2. RESOLVE (-ResolvePolicyPath <name-only policy>): reads the name-only mcp-policy.json, joins
+       each agent NAME to its live AgentIdentity AppId, DROPS any name with no matching identity,
+       and emits the RESOLVED (AppId-enriched) policy JSON for apim-mcp-compliance-all.bicep's
+       mcpPolicy parameter. Resolution happens here (runtime) because Bicep cannot call Azure to
+       look identities up, and they do not exist until the agents are seeded post-provision.
 
-  The value used is `instance_identity.client_id` from the agent's control-plane definition.
-  Because the MCP server connection authenticates with the agent's identity, THAT client id is
-  the `appid`/`azp` claim the AgenticIdentityToken carries when the agent calls the MCP gateway
-  — i.e. exactly what apim-mcp-compliance.bicep matches on. (The sibling `blueprint.client_id`
-  governs a whole Agent Identity Blueprint family instead of a single agent; print it too with
-  -IncludeBlueprint if you want to allow at that grain.)
+  How RESOLVE finds the AppId (CONTROL PLANE — no private endpoint needed):
+    A Foundry agent's runtime identity is an Entra service principal (servicePrincipalType
+    'ServiceIdentity') named '<account>-<project>-<agentName>-AgentIdentity'. Its appId is the
+    `appid`/`azp` claim the AgenticIdentityToken carries when the agent calls the MCP gateway —
+    exactly what apim-mcp-compliance.bicep matches on. RESOLVE reads it from Microsoft Graph via
+    `az ad sp list` (a control-plane call), so it runs anywhere the caller can read directory
+    objects — the azd host, a GitHub-hosted runner, or the VM — WITHOUT reaching the private
+    Foundry data plane. If an agent has more than one such SP (e.g. it was deleted + recreated,
+    leaving a stale identity), the NEWEST by createdDateTime is used. If the source policy lists
+    agents but NONE resolve, the script THROWS rather than emit a deny-all policy that would revoke
+    all access; an intentionally-emptied policy (no agents) DOES emit deny-all so access can be
+    revoked on purpose.
 
-  Where to run it:
-    * A REACHABLE project        -> run locally; token comes from `az account get-access-token`.
-    * The repo's PRIVATE project -> run ON the locked-down Linux VM (same host seed-agents.ps1
-                                    runs on), where the Foundry private endpoint resolves. The
-                                    VM managed-identity token is fetched from IMDS automatically.
+  SECURITY / trust model (control-plane resolution):
+    The match is (displayName == '<account>-<project>-<name>-AgentIdentity' AND
+    servicePrincipalType == 'ServiceIdentity'). Entra display names are NOT unique, so this trusts
+    that:
+      * 'ServiceIdentity' SPs are provisioned by the Foundry service, not mintable by ordinary
+        users (app registrations are type 'Application'; managed identities 'ManagedIdentity').
+      * The '<account>-<project>' prefix is a non-forgeable Azure resource name.
+    The DEFINITIVE identity is the data-plane instance_identity.client_id (see discovery mode); if
+    your threat model includes a hostile tenant member who can create a colliding ServiceIdentity,
+    prefer resolving on the in-VNet VM against the data plane instead of this control-plane path.
 
   Usage:
-    # Discovery
+    # Discovery (data plane; needs a reachable endpoint / the VM):
     ./list-agent-appids.ps1 -FoundryProjectEndpoint https://<acct>.services.ai.azure.com/api/projects/<proj>
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -AgentName 'hello-world-agent,teams-agent'
-    # Resolve name-only policy -> resolved policy file (deploy-compliancy workflow):
-    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
+    # Resolve name-only policy -> resolved policy file (control plane; account+project, no endpoint):
+    ./list-agent-appids.ps1 -AccountName <acct> -ProjectName <proj> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
 
   All parameters are [string] (comma-separated for -AgentName) so the script can be shipped to
   the private VM by hooks/vm-run-command.ps1, which invokes `pwsh -File` with string args only.
 #>
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
+  # DISCOVERY mode only (data plane). Required for discovery; ignored in resolve mode.
+  [Parameter(Mandatory = $false)] [string]$FoundryProjectEndpoint = '',
+  # RESOLVE mode (control plane): the Foundry account + project names that prefix each agent
+  # identity's SP display name ('<account>-<project>-<agentName>-AgentIdentity').
+  [Parameter(Mandatory = $false)] [string]$AccountName = '',
+  [Parameter(Mandatory = $false)] [string]$ProjectName = '',
   # Optional filter: comma-separated agent names (e.g. 'hello-world-agent,teams-agent').
   # Default: all agents in the project. Ignored in resolve mode (all agents are needed).
   [Parameter(Mandatory = $false)] [string]$AgentName = '',
@@ -55,7 +71,9 @@ param(
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
 $ErrorActionPreference = 'Stop'
-$FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+if (-not [string]::IsNullOrWhiteSpace($FoundryProjectEndpoint)) {
+  $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+}
 
 # All params are [string] so this script is invokable via hooks/vm-run-command.ps1 (which runs
 # it on the private VM through `pwsh -File`, passing only string values). Normalise here:
@@ -87,6 +105,88 @@ function Get-FoundryToken {
   return $token
 }
 
+# CONTROL-PLANE resolution: read an agent's runtime-identity AppId from Microsoft Graph
+# (az ad sp list) instead of the private Foundry data plane, so resolve mode needs no VNet reach.
+# The SP is named '<account>-<project>-<agentName>-AgentIdentity' (servicePrincipalType
+# 'ServiceIdentity'); its appId is the `appid` claim the AgenticIdentityToken carries.
+function Resolve-AgentAppId {
+  param([Parameter(Mandatory = $true)][string]$DisplayName)
+  $escaped = $DisplayName -replace "'", "''"   # OData single-quote escaping
+  $raw = az ad sp list --filter "displayName eq '$escaped'" `
+    --query "[?servicePrincipalType=='ServiceIdentity'].{appId:appId,created:createdDateTime}" -o json 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    throw "az ad sp list failed for '$DisplayName' (can the caller read directory objects? a managed identity / OIDC SP needs Directory.Read.All)."
+  }
+  $matches = @(($raw | ConvertFrom-Json) | Where-Object { $_ -and $_.appId })
+  if ($matches.Count -eq 0) { return $null }
+  if ($matches.Count -eq 1) { return $matches[0].appId }
+  # Duplicates (an agent deleted + recreated leaves a stale SP): the newest is the live one.
+  $winner = $matches |
+    Sort-Object { if ($_.created) { [datetime]$_.created } else { [datetime]::MinValue } } -Descending |
+    Select-Object -First 1
+  Write-Host "[resolve] '$DisplayName' has $($matches.Count) ServiceIdentity SPs; using newest (created $($winner.created))."
+  return $winner.appId
+}
+
+# --- RESOLVE MODE (control plane): name-only policy -> AppId-enriched policy ---
+# Join each agent NAME in the source policy to its live AgentIdentity AppId via Graph; DROP names
+# with no matching SP (deny-by-default). Emit the resolved policy for apim-mcp-compliance-all.bicep's
+# mcpPolicy parameter. Never mutates the source file, never touches the Foundry data plane.
+if ($resolveMode) {
+  if ([string]::IsNullOrWhiteSpace($AccountName) -or [string]::IsNullOrWhiteSpace($ProjectName)) {
+    throw "Resolve mode requires -AccountName and -ProjectName (the Foundry account + project names that prefix each agent identity's display name)."
+  }
+  if (-not (Test-Path -Path $ResolvePolicyPath)) {
+    throw "Resolve policy file not found: '$ResolvePolicyPath'."
+  }
+  $srcPolicy = Get-Content -Raw -Path $ResolvePolicyPath | ConvertFrom-Json
+  $prefix    = "$AccountName-$ProjectName"
+
+  $resolvedServers = foreach ($srv in @($srcPolicy.servers)) {
+    $resolvedAgents = foreach ($ag in @($srv.agents)) {
+      $displayName = "$prefix-$($ag.name)-AgentIdentity"
+      $appId       = Resolve-AgentAppId -DisplayName $displayName
+      if ([string]::IsNullOrWhiteSpace($appId)) {
+        Write-Host "[resolve] Dropping agent '$($ag.name)' on server '$($srv.name)': no ServiceIdentity SP '$displayName' (denied)."
+        continue
+      }
+      [ordered]@{ name = $ag.name; appId = $appId; requestsPerMinute = [int]$ag.requestsPerMinute }
+    }
+    [ordered]@{ name = $srv.name; agents = @($resolvedAgents) }
+  }
+
+  $grantedCount  = @($resolvedServers | ForEach-Object { $_.agents } | Where-Object { $_ }).Count
+  $srcAgentCount = @(@($srcPolicy.servers) | ForEach-Object { $_.agents } | Where-Object { $_ }).Count
+  $serverCount   = @($resolvedServers).Count
+  if ($grantedCount -eq 0 -and $srcAgentCount -gt 0) {
+    # The source policy DOES list agents but NONE resolved -> this is a failure (agents not seeded
+    # yet, or the caller lacks directory read), NOT an intentional lockdown. Refuse to emit a
+    # deny-all policy that would revoke ALL access; throwing leaves any previously-applied APIM
+    # policy intact. (If the source policy is intentionally emptied, $srcAgentCount is 0 and we
+    # correctly emit the empty deny-all policy so access CAN be revoked on purpose.)
+    throw "[resolve] Source policy '$ResolvePolicyPath' lists $srcAgentCount agent(s) but NONE resolved (looked for '$prefix-<name>-AgentIdentity'). Refusing to emit a deny-all policy — ensure agents are seeded and the caller can read directory objects."
+  }
+
+  $resolved = [ordered]@{
+    renewalPeriodSeconds = [int]($srcPolicy.renewalPeriodSeconds ?? 60)
+    servers              = @($resolvedServers)
+  }
+  $json = $resolved | ConvertTo-Json -Depth 8
+  if (-not [string]::IsNullOrWhiteSpace($OutFile)) {
+    Set-Content -Path $OutFile -Value $json -Encoding utf8
+    Write-Host "[resolve] Wrote resolved policy to '$OutFile' ($grantedCount agent grant(s) across $serverCount server(s))."
+  }
+  else {
+    Write-Output $json
+  }
+  return
+}
+
+# --- DISCOVERY MODE (data plane) below: requires a reachable endpoint ---
+if ([string]::IsNullOrWhiteSpace($FoundryProjectEndpoint)) {
+  throw "Discovery mode requires -FoundryProjectEndpoint (a reachable Foundry project endpoint)."
+}
+
 $token   = Get-FoundryToken
 $headers = @{ Authorization = "Bearer $token" }
 
@@ -116,51 +216,6 @@ $rows = foreach ($a in $agents) {
     appId        = $detail.instance_identity.client_id
     blueprintId  = $detail.blueprint.client_id
   }
-}
-
-# --- RESOLVE MODE: name-only policy -> AppId-enriched policy (deploy-compliancy workflow) ---
-# Join each agent NAME in the source policy to its live AppId; DROP names with no live agent
-# (deny-by-default: an agent that doesn't exist cannot be granted). Emit the resolved policy
-# for apim-mcp-compliance-all.bicep's mcpPolicy parameter. This never mutates the source file.
-if ($resolveMode) {
-  if (-not (Test-Path -Path $ResolvePolicyPath)) {
-    throw "Resolve policy file not found: '$ResolvePolicyPath'."
-  }
-  $srcPolicy = Get-Content -Raw -Path $ResolvePolicyPath | ConvertFrom-Json
-
-  $appIdByName = @{}
-  foreach ($r in $rows) {
-    if (-not [string]::IsNullOrWhiteSpace($r.appId)) { $appIdByName[$r.name] = $r.appId }
-  }
-
-  $resolvedServers = foreach ($srv in @($srcPolicy.servers)) {
-    $resolvedAgents = foreach ($ag in @($srv.agents)) {
-      $appId = $appIdByName[$ag.name]
-      if ([string]::IsNullOrWhiteSpace($appId)) {
-        Write-Host "[resolve] Dropping agent '$($ag.name)' on server '$($srv.name)': no live agent identity found (denied)."
-        continue
-      }
-      [ordered]@{ name = $ag.name; appId = $appId; requestsPerMinute = [int]$ag.requestsPerMinute }
-    }
-    [ordered]@{ name = $srv.name; agents = @($resolvedAgents) }
-  }
-
-  $resolved = [ordered]@{
-    renewalPeriodSeconds = [int]($srcPolicy.renewalPeriodSeconds ?? 60)
-    servers              = @($resolvedServers)
-  }
-  $json = $resolved | ConvertTo-Json -Depth 8
-
-  $grantedCount = @($resolvedServers | ForEach-Object { $_.agents } | Where-Object { $_ }).Count
-  $serverCount  = @($resolvedServers).Count
-  if (-not [string]::IsNullOrWhiteSpace($OutFile)) {
-    Set-Content -Path $OutFile -Value $json -Encoding utf8
-    Write-Host "[resolve] Wrote resolved policy to '$OutFile' ($grantedCount agent grant(s) across $serverCount server(s))."
-  }
-  else {
-    Write-Output $json
-  }
-  return
 }
 
 # 3a) Human-readable table.

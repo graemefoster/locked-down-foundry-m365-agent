@@ -53,6 +53,24 @@
 #>
 $ErrorActionPreference = 'Stop'
 
+# --- MCP compliance (control plane; independent of the Teams / M365 publish below) ---
+# Runs on EVERY azd up (agents were just seeded by hooks/predeploy.ps1) so a fresh env leaves a
+# working, compliant agent instead of the deny-all main.bicep applies at provision. Best-effort:
+# a transient failure is logged and swallowed so it never breaks the deployment; the resolver
+# refuses to emit a deny-all policy, so a partial failure leaves the prior APIM policy intact.
+try {
+  & "$PSScriptRoot/apply-mcp-compliance.ps1"
+}
+catch {
+  Write-Warning '=================================================================================='
+  Write-Warning "[postdeploy] MCP COMPLIANCE WAS NOT APPLIED (non-fatal): $($_.Exception.Message)"
+  Write-Warning '  Agents may be DENIED MCP access until this is re-run. The previous APIM policy'
+  Write-Warning '  (if any) is left intact. Fix the cause, then re-run one of:'
+  Write-Warning '    azd hooks run postdeploy'
+  Write-Warning "    gh workflow run 'deploy-compliancy.yml'"
+  Write-Warning '=================================================================================='
+}
+
 $enableTeams = [Environment]::GetEnvironmentVariable('SEED_ENABLE_TEAMS_PUBLISH')
 if ($null -eq $enableTeams) { $enableTeams = 'false' }
 $enableTeams = $enableTeams.Trim('"').ToLowerInvariant()
