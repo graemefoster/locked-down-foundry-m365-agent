@@ -28,12 +28,19 @@ param apiPath string = 'mcp'
 @description('FQDN of the MCP web app (private endpoint), e.g. mcp-xxxx.azurewebsites.net')
 param mcpWebAppFqdn string
 
+@description('Path on the backend MCP web app where the streamable-HTTP MCP endpoint is served.')
+param mcpBackendPath string = '/mcp'
+
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 }
 
 var backendId = 'mcp-server-backend'
-var backendBaseUrl = 'https://${mcpWebAppFqdn}'
+// The backend MCP container (Express) serves the streamable-HTTP MCP endpoint at /mcp, NOT at
+// root. APIM's type:mcp proxy forwards the MCP protocol to the backend `url` verbatim (it does
+// NOT append the endpoint uriTemplate), so the backend url MUST include the /mcp path — with a
+// bare host url APIM hits backend root and the server returns 404 (Cannot POST /).
+var backendBaseUrl = 'https://${mcpWebAppFqdn}${mcpBackendPath}'
 
 // First-class backend for the MCP web app (private endpoint).
 resource mcpBackend 'Microsoft.ApiManagement/service/backends@2024-06-01-preview' = {
@@ -69,6 +76,8 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
     mcpProperties: {
       endpoints: {
         mcp: {
+          // The MCP endpoint's backend path lives in the backend `url` (see backendBaseUrl),
+          // which already includes /mcp. Keep this at root so APIM does not double the path.
           uriTemplate: '/'
         }
       }
