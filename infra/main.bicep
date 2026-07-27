@@ -53,6 +53,12 @@ param modelSkuName string = 'GlobalStandard'
 @description('The tokens per minute (TPM) of your model deployment')
 param modelCapacity int = 30
 
+// RAI guardrail policy parameters
+@description('Assign the built-in "Guardrail for Cognitive Services Deployments" initiative (Audit) at this resource group. Audit-only: reports compliance, does not block.')
+param enableRaiGuardrailPolicy bool = true
+@description('Deploy a deliberately NON-COMPLIANT model (weak custom RAI policy) to demonstrate the guardrail flagging it. Off by default.')
+param enableNonCompliantModelDemo bool = false
+
 // ==================== MODEL GATEWAY ====================
 // The enterprise model gateway is always deployed: an APIM Standard v2 instance + a "real"
 // provider AI Foundry in a NEW spoke, advertised to the primary Foundry project as an
@@ -723,6 +729,27 @@ module addProjectCapabilityHost 'modules/foundry/add-project-capability-host.bic
   ]
 }
 
+// ==================== RAI GUARDRAIL POLICY (AUDIT) ====================
+// Assigns the built-in "[Preview]: Guardrail for Cognitive Services Deployments"
+// initiative with STRICT parameters. Audit-only (the built-in cannot block); it
+// reports every model deployment's content-filter config as Compliant / Non-compliant.
+module raiGuardrail 'modules/governance/rai-guardrail-assignment.bicep' = if (enableRaiGuardrailPolicy) {
+  name: 'rai-guardrail-${uniqueSuffix}-deployment'
+}
+
+// DEMO: a deliberately non-compliant deployment (weak custom RAI policy) so you can
+// watch the guardrail flag it. Attaches to the existing AI Services account.
+module nonCompliantModelDemo 'modules/governance/noncompliant-model-demo.bicep' = if (enableNonCompliantModelDemo) {
+  name: 'noncompliant-demo-${uniqueSuffix}-deployment'
+  params: {
+    accountName: aiAccount.outputs.accountName
+    modelName: modelName
+    modelFormat: modelFormat
+    modelVersion: modelVersion
+    modelSkuName: modelSkuName
+  }
+}
+
 // The Storage Blob Data Owner role must be assigned after the caphost is created
 module storageContainersRoleAssignment 'modules/rbac/blob-storage-container-role-assignments.bicep' = {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
@@ -1153,6 +1180,12 @@ output AZURE_AI_PROJECT_NAME string = aiProject.outputs.projectName
 
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
+
+@description('Name of the strict RAI guardrail policy assignment (empty when disabled). Use to query compliance.')
+output RAI_GUARDRAIL_ASSIGNMENT_NAME string = enableRaiGuardrailPolicy ? raiGuardrail!.outputs.assignmentName : ''
+
+@description('Name of the deliberately non-compliant demo deployment (empty when disabled).')
+output NONCOMPLIANT_DEMO_DEPLOYMENT_NAME string = enableNonCompliantModelDemo ? nonCompliantModelDemo!.outputs.deploymentName : ''
 
 @description('Whether to seed the second (model-gateway) agent. Always true — the model gateway is always deployed.')
 output SEED_ENABLE_SECOND_AGENT bool = true

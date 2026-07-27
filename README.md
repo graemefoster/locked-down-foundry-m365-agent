@@ -71,6 +71,11 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
   Standard v2 (private), dynamic model discovery, and defense-in-depth auth.
   **[docs/model-gateway.md](./docs/model-gateway.md)** ·
   [deep dive](./apim-model-gateway.md).
+- **RAI guardrail policy (Azure Policy · Audit)** *(on by default)* — assigns the built-in
+  "Guardrail for Cognitive Services Deployments" initiative with a strict content-filter
+  baseline that audits every model deployment. Audit-only (reports, does not block); an
+  optional flag deploys a deliberately non-compliant model to see it flagged.
+  **[docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md)**.
 - **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
   the in-VNet **Linux** worker VM so complex deployments run *inside the VNet*, reaching
   the private Foundry endpoint directly instead of via `az vm run-command`. `azd up`'s
@@ -91,6 +96,7 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 | [NETWORKING.md](./NETWORKING.md) | Rule-by-rule network lockdown: NSG, firewall, flow logs, validation. |
 | [docs/teams-m365.md](./docs/teams-m365.md) | Publish an agent to Teams / M365 Copilot (inbound path, hooks, JWT). |
 | [docs/model-gateway.md](./docs/model-gateway.md) · [apim-model-gateway.md](./apim-model-gateway.md) | Optional APIM model gateway overview + full walkthrough. |
+| [docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md) | RAI content-filter guardrail (Azure Policy, Audit): strict baseline, why it can't block, the non-compliant demo, compliance checks. |
 | [docs/github-runner.md](./docs/github-runner.md) | Optional in-VNet self-hosted GitHub Actions runner: security model, auth, setup. |
 | [BACKLOG.md](./BACKLOG.md) | Project backlog: aim, goals, and epics for evolving this reference implementation. |
 

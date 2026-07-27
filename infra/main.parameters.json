@@ -28,6 +28,8 @@
     "githubRunnerPat": { "value": "${GITHUB_RUNNER_PAT=}" },
     "githubRunnerPatSecretName": { "value": "${GITHUB_RUNNER_PAT_SECRET_NAME=gh-runner-pat}" },
     "githubRunnerLabels": { "value": "${GITHUB_RUNNER_LABELS=vnet,foundry-private}" },
-    "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" }
+    "enableTeamsPublish": { "value": "${ENABLE_TEAMS_PUBLISH=true}" },
+    "enableRaiGuardrailPolicy": { "value": "${RAI_GUARDRAIL_ENABLED=true}" },
+    "enableNonCompliantModelDemo": { "value": "${NONCOMPLIANT_MODEL_DEMO_ENABLED=false}" }
   }
 }
