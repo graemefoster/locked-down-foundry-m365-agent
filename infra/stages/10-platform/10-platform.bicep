@@ -7,9 +7,7 @@ The Foundry platform on top of the stage 00 substrate. Composes the slices —
                                  Search/App Service), container registry
   private-endpoints.bicep      → private endpoints + privatelink DNS
   model-gateway-platform.bicep → provider Foundry, APIM, APIM/provider PEs, APIM
-                                 provider RBAC + the MCP gateway wiring
-                                 (app registration + APIM MCP servers + the
-                                 mcpConnections the project consumes)
+                                 provider RBAC
   project.bicep                → AI project + workspace-id GUID
   rbac.bicep                   → data-plane RBAC + Agents capability host
   encryption.bicep             → CMK RBAC + account/storage CMK re-PUT
@@ -160,8 +158,6 @@ module modelGateway 'model-gateway-platform.bicep' = {
     modelGatewayApimSubnetId: modelGatewayApimSubnetId
     modelGatewayPeSubnetId: modelGatewayPeSubnetId
     hubVnetId: hubVnetId
-    mcpWebAppFqdn: dataResources.outputs.mcpWebAppFqdn
-    mcpWebAppIdentityPrincipalId: dataResources.outputs.mcpWebAppIdentityPrincipalId
   }
   dependsOn: [
     privateEndpoints
@@ -187,7 +183,6 @@ module project 'project.bicep' = {
     azureStorageSubscriptionId: dataResources.outputs.azureStorageSubscriptionId
     azureStorageResourceGroupName: dataResources.outputs.azureStorageResourceGroupName
     logAnalyticsId: logAnalyticsId
-    mcpConnections: modelGateway.outputs.mcpConnections
   }
   dependsOn: [
     privateEndpoints
@@ -249,6 +244,8 @@ output keyVaultName string = dataResources.outputs.keyVaultName
 // Dependent resources (App Service)
 output yarpWebAppFqdn string = dataResources.outputs.yarpWebAppFqdn
 output mcpWebAppName string = dataResources.outputs.mcpWebAppName
+output mcpWebAppFqdn string = dataResources.outputs.mcpWebAppFqdn
+output mcpWebAppIdentityPrincipalId string = dataResources.outputs.mcpWebAppIdentityPrincipalId
 
 // Project
 output projectName string = project.outputs.projectName
@@ -259,9 +256,3 @@ output projectEndpoint string = project.outputs.projectEndpoint
 output providerAccountId string = modelGateway.outputs.providerAccountId
 output apimName string = modelGateway.outputs.apimName
 output gatewayUrl string = modelGateway.outputs.gatewayUrl
-
-// MCP gateway wiring
-output mcpClientAppId string = modelGateway.outputs.mcpClientAppId
-output mcpIssuer string = modelGateway.outputs.mcpIssuer
-output mcpAudience string = modelGateway.outputs.mcpAudience
-output mcpSampleGatewayUrl string = modelGateway.outputs.mcpSampleGatewayUrl

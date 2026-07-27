@@ -1,9 +1,10 @@
 /*
 Stage 10 slice — AI project.
 The project (sub-resource of the Foundry account), its system-assigned identity,
-the connections to Storage / CosmosDB / AI Search and the governed MCP server
-connections, plus the workspace-id GUID reformatting used by the container-scope
-data-plane RBAC in the rbac slice.
+the BYO connections to Storage / CosmosDB / AI Search, plus the workspace-id GUID
+reformatting used by the container-scope data-plane RBAC in the rbac slice. The
+governed MCP-server connections are created separately (surgery #2) so project
+creation no longer depends on the APIM/app-registration outputs.
 */
 
 param location string
@@ -27,9 +28,6 @@ param azureStorageResourceGroupName string
 
 // From stage 00.
 param logAnalyticsId string
-
-// Governed MCP server connections (built in the model-gateway slice).
-param mcpConnections array
 
 // Existing data-plane resources (declared for the dependsOn ordering preserved from main).
 resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
@@ -71,12 +69,6 @@ module aiProject '../../modules/foundry/ai-project-identity.bicep' = {
     accountName: accountName
 
     logAnalyticsWorkspaceId: logAnalyticsId
-
-    // One project connection per governed MCP server, built from the APIM server outputs below.
-    // The agent's tool token is minted for our own app registration audience (an audience we
-    // control), so App Service built-in auth on the MCP web app accepts it. Shared audience for
-    // now; per-server audiences would flow through this same array.
-    mcpConnections: mcpConnections
 
   }
   dependsOn: [

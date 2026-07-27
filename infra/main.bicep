@@ -320,6 +320,64 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
 }
 
 /*
+  Entra app registration guarding the private MCP web app. Federated to the MCP web app's
+  user-assigned managed identity (MI-as-FIC) so App Service built-in auth is secretless.
+*/
+module mcpAppRegistration 'modules/gateway/app-registration.bicep' = {
+  name: 'mcp-appreg-${uniqueSuffix}-deployment'
+  params: {
+    clientAppName: 'mcp-gateway-${uniqueSuffix}'
+    clientAppDisplayName: 'MCP Gateway (${uniqueSuffix})'
+    webAppIdentityPrincipalId: stage10.outputs.mcpWebAppIdentityPrincipalId
+  }
+}
+
+// APIM MCP server APIs — exposes each private MCP web app in mcp/mcp.json through the APIM
+// gateway. The Foundry MCP connection points at these APIM endpoints instead of directly at
+// the App Service private endpoints, so all MCP tool traffic flows through the gateway.
+// Backend FQDNs are generated at provision time, so they are NOT stored in mcp/mcp.json — they
+// are flowed in here, keyed by server name. The existing sample is the server named 'mcp'.
+var mcpServerFqdns = {
+  mcp: stage10.outputs.mcpWebAppFqdn
+}
+module apimMcpServers 'modules/model-gateway/apim-mcp-servers.bicep' = {
+  name: 'mcp-apim-servers-${uniqueSuffix}-deployment'
+  params: {
+    apimName: stage10.outputs.apimName
+    serverFqdns: mcpServerFqdns
+  }
+  dependsOn: [
+    stage10
+  ]
+}
+// One Foundry project connection per governed MCP server: connection name from mcp/mcp.json
+// (via the module output), target = that server's APIM gateway URL, audience = the shared MCP
+// app registration audience (per-server audiences would slot in here later). Building this from
+// the module output (a single map, no nested lambda) means there is no "primary server" to
+// special-case — every server is wired symmetrically, and projectMcpConnections consumes the array.
+var mcpConnections = map(apimMcpServers.outputs.servers, srv => {
+  name: srv.connectionName
+  url: '${srv.url}/'
+  audience: mcpAppRegistration.outputs.audience
+})
+// URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
+// workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
+// server, and the sample 'mcp' server is the first entry by convention.
+var mcpSampleGatewayUrl = '${first(apimMcpServers.outputs.servers).url}/'
+
+// One Foundry project connection per governed MCP server. Split out of project creation: these
+// connections are not used by the Agents capability host, so they run here (after stage10, hence
+// after the capability host) rather than at project-create time.
+module projectMcpConnections 'modules/foundry/project-mcp-connections.bicep' = {
+  name: 'project-mcp-connections-${uniqueSuffix}-deployment'
+  params: {
+    accountName: stage10.outputs.aiAccountName
+    projectName: stage10.outputs.projectName
+    mcpConnections: mcpConnections
+  }
+}
+
+/*
   App Service built-in auth (EasyAuth) on the MCP web app — returns 401 on unauthenticated
   requests (machine-to-machine, no interactive redirect) and validates the AgenticIdentityToken
   audience against the app registration's Application ID URI.
@@ -328,9 +386,9 @@ module mcpBuiltinAuth 'modules/gateway/builtin-auth.bicep' = {
   name: 'mcp-auth-${uniqueSuffix}-deployment'
   params: {
     appServiceName: stage10.outputs.mcpWebAppName
-    clientId: stage10.outputs.mcpClientAppId
-    issuer: stage10.outputs.mcpIssuer
-    allowedAudience: stage10.outputs.mcpAudience
+    clientId: mcpAppRegistration.outputs.clientAppId
+    issuer: mcpAppRegistration.outputs.issuer
+    allowedAudience: mcpAppRegistration.outputs.audience
   }
 }
 
@@ -421,11 +479,12 @@ module apimMcpComplianceAll 'modules/model-gateway/apim-mcp-compliance-all.bicep
   name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {
     apimName: stage10.outputs.apimName
-    mcpAudience: stage10.outputs.mcpAudience
+    mcpAudience: mcpAppRegistration.outputs.audience
     tenantId: tenant().tenantId
   }
   dependsOn: [
     stage10
+    apimMcpServers
   ]
 }
 module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
@@ -486,6 +545,7 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
     apimApiPolicy
     apimTeamsApi
     apimMcpComplianceAll
+    apimMcpServers
   ]
 }
 
@@ -666,7 +726,7 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
-output MCP_GATEWAY_URL string = stage10.outputs.mcpSampleGatewayUrl
+output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
 
 // --- MCP compliance (deploy-compliancy workflow) ---------------------------------
 @description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')
@@ -674,7 +734,7 @@ output MCP_COMPLIANCE_APIM_NAME string = apimName
 @description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
 output MCP_COMPLIANCE_SERVER_COUNT int = apimMcpComplianceAll.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
-output MCP_COMPLIANCE_AUDIENCE string = stage10.outputs.mcpAudience
+output MCP_COMPLIANCE_AUDIENCE string = mcpAppRegistration.outputs.audience
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 
