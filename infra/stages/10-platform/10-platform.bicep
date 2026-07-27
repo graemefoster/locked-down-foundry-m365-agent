@@ -62,7 +62,6 @@ param logAnalyticsId string
 param appInsightsConnectionString string
 param appInsightsId string
 param appServiceDelegatedSubnetId string
-param hubVnetName string
 param hubVnetId string
 param foundrySpokeVnetName string
 param foundryPeSubnetName string
@@ -70,6 +69,17 @@ param appServiceSpokeVnetName string
 param appServicePeSubnetName string
 param modelGatewayApimSubnetId string
 param modelGatewayPeSubnetId string
+
+// Private DNS zone ids (created early in stage 00 foundation).
+param aiServicesDnsZoneId string
+param openAiDnsZoneId string
+param cognitiveServicesDnsZoneId string
+param aiSearchDnsZoneId string
+param storageDnsZoneId string
+param cosmosDBDnsZoneId string
+param appServiceDnsZoneId string
+param acrDnsZoneId string
+param keyVaultDnsZoneId string
 
 // Foundry account egress posture — shared by BOTH the identity (create) and encryption
 // (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
@@ -132,11 +142,19 @@ module privateEndpoints 'private-endpoints.bicep' = {
     keyVaultName: dataResources.outputs.keyVaultName
     mcpWebAppName: dataResources.outputs.mcpWebAppName
     yarpWebAppName: dataResources.outputs.yarpWebAppName
-    hubVnetName: hubVnetName
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
     appServiceSpokeVnetName: appServiceSpokeVnetName
     appServicePeSubnetName: appServicePeSubnetName
+    aiServicesDnsZoneId: aiServicesDnsZoneId
+    openAiDnsZoneId: openAiDnsZoneId
+    cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
+    aiSearchDnsZoneId: aiSearchDnsZoneId
+    storageDnsZoneId: storageDnsZoneId
+    cosmosDBDnsZoneId: cosmosDBDnsZoneId
+    appServiceDnsZoneId: appServiceDnsZoneId
+    acrDnsZoneId: acrDnsZoneId
+    keyVaultDnsZoneId: keyVaultDnsZoneId
   }
 }
 

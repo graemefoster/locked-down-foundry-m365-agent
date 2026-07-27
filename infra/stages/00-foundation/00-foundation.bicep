@@ -64,6 +64,16 @@ module networking 'networking.bicep' = {
   }
 }
 
+// All privatelink DNS zones are created early here (linked to the hub VNet) and their ids
+// are threaded to stage 10 where the private-endpoint zone groups consume them.
+module dnsZones 'dns-zones.bicep' = {
+  name: 'stage00-dns-zones-${uniqueSuffix}'
+  params: {
+    suffix: uniqueSuffix
+    hubVnetName: networking.outputs.hubVnetName
+  }
+}
+
 // ==================== OUTPUTS (consumed by stages 10 / 30 / 40) ====================
 
 // Observability
@@ -89,3 +99,14 @@ output appServicePeSubnetName string = networking.outputs.appServicePeSubnetName
 // Model-gateway spoke
 output modelGatewayApimSubnetId string = networking.outputs.modelGatewayApimSubnetId
 output modelGatewayPeSubnetId string = networking.outputs.modelGatewayPeSubnetId
+
+// Private DNS zone ids (created early; consumed by stage 10 private-endpoint zone groups)
+output aiServicesDnsZoneId string = dnsZones.outputs.aiServicesDnsZoneId
+output openAiDnsZoneId string = dnsZones.outputs.openAiDnsZoneId
+output cognitiveServicesDnsZoneId string = dnsZones.outputs.cognitiveServicesDnsZoneId
+output aiSearchDnsZoneId string = dnsZones.outputs.aiSearchDnsZoneId
+output storageDnsZoneId string = dnsZones.outputs.storageDnsZoneId
+output cosmosDBDnsZoneId string = dnsZones.outputs.cosmosDBDnsZoneId
+output appServiceDnsZoneId string = dnsZones.outputs.appServiceDnsZoneId
+output acrDnsZoneId string = dnsZones.outputs.acrDnsZoneId
+output keyVaultDnsZoneId string = dnsZones.outputs.keyVaultDnsZoneId

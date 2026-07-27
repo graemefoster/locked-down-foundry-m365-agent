@@ -17,16 +17,6 @@ param aiSearchName string
 param storageName string
 @description('Name of the Cosmos DB account')
 param cosmosDBName string
-@description('Suffix for unique resource names')
-param suffix string
-
-// Hub VNet (for DNS zone links - resolver lives here)
-@description('Name of the Hub VNet')
-param hubVnetName string
-@description('Resource Group of the Hub VNet')
-param hubVnetResourceGroupName string = resourceGroup().name
-@description('Subscription ID of the Hub VNet')
-param hubVnetSubscriptionId string = subscription().subscriptionId
 
 // Foundry Spoke VNet (for Foundry PEs)
 @description('Name of the Foundry spoke VNet')
@@ -43,6 +33,17 @@ param appServicePeSubnetName string
 param appServiceWebAppNames string[]
 param acrName string
 param keyVaultName string
+
+// Private DNS zone ids (created early in stage 00 and threaded in).
+param aiServicesDnsZoneId string
+param openAiDnsZoneId string
+param cognitiveServicesDnsZoneId string
+param aiSearchDnsZoneId string
+param storageDnsZoneId string
+param cosmosDBDnsZoneId string
+param appServiceDnsZoneId string
+param acrDnsZoneId string
+param keyVaultDnsZoneId string
 
 // ---- Resource references ----
 resource aiAccount 'Microsoft.CognitiveServices/accounts@2023-05-01' existing = {
@@ -73,12 +74,6 @@ resource acr 'Microsoft.ContainerRegistry/registries@2025-11-01' existing = {
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
   scope: resourceGroup()
-}
-
-// Reference Hub VNet (DNS zones linked here)
-resource hubVnet 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
-  name: hubVnetName
-  scope: resourceGroup(hubVnetSubscriptionId, hubVnetResourceGroupName)
 }
 
 // Reference Foundry Spoke VNet and PE subnet
@@ -230,159 +225,6 @@ resource appServicePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-0
   }
 ]
 
-/* -------------------------------------------- Private DNS Zones -------------------------------------------- */
-
-var aiServicesDnsZoneName = 'privatelink.services.ai.azure.com'
-var openAiDnsZoneName = 'privatelink.openai.azure.com'
-var cognitiveServicesDnsZoneName = 'privatelink.cognitiveservices.azure.com'
-var aiSearchDnsZoneName = 'privatelink.search.windows.net'
-var storageDnsZoneName = 'privatelink.blob.${environment().suffixes.storage}'
-var cosmosDBDnsZoneName = 'privatelink.documents.azure.com'
-var appServiceDnsZoneName = 'privatelink.azurewebsites.net'
-var acrDnsZoneName = 'privatelink.azurecr.io'
-var keyVaultDnsZoneName = 'privatelink.vaultcore.azure.net'
-
-// ---- DNS Zone Resources ----
-resource acrServicePrivateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: acrDnsZoneName
-  location: 'global'
-}
-
-resource keyVaultPrivateDnsZone 'Microsoft.Network/privateDnsZones@2024-06-01' = {
-  name: keyVaultDnsZoneName
-  location: 'global'
-}
-var keyVaultDnsZoneId = keyVaultPrivateDnsZone.id
-
-resource appServiceDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: appServiceDnsZoneName
-  location: 'global'
-}
-
-resource aiServicesPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: aiServicesDnsZoneName
-  location: 'global'
-}
-var aiServicesDnsZoneId = aiServicesPrivateDnsZone.id
-
-resource openAiPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: openAiDnsZoneName
-  location: 'global'
-}
-var openAiDnsZoneId = openAiPrivateDnsZone.id
-
-resource cognitiveServicesPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: cognitiveServicesDnsZoneName
-  location: 'global'
-}
-var cognitiveServicesDnsZoneId = cognitiveServicesPrivateDnsZone.id
-
-resource aiSearchPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: aiSearchDnsZoneName
-  location: 'global'
-}
-var aiSearchDnsZoneId = aiSearchPrivateDnsZone.id
-
-resource storagePrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: storageDnsZoneName
-  location: 'global'
-}
-var storageDnsZoneId = storagePrivateDnsZone.id
-
-resource cosmosDBPrivateDnsZone 'Microsoft.Network/privateDnsZones@2020-06-01' = {
-  name: cosmosDBDnsZoneName
-  location: 'global'
-}
-var cosmosDBDnsZoneId = cosmosDBPrivateDnsZone.id
-
-/* ---- DNS VNet Links (all zones linked to Hub VNet for DNS Resolver) ---- */
-
-resource acrLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: acrServicePrivateDnsZone
-  location: 'global'
-  name: 'acr-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-
-resource keyVaultLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: keyVaultPrivateDnsZone
-  location: 'global'
-  name: 'keyvault-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-
-resource aiServicesLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: aiServicesPrivateDnsZone
-  location: 'global'
-  name: 'aiServices-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-resource openAiLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: openAiPrivateDnsZone
-  location: 'global'
-  name: 'aiServicesOpenAI-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-resource cognitiveServicesLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: cognitiveServicesPrivateDnsZone
-  location: 'global'
-  name: 'aiServicesCognitiveServices-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-resource aiSearchLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: aiSearchPrivateDnsZone
-  location: 'global'
-  name: 'aiSearch-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-resource storageLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: storagePrivateDnsZone
-  location: 'global'
-  name: 'storage-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-resource cosmosDBLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: cosmosDBPrivateDnsZone
-  location: 'global'
-  name: 'cosmosDB-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-
-// App Service DNS zone linked to Hub (for resolver) and App Service spoke (for local resolution)
-resource appServiceLinkHub 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = {
-  parent: appServiceDnsZone
-  location: 'global'
-  name: 'appservice-${suffix}-hub-link'
-  properties: {
-    virtualNetwork: { id: hubVnet.id }
-    registrationEnabled: false
-  }
-}
-
 // ---- DNS Zone Groups ----
 resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: aiAccountPrivateEndpoint
@@ -394,11 +236,6 @@ resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGr
       { name: '${aiAccountName}-dns-cogserv-config', properties: { privateDnsZoneId: cognitiveServicesDnsZoneId } }
     ]
   }
-  dependsOn: [
-    aiServicesLinkHub
-    openAiLinkHub
-    cognitiveServicesLinkHub
-  ]
 }
 resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: aiSearchPrivateEndpoint
@@ -408,9 +245,6 @@ resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
       { name: '${aiSearchName}-dns-config', properties: { privateDnsZoneId: aiSearchDnsZoneId } }
     ]
   }
-  dependsOn: [
-    aiSearchLinkHub
-  ]
 }
 resource storageDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: storagePrivateEndpoint
@@ -420,9 +254,6 @@ resource storageDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroup
       { name: '${storageName}-dns-config', properties: { privateDnsZoneId: storageDnsZoneId } }
     ]
   }
-  dependsOn: [
-    storageLinkHub
-  ]
 }
 resource cosmosDBDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: cosmosDBPrivateEndpoint
@@ -432,9 +263,6 @@ resource cosmosDBDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
       { name: '${cosmosDBName}-dns-config', properties: { privateDnsZoneId: cosmosDBDnsZoneId } }
     ]
   }
-  dependsOn: [
-    cosmosDBLinkHub
-  ]
 }
 
 resource keyVaultDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
@@ -445,9 +273,6 @@ resource keyVaultDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
       { name: '${keyVaultName}-dns-config', properties: { privateDnsZoneId: keyVaultDnsZoneId } }
     ]
   }
-  dependsOn: [
-    keyVaultLinkHub
-  ]
 }
 
 resource appServiceDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = [
@@ -456,12 +281,9 @@ resource appServiceDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZo
     parent: appServicePrivateEndpoint[i]
     properties: {
       privateDnsZoneConfigs: [
-        { name: '${appServiceName}-dns-config', properties: { privateDnsZoneId: appServiceDnsZone.id } }
+        { name: '${appServiceName}-dns-config', properties: { privateDnsZoneId: appServiceDnsZoneId } }
       ]
     }
-    dependsOn: [
-      appServiceLinkHub
-    ]
   }
 ]
 
@@ -470,10 +292,7 @@ resource acrDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroup
   name: '${acrName}-dns-group'
   properties: {
     privateDnsZoneConfigs: [
-      { name: '${acrName}-dns-config', properties: { privateDnsZoneId: acrServicePrivateDnsZone.id } }
+      { name: '${acrName}-dns-config', properties: { privateDnsZoneId: acrDnsZoneId } }
     ]
   }
-  dependsOn: [
-    acrLinkHub
-  ]
 }

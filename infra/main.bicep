@@ -308,7 +308,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
     appInsightsId: stage00.outputs.appInsightsId
     appServiceDelegatedSubnetId: stage00.outputs.appServiceDelegatedSubnetId
-    hubVnetName: stage00.outputs.hubVnetName
     hubVnetId: stage00.outputs.hubVnetId
     foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
     foundryPeSubnetName: stage00.outputs.foundryPeSubnetName
@@ -316,6 +315,15 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     appServicePeSubnetName: stage00.outputs.appServicePeSubnetName
     modelGatewayApimSubnetId: stage00.outputs.modelGatewayApimSubnetId
     modelGatewayPeSubnetId: stage00.outputs.modelGatewayPeSubnetId
+    aiServicesDnsZoneId: stage00.outputs.aiServicesDnsZoneId
+    openAiDnsZoneId: stage00.outputs.openAiDnsZoneId
+    cognitiveServicesDnsZoneId: stage00.outputs.cognitiveServicesDnsZoneId
+    aiSearchDnsZoneId: stage00.outputs.aiSearchDnsZoneId
+    storageDnsZoneId: stage00.outputs.storageDnsZoneId
+    cosmosDBDnsZoneId: stage00.outputs.cosmosDBDnsZoneId
+    appServiceDnsZoneId: stage00.outputs.appServiceDnsZoneId
+    acrDnsZoneId: stage00.outputs.acrDnsZoneId
+    keyVaultDnsZoneId: stage00.outputs.keyVaultDnsZoneId
   }
 }
 

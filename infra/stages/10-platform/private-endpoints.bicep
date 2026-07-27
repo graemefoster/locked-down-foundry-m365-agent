@@ -20,11 +20,21 @@ param mcpWebAppName string
 param yarpWebAppName string
 
 // From stage 00 networking.
-param hubVnetName string
 param foundrySpokeVnetName string
 param foundryPeSubnetName string
 param appServiceSpokeVnetName string
 param appServicePeSubnetName string
+
+// Private DNS zone ids (created early in stage 00).
+param aiServicesDnsZoneId string
+param openAiDnsZoneId string
+param cognitiveServicesDnsZoneId string
+param aiSearchDnsZoneId string
+param storageDnsZoneId string
+param cosmosDBDnsZoneId string
+param appServiceDnsZoneId string
+param acrDnsZoneId string
+param keyVaultDnsZoneId string
 
 // Existing data-plane resources (declared for the dependsOn ordering preserved from main).
 resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
@@ -47,9 +57,6 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     storageName: storageName
     cosmosDBName: cosmosDBName
 
-    // Hub VNet (DNS zones linked here for resolver)
-    hubVnetName: hubVnetName
-
     // Foundry Spoke (Foundry PEs go here)
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
@@ -58,7 +65,17 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     appServiceSpokeVnetName: appServiceSpokeVnetName
     appServicePeSubnetName: appServicePeSubnetName
 
-    suffix: uniqueSuffix
+    // Private DNS zone ids (created early in stage 00)
+    aiServicesDnsZoneId: aiServicesDnsZoneId
+    openAiDnsZoneId: openAiDnsZoneId
+    cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
+    aiSearchDnsZoneId: aiSearchDnsZoneId
+    storageDnsZoneId: storageDnsZoneId
+    cosmosDBDnsZoneId: cosmosDBDnsZoneId
+    appServiceDnsZoneId: appServiceDnsZoneId
+    acrDnsZoneId: acrDnsZoneId
+    keyVaultDnsZoneId: keyVaultDnsZoneId
+
     // When Teams publish is enabled the YARP proxy is public (its own FQDN + managed cert is
     // the Bot Channel Adapter entry point), so it gets NO private endpoint — only the MCP web
     // app does. Otherwise both get private endpoints (legacy private-only posture).
