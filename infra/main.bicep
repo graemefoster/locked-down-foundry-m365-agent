@@ -603,7 +603,7 @@ module aiProject 'modules/foundry/ai-project-identity.bicep' = {
     logAnalyticsWorkspaceId: lanalytics.id
 
     mcpServerName: 'testweathermcpserver'
-    mcpUrl: '${apimMcpApi.outputs.mcpGatewayUrl}/'
+    mcpUrl: '${mcpPrimaryGatewayUrl}/'
     // Mint the agent's tool token for our own app registration (an audience we control), so
     // App Service built-in auth on the MCP web app accepts it.
     mcpAudience: mcpAppRegistration.outputs.audience
@@ -909,32 +909,45 @@ module apimProviderRoleAssignment 'modules/model-gateway/apim-provider-role-assi
   }
 }
 
-// APIM MCP server API — exposes the private MCP web app through the APIM gateway.
-// The Foundry MCP connection points at this APIM endpoint instead of directly at the
-// App Service private endpoint, so all MCP tool traffic flows through the gateway.
-module apimMcpApi 'modules/model-gateway/apim-mcp-api.bicep' = {
-  name: 'mcp-apim-api-${uniqueSuffix}-deployment'
+// APIM MCP server APIs — exposes each private MCP web app in mcp/mcp.json through the APIM
+// gateway. The Foundry MCP connection points at these APIM endpoints instead of directly at
+// the App Service private endpoints, so all MCP tool traffic flows through the gateway.
+// Backend FQDNs are generated at provision time, so they are NOT stored in mcp/mcp.json — they
+// are flowed in here, keyed by server name. The existing sample is the server named 'mcp'.
+var mcpServerFqdns = {
+  mcp: aiDependencies.outputs.mcpWebAppFqdn
+}
+module apimMcpServers 'modules/model-gateway/apim-mcp-servers.bicep' = {
+  name: 'mcp-apim-servers-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
-    mcpWebAppFqdn: aiDependencies.outputs.mcpWebAppFqdn
+    serverFqdns: mcpServerFqdns
   }
   dependsOn: [
     apimProviderRoleAssignment
   ]
 }
+// Gateway URL of the primary MCP server used by the Foundry project connection. By convention
+// this is the 'mcp' sample server; if mcp/mcp.json ever drops or renames it, fall back to the
+// first configured server so this never evaluates first([]).url (which fails with an opaque
+// null-reference error rather than pointing at the real cause — a missing 'mcp' entry).
+var mcpPrimaryServerName = contains(map(apimMcpServers.outputs.servers, s => s.name), 'mcp') ? 'mcp' : first(apimMcpServers.outputs.servers).name
+var mcpPrimaryGatewayUrl = first(filter(apimMcpServers.outputs.servers, s => s.name == mcpPrimaryServerName)).url
 
-// MCP per-agent rate-limit compliance policy — reflects mcp/mcp-policy.json into a policy
-// on the MCP API so each agent's tool calls are throttled by AppId (deny-by-default).
-// Applied here at provision time so a fresh environment starts compliant; the
+// MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
+// each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
+// per server). Applied here at provision time so a fresh environment starts compliant; the
 // deploy-compliancy workflow re-applies THIS SAME module on demand after the JSON changes.
-module apimMcpCompliance 'modules/model-gateway/apim-mcp-compliance.bicep' = {
-  name: 'mcp-compliance-${uniqueSuffix}-deployment'
+module apimMcpComplianceAll 'modules/model-gateway/apim-mcp-compliance-all.bicep' = {
+  name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {
     apimName: apim.outputs.apimName
-    mcpApiName: apimMcpApi.outputs.apiName
     mcpAudience: mcpAppRegistration.outputs.audience
     tenantId: tenant().tenantId
   }
+  dependsOn: [
+    apimMcpServers
+  ]
 }
 module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
@@ -993,8 +1006,8 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
     apimPrivateEndpoint
     apimApiPolicy
     apimTeamsApi
-    apimMcpApi
-    apimMcpCompliance
+    apimMcpServers
+    apimMcpComplianceAll
   ]
 }
 
@@ -1168,14 +1181,14 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 @description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
 
-@description('Per-environment MCP server URL (the APIM MCP gateway), identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
-output MCP_GATEWAY_URL string = '${apimMcpApi.outputs.mcpGatewayUrl}/'
+@description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
+output MCP_GATEWAY_URL string = '${mcpPrimaryGatewayUrl}/'
 
 // --- MCP compliance (deploy-compliancy workflow) ---------------------------------
-@description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policy on demand.')
+@description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')
 output MCP_COMPLIANCE_APIM_NAME string = apimName
-@description('MCP API name on APIM the compliance policy targets.')
-output MCP_COMPLIANCE_API_NAME string = apimMcpApi.outputs.apiName
+@description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
+output MCP_COMPLIANCE_SERVER_COUNT int = apimMcpComplianceAll.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
 output MCP_COMPLIANCE_AUDIENCE string = mcpAppRegistration.outputs.audience
 

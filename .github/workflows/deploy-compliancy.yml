@@ -1,10 +1,11 @@
 name: Deploy compliancy (MCP rate limits)
 
 # ---------------------------------------------------------------------------
-# On-demand re-apply of the MCP per-agent rate-limit policy from mcp/mcp-policy.json
+# On-demand re-apply of the MCP per-agent rate-limit policies from mcp/mcp-policy.json
 # into APIM. This is the fast path used after editing the JSON — it re-deploys ONLY the
-# apim-mcp-compliance.bicep module (the same module `azd up` runs), so the two paths can
-# never diverge. A full `azd up` is not required just to change rate limits.
+# apim-mcp-compliance-all.bicep wrapper (the same module `azd up` runs), which loops every
+# server in mcp/mcp.json and applies that server's policy, so the two paths can never
+# diverge. A full `azd up` is not required just to change rate limits.
 #
 # Why this runs on the self-hosted VNet runner (not a GitHub-hosted runner):
 #   * Applying an APIM policy is an ARM CONTROL-PLANE operation, so it does NOT need to
@@ -16,9 +17,9 @@ name: Deploy compliancy (MCP rate limits)
 #     branch=main in repo Settings so an approval gate precedes any change to APIM).
 #
 # Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables):
-#   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_API_NAME,
-#   MCP_COMPLIANCE_AUDIENCE. Run `azd env refresh` if any are missing. Each can be
-#   overridden per-run via the dispatch inputs below.
+#   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE. Run
+#   `azd env refresh` if any are missing. Each can be overridden per-run via the dispatch
+#   inputs below. Which servers get a policy is driven by mcp/mcp.json (no input needed).
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -29,10 +30,6 @@ on:
         default: ""
       apimName:
         description: "APIM instance name (defaults to repo variable MCP_COMPLIANCE_APIM_NAME)"
-        required: false
-        default: ""
-      mcpApiName:
-        description: "MCP API name on APIM (defaults to repo variable MCP_COMPLIANCE_API_NAME, else 'mcp')"
         required: false
         default: ""
       mcpAudience:
@@ -57,12 +54,11 @@ jobs:
         shell: pwsh
         run: az login --identity --output none
 
-      - name: Apply MCP rate-limit policy from mcp/mcp-policy.json
+      - name: Apply MCP rate-limit policies from mcp/mcp-policy.json
         shell: pwsh
         env:
           RESOURCE_GROUP: ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:      ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
-          MCP_API_NAME:   ${{ inputs.mcpApiName != '' && inputs.mcpApiName || vars.MCP_COMPLIANCE_API_NAME }}
           MCP_AUDIENCE:   ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
@@ -70,22 +66,20 @@ jobs:
               [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE)) {
             throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME and MCP_COMPLIANCE_AUDIENCE (from 'azd env get-values'), or pass them as dispatch inputs."
           }
-          $mcpApi = if ([string]::IsNullOrWhiteSpace($env:MCP_API_NAME)) { 'mcp' } else { $env:MCP_API_NAME }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
           }
 
-          Write-Host "Applying MCP compliance policy to APIM '$($env:APIM_NAME)' (API '$mcpApi') in RG '$($env:RESOURCE_GROUP)'."
+          Write-Host "Applying MCP compliance policies to APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)' for every server in mcp/mcp.json."
           az deployment group create `
             --resource-group $env:RESOURCE_GROUP `
             --name "mcp-compliance-$(Get-Date -Format 'yyyyMMddHHmmss')" `
-            --template-file infra/modules/model-gateway/apim-mcp-compliance.bicep `
+            --template-file infra/modules/model-gateway/apim-mcp-compliance-all.bicep `
             --parameters `
               apimName=$env:APIM_NAME `
-              mcpApiName=$mcpApi `
               mcpAudience=$env:MCP_AUDIENCE `
               tenantId=$tenantId `
             --output none
           if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
-          Write-Host "MCP rate-limit policy applied from mcp/mcp-policy.json."
+          Write-Host "MCP rate-limit policies applied from mcp/mcp-policy.json."

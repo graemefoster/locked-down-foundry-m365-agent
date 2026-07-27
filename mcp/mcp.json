@@ -1,0 +1,8 @@
+{
+  "description": "MCP servers exposed through the APIM AI gateway. This file is the single source of truth for WHICH MCP servers the gateway fronts; infra/modules/model-gateway/apim-mcp-servers.bicep compiles it into one APIM `type: mcp` API + backend per entry (applied during 'azd up'). CONVENTION-DRIVEN: an entry is just a `name`. The APIM API path and the backend path are BOTH derived from the name ('<name>' and '/<name>'), so nothing about routing is hardcoded in Bicep. The existing sample server is represented here as `mcp` so it keeps resolving to the already-deployed backend served at /mcp. The backend FQDN and the token audience are NOT stored here — they are flowed in dynamically from the deployment (see main.bicep serverFqdns + mcpAudience), because they are generated at provision time and (for audience) may differ per app registration once there is more than one server.",
+  "servers": [
+    {
+      "name": "mcp"
+    }
+  ]
+}

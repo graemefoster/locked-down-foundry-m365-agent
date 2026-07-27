@@ -1,11 +1,16 @@
 {
-  "description": "Per-agent rate limits for MCP tool calls through the APIM AI gateway. This file is the single source of truth; it is compiled into an APIM policy by infra/modules/model-gateway/apim-mcp-compliance.bicep (applied during 'azd up' and re-applied on demand by the deploy-compliancy workflow). Each agent is keyed by the AppId carried in its AgenticIdentityToken. DENY-BY-DEFAULT: any AppId not listed here is rejected with HTTP 403.",
+  "description": "Per-server, per-agent rate limits for MCP tool calls through the APIM AI gateway. Single source of truth; compiled into one APIM policy PER MCP server by infra/modules/model-gateway/apim-mcp-compliance.bicep (applied during 'azd up' and re-applied on demand by the deploy-compliancy workflow). Keyed by MCP server 'name' (matching mcp/mcp.json) so each server has its own independent allowlist. Within a server, each agent is keyed by the AppId carried in its AgenticIdentityToken (the instance_identity.client_id from the Foundry agent definition; discover with scripts/list-agent-appids.ps1) and gets its own requestsPerMinute. DENY-BY-DEFAULT and PER-SERVER: on a given server, any AppId not listed under that server (or a server with no entry here at all) is rejected with HTTP 403 -- an agent allowed on one server is NOT implicitly allowed on another.",
   "renewalPeriodSeconds": 60,
-  "agents": [
+  "servers": [
     {
-      "name": "gateway-model-agent",
-      "appId": "00000000-0000-0000-0000-000000000000",
-      "requestsPerMinute": 60
+      "name": "mcp",
+      "agents": [
+        {
+          "name": "gateway-model-agent",
+          "appId": "00000000-0000-0000-0000-000000000000",
+          "requestsPerMinute": 60
+        }
+      ]
     }
   ]
 }

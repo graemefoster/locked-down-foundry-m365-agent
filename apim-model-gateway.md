@@ -263,26 +263,53 @@ response with no auth error → confirms discovery + v1 inference through APIM e
   → expect 200 with the MCP `initialize` response. App Service HTTP logs
   (`AppServiceHTTPLogs | where CsUriStem == "/"`, `ScStatus 404`) confirm the forwarded path.
 
-## 13. MCP tool-call rate limiting per agent (compliance policy)
+## 13. MCP servers + per-agent rate limiting (config-as-data)
 
-Config-as-data governance for MCP tool traffic through the gateway. Each Foundry agent's
-MCP tool calls are **rate-limited by the agent's AppId**, driven by a single repo-tracked
-JSON file compiled into an APIM policy — no portal magic, fully IaC, reviewable in PRs.
+Config-as-data governance for MCP traffic through the gateway, driven by **two** repo-tracked
+JSON files compiled into APIM — no portal magic, fully IaC, reviewable in PRs:
 
-### Source of truth: `mcp/mcp-policy.json`
+- **`mcp/mcp.json`** — WHICH MCP servers the gateway fronts (one `type: mcp` API + backend each).
+- **`mcp/mcp-policy.json`** — WHICH agents may call each server, at what RPM (deny-by-default).
+
+`.gitignore` ignores `*.json`, so both are kept trackable via a `!mcp/*.json` negation (same
+trick as `infra/main.parameters.json`). Verify with `git check-ignore`.
+
+### Which servers: `mcp/mcp.json` (convention-driven)
+```json
+{ "servers": [ { "name": "mcp" } ] }
+```
+An entry is just a `name`. **Everything routing is derived from it** — the APIM API name +
+path are `<name>`, and the backend path defaults to `/<name>`. Nothing is hardcoded: the
+previously hardcoded `mcp` default now lives here as a server *name*, retrofitting the existing
+sample (whose deployed backend is served at `/mcp`). A server may override the backend path with
+an optional `backendPath` field.
+
+Backend **FQDNs and the token audience are NOT in this file** — they are generated at provision
+time and flowed in dynamically from `infra/main.bicep` (`mcpServerFqdns`, a `{ <name>: <fqdn> }`
+map built from the App Service outputs; and `mcpAudience`). Adding a server therefore means: add
+an entry here **and** add its FQDN to the `mcpServerFqdns` map in `main.bicep`. (Audience is
+shared across servers for now — multiple app registrations would need a per-server audience flow.)
+
+`apim-mcp-servers.bicep` loops `mcp.json` and instantiates `apim-mcp-api.bicep` per server.
+
+### Which agents: `mcp/mcp-policy.json` (server-keyed)
 ```json
 {
   "renewalPeriodSeconds": 60,
-  "agents": [
-    { "name": "gateway-model-agent", "appId": "<agent-app-id-guid>", "requestsPerMinute": 60 }
+  "servers": [
+    { "name": "mcp", "agents": [
+      { "name": "gateway-model-agent", "appId": "<agent-app-id-guid>", "requestsPerMinute": 60 }
+    ] }
   ]
 }
 ```
-`.gitignore` ignores `*.json`, so this file is kept trackable via a `!mcp/mcp-policy.json`
-negation (same trick as `infra/main.parameters.json`). Verify with `git check-ignore`.
+**Keyed by server**, so each server has its own independent allowlist. The `appId` is the AppId
+carried in the agent's AgenticIdentityToken — the `instance_identity.client_id` from the Foundry
+agent definition; discover it with **`scripts/list-agent-appids.ps1`** (read-only; run on the
+in-VNet VM for private projects).
 
-### What the policy does (`apim-mcp-compliance.bicep`)
-Attaches a `policy` (rawxml) to the **MCP API** on APIM. Inbound pipeline:
+### What the policy does (`apim-mcp-compliance.bicep`, one per server)
+Attaches a `policy` (rawxml) to **that server's MCP API**. Inbound pipeline:
 1. `validate-azure-ad-token` — validates the caller's **AgenticIdentityToken** against the
    MCP app-registration audience (`mcpAudience`, both slash/no-slash) + this tenant. This is
    an **auth-posture change**: today the MCP API is pure pass-through (App Service EasyAuth
@@ -293,35 +320,43 @@ Attaches a `policy` (rawxml) to the **MCP API** on APIM. Inbound pipeline:
    (`((Jwt)context.Variables["mcpJwt"]).Claims`) rather than re-parsing the raw `Authorization`
    header — preserving the chain of trust and avoiding any malformed-header edge case (the
    request is already 401'd before this runs). Claim: **`appid`** (v1.0 tokens) with fallback
-   to **`azp`** (v2.0 tokens; Entra emits the agent identity's app id in one of these). Confirm
-   which one your live token uses and collapse if desired.
-3. `choose` — one `<when>` per listed AppId → `rate-limit-by-key` (`calls={requestsPerMinute}`,
-   `renewal-period={renewalPeriodSeconds}`, `counter-key="mcp-rl:<appId>"`; **429** when
-   exceeded, `x-mcp-ratelimit-remaining` header surfaces the remaining count).
-   **DENY-BY-DEFAULT:** any unlisted AppId hits `<otherwise>` → **403** `agent_not_permitted`.
+   to **`azp`** (v2.0 tokens; Entra emits the agent identity's app id in one of these).
+3. `choose` — one `<when>` per AppId listed **under this server** → `rate-limit-by-key`
+   (`calls={requestsPerMinute}`, `renewal-period={renewalPeriodSeconds}`,
+   `counter-key="mcp-rl:<server>:<appId>"`; **429** when exceeded, `x-mcp-ratelimit-remaining`
+   header surfaces the remaining count).
+   **DENY-BY-DEFAULT, PER-SERVER:** any AppId not listed under this server (or a server absent
+   from `mcp-policy.json` entirely) hits `<otherwise>` → **403** `agent_not_permitted`. Being
+   allowed on one server never implies access to another.
 
-### Applied in two places (one module, one source of truth)
-- **`azd up`** — wired in `infra/main.bicep` as `apimMcpCompliance` (after `apimMcpApi`,
-  before `apimLockdown`), so the governance policy is present from the first deploy.
+### Applied in two places (one wrapper, one source of truth)
+`apim-mcp-compliance-all.bicep` loops `mcp.json` and applies the per-server policy to each. It
+needs **no backend FQDNs** (only APIM control-plane inputs), so the SAME wrapper is used by both:
+- **`azd up`** — wired in `infra/main.bicep` as `apimMcpComplianceAll` (after `apimMcpServers`,
+  before `apimLockdown`), so governance is present from the first deploy.
   **Bootstrap note:** the committed `mcp/mcp-policy.json` ships a **placeholder** entry
-  (`appId` all-zeros), so out of the box the policy is effectively **deny-all** for MCP
-  callers. This is intentional and safe — the seeded agents (`hello-world-agent`,
-  `gateway-model-agent`, `teams-agent`) do **not** call the MCP API, so nothing breaks on a
-  fresh env. Before any agent you wire up can call the MCP gateway, add its real AppId to the
-  JSON and re-apply (either re-run `azd up` or the workflow below).
+  (`appId` all-zeros), so out of the box the policy is effectively **deny-all** for MCP callers.
+  This is intentional and safe — the seeded agents do **not** call the MCP API, so nothing
+  breaks on a fresh env. Before an agent can call a server, add its real AppId under that server
+  in the JSON and re-apply (re-run `azd up` or the workflow below).
 - **On demand** — `.github/workflows/deploy-compliancy.yml` (`workflow_dispatch`, self-hosted
   VNet runner, `vnet-deploy` environment, VM MI via `az login --identity`) re-deploys ONLY
-  this module after you edit the JSON. Applying an APIM policy is an **ARM control-plane**
+  this wrapper after you edit the JSON. Applying an APIM policy is an **ARM control-plane**
   op, so it does not need to reach APIM's private data plane — just Azure RBAC.
   Needs repo variables `AZURE_RESOURCE_GROUP`, `MCP_COMPLIANCE_APIM_NAME`,
-  `MCP_COMPLIANCE_API_NAME`, `MCP_COMPLIANCE_AUDIENCE` (Bicep outputs; `azd env refresh` if
-  missing).
+  `MCP_COMPLIANCE_AUDIENCE` (Bicep outputs; `azd env refresh` if missing). Which servers get a
+  policy is driven by `mcp/mcp.json` — no per-API input.
 
 ### Gotchas / notes
+- **Foundry cannot reach MCP backends directly** — the Azure Firewall is default-deny and the
+  only agent-subnet egress rule is `agent → APIM inbound PE`. There is no `agent → App Service
+  PE` rule, so all MCP traffic is forced through APIM. New servers keep this for free: the
+  existing `AllowApimToMcpAppServicePE` rule already covers the whole App Service pe-subnet
+  (`APIM → PE`), and no `agent → PE` rule is ever added.
 - **`rate-limit-by-key` is supported on APIM v2 tiers** (token-bucket algorithm) but **NOT**
   on the Consumption tier. This gateway is Standard v2 → supported.
 - Bicep does **not** interpolate `${...}` inside triple-quoted (`'''`) strings, so the policy
-  XML is built from **single-quoted** strings (with `\n`) via `join(map(config.agents, …))`.
+  XML is built from **single-quoted** strings (with `\n`) via `join(map(server.agents, …))`.
 - APIM **policy expressions are C#**, so string literals are double-quoted. They live inside
   double-quoted XML attributes, so every C# string quote is emitted as the entity **`&quot;`**
   (a plain `"` would close the attribute early).
