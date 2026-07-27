@@ -24,13 +24,6 @@ param foundrySpokeVnetName string
 @description('Name of the PE subnet in Foundry spoke')
 param foundryPeSubnetName string
 
-// App Service Spoke VNet (for App Service PEs)
-@description('Name of the App Service spoke VNet')
-param appServiceSpokeVnetName string
-@description('Name of the PE subnet in App Service spoke')
-param appServicePeSubnetName string
-
-param appServiceWebAppNames string[]
 param acrName string
 param keyVaultName string
 
@@ -41,7 +34,6 @@ param cognitiveServicesDnsZoneId string
 param aiSearchDnsZoneId string
 param storageDnsZoneId string
 param cosmosDBDnsZoneId string
-param appServiceDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
@@ -83,15 +75,6 @@ resource foundrySpokeVnet 'Microsoft.Network/virtualNetworks@2024-05-01' existin
 resource foundryPeSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
   parent: foundrySpokeVnet
   name: foundryPeSubnetName
-}
-
-// Reference App Service Spoke VNet and PE subnet
-resource appServiceSpokeVnet 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
-  name: appServiceSpokeVnetName
-}
-resource appServicePeSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' existing = {
-  parent: appServiceSpokeVnet
-  name: appServicePeSubnetName
 }
 
 /* -------------------------------------------- Foundry PEs (in Foundry Spoke) -------------------------------------------- */
@@ -200,31 +183,6 @@ resource acrPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
 
 /* -------------------------------------------- App Service PEs (in App Service Spoke) -------------------------------------------- */
 
-resource appService 'Microsoft.Web/sites@2025-03-01' existing = [
-  for appServiceWebAppName in appServiceWebAppNames: {
-    name: appServiceWebAppName
-  }
-]
-
-resource appServicePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = [
-  for (appServiceWebAppName, i) in appServiceWebAppNames: {
-    name: '${appServiceWebAppName}-private-endpoint'
-    location: resourceGroup().location
-    properties: {
-      subnet: { id: appServicePeSubnet.id }
-      privateLinkServiceConnections: [
-        {
-          name: '${appServiceWebAppName}-private-link-service-connection'
-          properties: {
-            privateLinkServiceId: appService[i].id
-            groupIds: ['sites']
-          }
-        }
-      ]
-    }
-  }
-]
-
 // ---- DNS Zone Groups ----
 resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: aiAccountPrivateEndpoint
@@ -274,18 +232,6 @@ resource keyVaultDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
     ]
   }
 }
-
-resource appServiceDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = [
-  for (appServiceName, i) in appServiceWebAppNames: {
-    name: '${appServiceName}-dns-group'
-    parent: appServicePrivateEndpoint[i]
-    properties: {
-      privateDnsZoneConfigs: [
-        { name: '${appServiceName}-dns-config', properties: { privateDnsZoneId: appServiceDnsZoneId } }
-      ]
-    }
-  }
-]
 
 resource acrDnsZoneGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: acrPrivateEndpoint

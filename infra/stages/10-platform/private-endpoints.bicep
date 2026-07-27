@@ -1,13 +1,12 @@
 /*
 Stage 10 slice — Private endpoints & DNS.
-Foundry account, AI Search, Storage, CosmosDB, ACR, Key Vault and the App Service
-web app(s) all get private endpoints; the privatelink DNS zones are linked to the
-hub VNet for the DNS resolver. When Teams publish is on the YARP proxy is public
-(no PE) — only the MCP web app gets one.
+Foundry account, AI Search, Storage, CosmosDB, ACR, Key Vault and the MCP App Service
+web app all get private endpoints; the privatelink DNS zones are linked to the hub VNet
+for the DNS resolver. The YARP proxy is the public ingress, so it never gets a private
+endpoint — only the MCP web app does.
 */
 
 param uniqueSuffix string
-param enableTeamsPublish bool
 
 // Foundry account + dependent-resource names (from earlier slices).
 param aiAccountName string
@@ -17,7 +16,6 @@ param cosmosDBName string
 param acrName string
 param keyVaultName string
 param mcpWebAppName string
-param yarpWebAppName string
 
 // From stage 00 networking.
 param foundrySpokeVnetName string
@@ -61,10 +59,6 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
 
-    // App Service Spoke (App Service PEs go here)
-    appServiceSpokeVnetName: appServiceSpokeVnetName
-    appServicePeSubnetName: appServicePeSubnetName
-
     // Private DNS zone ids (created early in stage 00)
     aiServicesDnsZoneId: aiServicesDnsZoneId
     openAiDnsZoneId: openAiDnsZoneId
@@ -72,16 +66,9 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     aiSearchDnsZoneId: aiSearchDnsZoneId
     storageDnsZoneId: storageDnsZoneId
     cosmosDBDnsZoneId: cosmosDBDnsZoneId
-    appServiceDnsZoneId: appServiceDnsZoneId
     acrDnsZoneId: acrDnsZoneId
     keyVaultDnsZoneId: keyVaultDnsZoneId
 
-    // When Teams publish is enabled the YARP proxy is public (its own FQDN + managed cert is
-    // the Bot Channel Adapter entry point), so it gets NO private endpoint — only the MCP web
-    // app does. Otherwise both get private endpoints (legacy private-only posture).
-    appServiceWebAppNames: enableTeamsPublish
-      ? [mcpWebAppName]
-      : [yarpWebAppName, mcpWebAppName]
     acrName: acrName
     keyVaultName: keyVaultName
   }
@@ -90,4 +77,16 @@ module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bic
     storage
     cosmosDB
   ]
+}
+
+// The YARP proxy is the public ingress (its own FQDN + managed cert is the Bot Channel
+// Adapter entry point), so it gets NO private endpoint — only the MCP web app does.
+module appServicePrivateEndpoint '../../modules/network/app-service-private-endpoint.bicep' = {
+  name: '${uniqueSuffix}-app-service-private-endpoint'
+  params: {
+    appServiceSpokeVnetName: appServiceSpokeVnetName
+    appServicePeSubnetName: appServicePeSubnetName
+    appServiceWebAppNames: [mcpWebAppName]
+    appServiceDnsZoneId: appServiceDnsZoneId
+  }
 }

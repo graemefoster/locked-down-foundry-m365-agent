@@ -133,7 +133,6 @@ module privateEndpoints 'private-endpoints.bicep' = {
   name: 'stage10-private-endpoints-${uniqueSuffix}'
   params: {
     uniqueSuffix: uniqueSuffix
-    enableTeamsPublish: enableTeamsPublish
     aiAccountName: foundryAccount.outputs.accountName
     aiSearchName: dataResources.outputs.aiSearchName
     storageName: dataResources.outputs.azureStorageName
@@ -141,7 +140,6 @@ module privateEndpoints 'private-endpoints.bicep' = {
     acrName: dataResources.outputs.acrName
     keyVaultName: dataResources.outputs.keyVaultName
     mcpWebAppName: dataResources.outputs.mcpWebAppName
-    yarpWebAppName: dataResources.outputs.yarpWebAppName
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
     appServiceSpokeVnetName: appServiceSpokeVnetName
