@@ -249,3 +249,15 @@ response with no auth error → confirms discovery + v1 inference through APIM e
   'tunnel_id'`. So the URL must be present in the *deployed* definition (connection-only is not
   enough); we inject it rather than hardcode it. The old bug was a hardcoded URL that was both
   stale (wrong env) and pointed straight at the App Service instead of the APIM gateway.
+- **APIM `type:mcp` passthrough forwards to the backend `url` verbatim — put the MCP path there.**
+  The MCP web app (Express) serves the streamable-HTTP MCP endpoint at **`/mcp`**, not root. APIM's
+  MCP proxy does **not** append `mcpProperties.endpoints.mcp.uriTemplate` to the backend when
+  forwarding, so a bare-host backend `url` makes APIM hit the container root → the server returns
+  **404 `Cannot POST /`** (seen client-side as `The remote MCP server ... returned HTTP 404 while
+  enumerating tools`). Fix in `apim-mcp-api.bicep`: set the backend `url` to include the path
+  (`https://<mcp-app>/mcp`, via `mcpBackendPath`) and keep `uriTemplate: '/'`. Verify from the
+  in-VNet VM (APIM is private) with a token minted for the MCP app's audience:
+  `az account get-access-token --resource <mcpAppClientId>` then
+  `curl -H "Authorization: Bearer $TOK" -X POST https://<apim>.azure-api.net/mcp -d '<initialize>'`
+  → expect 200 with the MCP `initialize` response. App Service HTTP logs
+  (`AppServiceHTTPLogs | where CsUriStem == "/"`, `ScStatus 404`) confirm the forwarded path.
