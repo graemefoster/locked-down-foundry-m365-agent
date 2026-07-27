@@ -1,16 +1,25 @@
 <#
-  List Foundry agent identity AppIds (to populate mcp/mcp-policy.json)
-  -------------------------------------------------------------------
-  READ-ONLY discovery helper. It does NOT change any Azure resource and it does NOT edit
+  List / resolve Foundry agent identity AppIds (for mcp/mcp-policy.json governance)
+  ---------------------------------------------------------------------------------
+  READ-ONLY. It does NOT change any Azure resource and it does NOT edit the source
   mcp/mcp-policy.json — the allowlist is curated by a human (deny-by-default governance).
-  This script only prints, for each agent, the AppId you paste into the policy file.
 
-  The value printed is `instance_identity.client_id` from the agent's control-plane
-  definition. Because the MCP server connection authenticates with the agent's identity,
-  THAT client id is the `appid`/`azp` claim the AgenticIdentityToken carries when the agent
-  calls the MCP gateway — i.e. exactly what apim-mcp-compliance.bicep matches on. (The
-  sibling `blueprint.client_id` governs a whole Agent Identity Blueprint family instead of a
-  single agent; print it too with -IncludeBlueprint if you want to allow at that grain.)
+  Two modes:
+    1. DISCOVERY (default): prints, for each agent, the AppId (instance_identity.client_id).
+       Handy for eyeballing which identities exist.
+    2. RESOLVE (-ResolvePolicyPath <name-only policy>): reads the name-only mcp-policy.json,
+       joins each agent NAME to its live AppId, DROPS any name with no matching live agent,
+       and emits the RESOLVED (AppId-enriched) policy JSON. This is what the deploy-compliancy
+       workflow runs on the in-VNet runner and feeds to apim-mcp-compliance-all.bicep as the
+       mcpPolicy parameter. Resolution happens here (runtime) because Bicep cannot call Foundry,
+       and agent identities do not exist until the agents are seeded post-provision.
+
+  The value used is `instance_identity.client_id` from the agent's control-plane definition.
+  Because the MCP server connection authenticates with the agent's identity, THAT client id is
+  the `appid`/`azp` claim the AgenticIdentityToken carries when the agent calls the MCP gateway
+  — i.e. exactly what apim-mcp-compliance.bicep matches on. (The sibling `blueprint.client_id`
+  governs a whole Agent Identity Blueprint family instead of a single agent; print it too with
+  -IncludeBlueprint if you want to allow at that grain.)
 
   Where to run it:
     * A REACHABLE project        -> run locally; token comes from `az account get-access-token`.
@@ -19,9 +28,11 @@
                                     VM managed-identity token is fetched from IMDS automatically.
 
   Usage:
+    # Discovery
     ./list-agent-appids.ps1 -FoundryProjectEndpoint https://<acct>.services.ai.azure.com/api/projects/<proj>
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -AgentName 'hello-world-agent,teams-agent'
-    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -RequestsPerMinute 120 -IncludeBlueprint true
+    # Resolve name-only policy -> resolved policy file (deploy-compliancy workflow):
+    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
 
   All parameters are [string] (comma-separated for -AgentName) so the script can be shipped to
   the private VM by hooks/vm-run-command.ps1, which invokes `pwsh -File` with string args only.
@@ -30,12 +41,17 @@
 param(
   [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
   # Optional filter: comma-separated agent names (e.g. 'hello-world-agent,teams-agent').
-  # Default: all agents in the project.
+  # Default: all agents in the project. Ignored in resolve mode (all agents are needed).
   [Parameter(Mandatory = $false)] [string]$AgentName = '',
-  # Default RPM written into each emitted policy entry (tune per agent afterwards).
+  # Default RPM written into each emitted policy entry (discovery mode only; tune per agent).
   [Parameter(Mandatory = $false)] [string]$RequestsPerMinute = '60',
   # 'true' also prints blueprint.client_id (governs a whole Agent Identity Blueprint family).
   [Parameter(Mandatory = $false)] [string]$IncludeBlueprint = 'false',
+  # RESOLVE MODE: path to the name-only mcp-policy.json to resolve into an AppId-enriched policy.
+  [Parameter(Mandatory = $false)] [string]$ResolvePolicyPath = '',
+  # In resolve mode, write the resolved policy JSON here (recommended, keeps stdout clean).
+  # If empty in resolve mode, the resolved JSON is written to stdout.
+  [Parameter(Mandatory = $false)] [string]$OutFile = '',
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
 $ErrorActionPreference = 'Stop'
@@ -43,7 +59,9 @@ $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
 
 # All params are [string] so this script is invokable via hooks/vm-run-command.ps1 (which runs
 # it on the private VM through `pwsh -File`, passing only string values). Normalise here:
-$agentFilter      = @($AgentName -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$resolveMode      = -not [string]::IsNullOrWhiteSpace($ResolvePolicyPath)
+# Resolve mode needs EVERY live agent to join against, so the name filter is not applied there.
+$agentFilter      = $resolveMode ? @() : @($AgentName -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $rpm              = [int]$RequestsPerMinute
 $showBlueprint    = $IncludeBlueprint -eq 'true'
 
@@ -98,6 +116,51 @@ $rows = foreach ($a in $agents) {
     appId        = $detail.instance_identity.client_id
     blueprintId  = $detail.blueprint.client_id
   }
+}
+
+# --- RESOLVE MODE: name-only policy -> AppId-enriched policy (deploy-compliancy workflow) ---
+# Join each agent NAME in the source policy to its live AppId; DROP names with no live agent
+# (deny-by-default: an agent that doesn't exist cannot be granted). Emit the resolved policy
+# for apim-mcp-compliance-all.bicep's mcpPolicy parameter. This never mutates the source file.
+if ($resolveMode) {
+  if (-not (Test-Path -Path $ResolvePolicyPath)) {
+    throw "Resolve policy file not found: '$ResolvePolicyPath'."
+  }
+  $srcPolicy = Get-Content -Raw -Path $ResolvePolicyPath | ConvertFrom-Json
+
+  $appIdByName = @{}
+  foreach ($r in $rows) {
+    if (-not [string]::IsNullOrWhiteSpace($r.appId)) { $appIdByName[$r.name] = $r.appId }
+  }
+
+  $resolvedServers = foreach ($srv in @($srcPolicy.servers)) {
+    $resolvedAgents = foreach ($ag in @($srv.agents)) {
+      $appId = $appIdByName[$ag.name]
+      if ([string]::IsNullOrWhiteSpace($appId)) {
+        Write-Host "[resolve] Dropping agent '$($ag.name)' on server '$($srv.name)': no live agent identity found (denied)."
+        continue
+      }
+      [ordered]@{ name = $ag.name; appId = $appId; requestsPerMinute = [int]$ag.requestsPerMinute }
+    }
+    [ordered]@{ name = $srv.name; agents = @($resolvedAgents) }
+  }
+
+  $resolved = [ordered]@{
+    renewalPeriodSeconds = [int]($srcPolicy.renewalPeriodSeconds ?? 60)
+    servers              = @($resolvedServers)
+  }
+  $json = $resolved | ConvertTo-Json -Depth 8
+
+  $grantedCount = @($resolvedServers | ForEach-Object { $_.agents } | Where-Object { $_ }).Count
+  $serverCount  = @($resolvedServers).Count
+  if (-not [string]::IsNullOrWhiteSpace($OutFile)) {
+    Set-Content -Path $OutFile -Value $json -Encoding utf8
+    Write-Host "[resolve] Wrote resolved policy to '$OutFile' ($grantedCount agent grant(s) across $serverCount server(s))."
+  }
+  else {
+    Write-Output $json
+  }
+  return
 }
 
 # 3a) Human-readable table.

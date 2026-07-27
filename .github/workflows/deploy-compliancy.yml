@@ -7,19 +7,29 @@ name: Deploy compliancy (MCP rate limits)
 # server in mcp/mcp.json and applies that server's policy, so the two paths can never
 # diverge. A full `azd up` is not required just to change rate limits.
 #
+# NAME-ONLY policy + deploy-time resolution:
+#   mcp/mcp-policy.json lists agents by NAME only (no AppId GUIDs committed). This workflow
+#   runs scripts/list-agent-appids.ps1 -ResolvePolicyPath ON THIS in-VNet runner to join each
+#   name to its LIVE agent identity (instance_identity.client_id) — dropping any name with no
+#   matching live agent — then passes the resolved (AppId-enriched) policy to the Bicep wrapper
+#   as the `mcpPolicy` parameter. `azd up` cannot do this (agents are seeded AFTER provision),
+#   so it applies deny-all; this workflow is what actually grants agents their rate limits.
+#
 # Why this runs on the self-hosted VNet runner (not a GitHub-hosted runner):
-#   * Applying an APIM policy is an ARM CONTROL-PLANE operation, so it does NOT need to
-#     reach APIM's private data-plane endpoint. It DOES need Azure RBAC, which the VM
-#     managed identity already has (Contributor on the resource group). Reusing the VM MI
+#   * Reaching the PRIVATE Foundry endpoint to enumerate agents requires being inside the VNet
+#     (and the VM managed-identity IMDS token). Applying the APIM policy is an ARM CONTROL-PLANE
+#     operation, so it does NOT need APIM's private data-plane; it DOES need Azure RBAC, which
+#     the VM managed identity already has (Contributor on the resource group). Reusing the VM MI
 #     avoids provisioning any new OIDC federated credential.
 #   * Same lockdown as deploy-vnet.yml: workflow_dispatch only (forks cannot queue),
 #     repository guard, and the `vnet-deploy` environment (add a REQUIRED REVIEWER +
 #     branch=main in repo Settings so an approval gate precedes any change to APIM).
 #
 # Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables):
-#   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE. Run
-#   `azd env refresh` if any are missing. Each can be overridden per-run via the dispatch
-#   inputs below. Which servers get a policy is driven by mcp/mcp.json (no input needed).
+#   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE,
+#   AZURE_AI_PROJECT_ENDPOINT. Run `azd env refresh` if any are missing. Each can be
+#   overridden per-run via the dispatch inputs below. Which servers get a policy is driven
+#   by mcp/mcp.json (no input needed).
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -34,6 +44,10 @@ on:
         default: ""
       mcpAudience:
         description: "MCP app registration audience (defaults to repo variable MCP_COMPLIANCE_AUDIENCE)"
+        required: false
+        default: ""
+      projectEndpoint:
+        description: "Foundry project endpoint for name->AppId resolution (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
         required: false
         default: ""
 
@@ -54,22 +68,36 @@ jobs:
         shell: pwsh
         run: az login --identity --output none
 
-      - name: Apply MCP rate-limit policies from mcp/mcp-policy.json
+      - name: Resolve agent names to AppIds and apply MCP rate-limit policies
         shell: pwsh
         env:
-          RESOURCE_GROUP: ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
-          APIM_NAME:      ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
-          MCP_AUDIENCE:   ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
+          RESOURCE_GROUP:   ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:        ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
+          MCP_AUDIENCE:     ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
+          PROJECT_ENDPOINT: ${{ inputs.projectEndpoint != '' && inputs.projectEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME and MCP_COMPLIANCE_AUDIENCE (from 'azd env get-values'), or pass them as dispatch inputs."
+              [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE) -or
+              [string]::IsNullOrWhiteSpace($env:PROJECT_ENDPOINT)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (from 'azd env get-values'), or pass them as dispatch inputs."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
           }
+
+          # Resolve the name-only mcp/mcp-policy.json against LIVE agents (private endpoint,
+          # VM managed-identity IMDS token) into an AppId-enriched policy. Names with no live
+          # agent are dropped (deny-by-default). This runs here because Bicep cannot call Foundry.
+          $resolvedPolicy = Join-Path $env:RUNNER_TEMP 'resolved-mcp-policy.json'
+          Write-Host "Resolving agent names -> AppIds from '$($env:PROJECT_ENDPOINT)'."
+          pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
+            -FoundryProjectEndpoint $env:PROJECT_ENDPOINT `
+            -ResolvePolicyPath mcp/mcp-policy.json `
+            -OutFile $resolvedPolicy
+          if ($LASTEXITCODE -ne 0) { throw "Agent name resolution failed." }
+          if (-not (Test-Path $resolvedPolicy)) { throw "Resolver did not produce '$resolvedPolicy'." }
 
           Write-Host "Applying MCP compliance policies to APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)' for every server in mcp/mcp.json."
           az deployment group create `
@@ -80,6 +108,7 @@ jobs:
               apimName=$env:APIM_NAME `
               mcpAudience=$env:MCP_AUDIENCE `
               tenantId=$tenantId `
+              "mcpPolicy=@$resolvedPolicy" `
             --output none
           if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
-          Write-Host "MCP rate-limit policies applied from mcp/mcp-policy.json."
+          Write-Host "MCP rate-limit policies applied (resolved from mcp/mcp-policy.json)."

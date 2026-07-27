@@ -1,13 +1,19 @@
 /*
   Model-Gateway: MCP per-agent rate-limit compliance policy (one server)
   ----------------------------------------------------------------------
-  Reflects the mcp/mcp-policy.json block for ONE MCP server into an APIM policy on
+  Reflects the RESOLVED mcpPolicy block for ONE MCP server into an APIM policy on
   that server's API, so each Foundry agent's MCP tool calls are rate-limited by the
   agent's AppId. This is the "MCP governance" layer of the AI gateway, authored
   explicitly as IaC (no portal magic). apim-mcp-compliance-all.bicep instantiates
-  this module once per server in mcp/mcp.json.
+  this module once per server in mcp/mcp.json, threading in the resolved policy.
 
-  Server-keyed + per-server: mcp-policy.json.servers[] is looked up by `serverName`;
+  The policy is name-only in the repo (mcp/mcp-policy.json). Agent names are resolved
+  to AppIds at DEPLOY time (deploy-compliancy workflow -> scripts/list-agent-appids.ps1)
+  because agent identities don't exist until the agents are seeded post-provision. The
+  resolved (AppId-enriched) policy is passed in via the mcpPolicy parameter; 'azd provision'
+  passes a deny-all default because it runs before any agent exists.
+
+  Server-keyed + per-server: mcpPolicy.servers[] is looked up by `serverName`;
   only that server's agents[] become allow branches. A server with no block here (or
   an agent not listed under it) is denied on this API - allowing on one server never
   implies allowing on another.
@@ -26,10 +32,11 @@
   rate-limit-by-key is supported on APIM v2 tiers (token-bucket algorithm); it is NOT
   available on the Consumption tier. This gateway is Standard v2, so it is supported.
 
-  Config-as-data: the policy XML is generated from mcp-policy.json via join(map(...)).
-  Normal single-quoted Bicep strings interpolate ${...}, so (unlike apim-api-policy.bicep,
-  which uses triple-quoted strings + @@TOKEN@@ replace) the per-agent branches are built
-  by direct interpolation of the JSON values (guids + ints, no XML-escaping hazard).
+  Config-as-data: the policy XML is generated from the resolved mcpPolicy param via
+  join(map(...)). Normal single-quoted Bicep strings interpolate ${...}, so (unlike
+  apim-api-policy.bicep, which uses triple-quoted strings + @@TOKEN@@ replace) the per-agent
+  branches are built by direct interpolation of the resolved values (guids + ints, no
+  XML-escaping hazard).
 */
 
 @description('Name of the existing APIM instance hosting the MCP API.')
@@ -44,8 +51,8 @@ param mcpAudience string
 @description('Entra tenant ID the caller token must be issued by.')
 param tenantId string = subscription().tenantId
 
-@description('Path (relative to this module) to the MCP rate-limit config. Override to point at an alternate config file.')
-param mcpPolicyConfig object = loadJsonContent('../../../mcp/mcp-policy.json')
+@description('RESOLVED MCP rate-limit policy (AppId-enriched). Threaded in from apim-mcp-compliance-all.bicep, which either builds a deny-all default (azd provision, before agents are seeded) or receives the deploy-time-resolved policy from the deploy-compliancy workflow. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }. Defaults to {} (deny-all) so a direct invocation without a policy is safe.')
+param mcpPolicy object = {}
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
@@ -55,12 +62,12 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   }
 }
 
-var renewalPeriod = string(mcpPolicyConfig.?renewalPeriodSeconds ?? 60)
+var renewalPeriod = string(mcpPolicy.?renewalPeriodSeconds ?? 60)
 
-// Look up THIS server's allowlist. A server absent from mcp-policy.json (or present with no
+// Look up THIS server's allowlist. A server absent from mcpPolicy (or present with no
 // agents) yields an empty list -> the <choose> has no <when> branches -> everything hits the
 // <otherwise> 403 (deny-by-default), which is the correct posture for an ungoverned server.
-var serverMatches = filter(mcpPolicyConfig.?servers ?? [], s => s.name == serverName)
+var serverMatches = filter(mcpPolicy.?servers ?? [], s => s.name == serverName)
 var agentsForServer = empty(serverMatches) ? [] : (first(serverMatches).?agents ?? [])
 
 // Per-agent <when> branches: match the validated caller AppId variable and apply that
