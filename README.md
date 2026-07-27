@@ -88,6 +88,7 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 | [docs/teams-m365.md](./docs/teams-m365.md) | Publish an agent to Teams / M365 Copilot (inbound path, hooks, JWT). |
 | [docs/model-gateway.md](./docs/model-gateway.md) · [apim-model-gateway.md](./apim-model-gateway.md) | Optional APIM model gateway overview + full walkthrough. |
 | [docs/github-runner.md](./docs/github-runner.md) | Optional in-VNet self-hosted GitHub Actions runner: security model, auth, setup. |
+| [BACKLOG.md](./BACKLOG.md) | Project backlog: aim, goals, and epics for evolving this reference implementation. |
 
 ## References
 

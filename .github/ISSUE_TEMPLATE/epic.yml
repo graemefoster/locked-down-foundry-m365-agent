@@ -1,0 +1,41 @@
+name: Epic
+description: A large body of work in the project backlog, made up of several backlog items.
+title: "[Epic] <short title>"
+labels: ["epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a backlog **epic**. See [BACKLOG.md](../../BACKLOG.md) for the full list.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal / rationale
+      description: What outcome does this epic deliver, and why does it matter?
+      placeholder: e.g. Automate deployment of hosted (containerized) Foundry agents, completing goal 1.
+    validations:
+      required: true
+  - type: textarea
+    id: items
+    attributes:
+      label: Backlog items
+      description: Checklist of the concrete items that make up this epic.
+      value: |
+        - [ ] Item 1
+        - [ ] Item 2
+    validations:
+      required: true
+  - type: textarea
+    id: current-state
+    attributes:
+      label: What already exists
+      description: Note anything in the repo today that this epic builds on (avoid re-doing solved work).
+    validations:
+      required: false
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      description: How do we know this epic is complete?
+    validations:
+      required: false

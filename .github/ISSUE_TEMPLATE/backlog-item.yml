@@ -1,0 +1,47 @@
+name: Backlog item
+description: A single, actionable piece of work from the project backlog.
+title: "<short, action-oriented title>"
+labels: ["backlog"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for a single **backlog item**. See [BACKLOG.md](../../BACKLOG.md) for context.
+  - type: dropdown
+    id: epic
+    attributes:
+      label: Related epic
+      description: Which backlog epic does this item belong to?
+      options:
+        - "Epic 1 — Prompt & hosted agent deployment"
+        - "Epic 2 — Evaluations as a pipeline gate"
+        - "Epic 3 — Continuous evaluations in Foundry"
+        - "Epic 4 — Second Foundry project + promotion"
+        - "Epic 5 — Governance: RPM, token & cost controls"
+        - "Epic 6 — Sample .NET MVC + React front end"
+        - "Epic 7 — Cross-cutting: DX, tests & docs"
+        - "Other / not yet mapped"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What needs to be done, and why?
+    validations:
+      required: true
+  - type: dropdown
+    id: size
+    attributes:
+      label: Rough size
+      options: ["S", "M", "L"]
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      value: |
+        - [ ] ...
+    validations:
+      required: false
