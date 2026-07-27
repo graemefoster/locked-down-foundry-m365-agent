@@ -35,8 +35,9 @@ module mcpApis 'apim-mcp-api.bicep' = [for server in mcpConfig.servers: {
   }
 }]
 
-@description('The MCP servers exposed on APIM, as [{ name, url }] — url is the gateway URL Foundry connects to.')
+@description('The MCP servers exposed on APIM, as [{ name, connectionName, url }] — url is the gateway URL Foundry connects to; connectionName is the Foundry project connection name (defaults to the server name).')
 output servers array = [for (server, i) in mcpConfig.servers: {
   name: server.name
+  connectionName: server.?connectionName ?? server.name
   url: mcpApis[i].outputs.mcpGatewayUrl
 }]

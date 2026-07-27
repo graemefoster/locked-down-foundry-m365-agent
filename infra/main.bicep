@@ -602,11 +602,11 @@ module aiProject 'modules/foundry/ai-project-identity.bicep' = {
 
     logAnalyticsWorkspaceId: lanalytics.id
 
-    mcpServerName: 'testweathermcpserver'
-    mcpUrl: '${mcpPrimaryGatewayUrl}/'
-    // Mint the agent's tool token for our own app registration (an audience we control), so
-    // App Service built-in auth on the MCP web app accepts it.
-    mcpAudience: mcpAppRegistration.outputs.audience
+    // One project connection per governed MCP server, built from the APIM server outputs below.
+    // The agent's tool token is minted for our own app registration audience (an audience we
+    // control), so App Service built-in auth on the MCP web app accepts it. Shared audience for
+    // now; per-server audiences would flow through this same array.
+    mcpConnections: mcpConnections
 
   }
   dependsOn: [
@@ -927,12 +927,20 @@ module apimMcpServers 'modules/model-gateway/apim-mcp-servers.bicep' = {
     apimProviderRoleAssignment
   ]
 }
-// Gateway URL of the primary MCP server used by the Foundry project connection. By convention
-// this is the 'mcp' sample server; if mcp/mcp.json ever drops or renames it, fall back to the
-// first configured server so this never evaluates first([]).url (which fails with an opaque
-// null-reference error rather than pointing at the real cause — a missing 'mcp' entry).
-var mcpPrimaryServerName = contains(map(apimMcpServers.outputs.servers, s => s.name), 'mcp') ? 'mcp' : first(apimMcpServers.outputs.servers).name
-var mcpPrimaryGatewayUrl = first(filter(apimMcpServers.outputs.servers, s => s.name == mcpPrimaryServerName)).url
+// One Foundry project connection per governed MCP server: connection name from mcp/mcp.json
+// (via the module output), target = that server's APIM gateway URL, audience = the shared MCP
+// app registration audience (per-server audiences would slot in here later). Building this from
+// the module output (a single map, no nested lambda) means there is no "primary server" to
+// special-case — every server is wired symmetrically, and aiProject consumes the whole array.
+var mcpConnections = map(apimMcpServers.outputs.servers, srv => {
+  name: srv.connectionName
+  url: '${srv.url}/'
+  audience: mcpAppRegistration.outputs.audience
+})
+// URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
+// workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
+// server, and the sample 'mcp' server is the first entry by convention.
+var mcpSampleGatewayUrl = '${first(apimMcpServers.outputs.servers).url}/'
 
 // MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
 // each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
@@ -1182,7 +1190,7 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
 
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
-output MCP_GATEWAY_URL string = '${mcpPrimaryGatewayUrl}/'
+output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
 
 // --- MCP compliance (deploy-compliancy workflow) ---------------------------------
 @description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')

@@ -16,11 +16,8 @@ param azureStorageName string
 param azureStorageSubscriptionId string
 param azureStorageResourceGroupName string
 
-param mcpServerName string
-param mcpUrl string
-
-@description('Audience the AgenticIdentityToken is minted for — the guarding Entra app registration Application ID URI (api://<appId>). Must be an audience you control, not a Microsoft one.')
-param mcpAudience string
+@description('MCP project connections to create — one per governed MCP server (from mcp/mcp.json). Each item is { name, url, audience }: name = the Foundry connection name; url = the APIM gateway URL the agent calls (trailing slash included); audience = the AgenticIdentityToken audience (an Entra app registration you control, not a Microsoft one). The array is authored in main.bicep from the APIM server outputs, so adding a server here needs no module change.')
+param mcpConnections array
 
 param logAnalyticsWorkspaceId string
 
@@ -104,19 +101,23 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 
   //Not used by a capability host so does not need the @onlyIfNotExists() decorator
   //Sample MCP server
-  resource project_connection_mcp_server 'connections@2026-03-01' = {
-    name: mcpServerName
+  // One project connection per governed MCP server (from mcp/mcp.json, via main.bicep). Each
+  // agent reaches its MCP tools through the APIM gateway using this connection's AgenticIdentity
+  // token, minted for that server's audience. Looping here (rather than a single scalar connection)
+  // means there is no "primary" server to special-case — every server is wired symmetrically.
+  resource project_connection_mcp_server 'connections@2026-03-01' = [for c in mcpConnections: {
+    name: c.name
     properties: {
       category: 'RemoteTool'
-      target: mcpUrl
+      target: c.url
       authType: 'AgenticIdentityToken'
-      audience: mcpAudience
+      audience: c.audience
       group: 'GenericProtocol'
       metadata: {
         type: 'custom_MCP'
       }
     }
-  }
+  }]
 }
 
 resource foundryDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
