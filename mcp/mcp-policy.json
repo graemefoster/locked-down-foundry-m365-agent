@@ -1,0 +1,11 @@
+{
+  "description": "Per-agent rate limits for MCP tool calls through the APIM AI gateway. This file is the single source of truth; it is compiled into an APIM policy by infra/modules/model-gateway/apim-mcp-compliance.bicep (applied during 'azd up' and re-applied on demand by the deploy-compliancy workflow). Each agent is keyed by the AppId carried in its AgenticIdentityToken. DENY-BY-DEFAULT: any AppId not listed here is rejected with HTTP 403.",
+  "renewalPeriodSeconds": 60,
+  "agents": [
+    {
+      "name": "gateway-model-agent",
+      "appId": "00000000-0000-0000-0000-000000000000",
+      "requestsPerMinute": 60
+    }
+  ]
+}

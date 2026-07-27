@@ -6,6 +6,8 @@
 !infra/bicepconfig.json
 # ...and the agent evaluation datasets (input data for the nightly eval workflow).
 !agents/**/eval-data.json
+# ...and the MCP per-agent rate-limit config (source of truth compiled into APIM policy).
+!mcp/mcp-policy.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.

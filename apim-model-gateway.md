@@ -111,6 +111,7 @@ connection — the portal emits the flat `authHeaderName`/`authHeaderFormat` met
 - `apim-connection.bicep` — primary project → APIM `ApiManagement` connection (see §4/§5).
 - `model-gateway-private-endpoints.bicep` — APIM PE (`privatelink.azure-api.net`) + provider PE + DNS links.
 - `apim-provider-role-assignment.bicep` — APIM MI → `Cognitive Services OpenAI User` on provider.
+- `apim-mcp-compliance.bicep` — MCP per-agent rate-limit policy (see §13).
 
 Modified core:
 - `infra/main.bicep` — always-deployed model-gateway modules; firewall rule; hub↔spoke
@@ -261,3 +262,68 @@ response with no auth error → confirms discovery + v1 inference through APIM e
   `curl -H "Authorization: Bearer $TOK" -X POST https://<apim>.azure-api.net/mcp -d '<initialize>'`
   → expect 200 with the MCP `initialize` response. App Service HTTP logs
   (`AppServiceHTTPLogs | where CsUriStem == "/"`, `ScStatus 404`) confirm the forwarded path.
+
+## 13. MCP tool-call rate limiting per agent (compliance policy)
+
+Config-as-data governance for MCP tool traffic through the gateway. Each Foundry agent's
+MCP tool calls are **rate-limited by the agent's AppId**, driven by a single repo-tracked
+JSON file compiled into an APIM policy — no portal magic, fully IaC, reviewable in PRs.
+
+### Source of truth: `mcp/mcp-policy.json`
+```json
+{
+  "renewalPeriodSeconds": 60,
+  "agents": [
+    { "name": "gateway-model-agent", "appId": "<agent-app-id-guid>", "requestsPerMinute": 60 }
+  ]
+}
+```
+`.gitignore` ignores `*.json`, so this file is kept trackable via a `!mcp/mcp-policy.json`
+negation (same trick as `infra/main.parameters.json`). Verify with `git check-ignore`.
+
+### What the policy does (`apim-mcp-compliance.bicep`)
+Attaches a `policy` (rawxml) to the **MCP API** on APIM. Inbound pipeline:
+1. `validate-azure-ad-token` — validates the caller's **AgenticIdentityToken** against the
+   MCP app-registration audience (`mcpAudience`, both slash/no-slash) + this tenant. This is
+   an **auth-posture change**: today the MCP API is pure pass-through (App Service EasyAuth
+   validates). The policy adds edge validation (defense-in-depth) and still forwards the
+   token **unchanged** to the backend.
+2. `set-variable callerAppId` — reads the AppId from the **already-validated** JWT. Step 1
+   sets `output-token-variable-name="mcpJwt"`, so this reads claims off that `Jwt` object
+   (`((Jwt)context.Variables["mcpJwt"]).Claims`) rather than re-parsing the raw `Authorization`
+   header — preserving the chain of trust and avoiding any malformed-header edge case (the
+   request is already 401'd before this runs). Claim: **`appid`** (v1.0 tokens) with fallback
+   to **`azp`** (v2.0 tokens; Entra emits the agent identity's app id in one of these). Confirm
+   which one your live token uses and collapse if desired.
+3. `choose` — one `<when>` per listed AppId → `rate-limit-by-key` (`calls={requestsPerMinute}`,
+   `renewal-period={renewalPeriodSeconds}`, `counter-key="mcp-rl:<appId>"`; **429** when
+   exceeded, `x-mcp-ratelimit-remaining` header surfaces the remaining count).
+   **DENY-BY-DEFAULT:** any unlisted AppId hits `<otherwise>` → **403** `agent_not_permitted`.
+
+### Applied in two places (one module, one source of truth)
+- **`azd up`** — wired in `infra/main.bicep` as `apimMcpCompliance` (after `apimMcpApi`,
+  before `apimLockdown`), so the governance policy is present from the first deploy.
+  **Bootstrap note:** the committed `mcp/mcp-policy.json` ships a **placeholder** entry
+  (`appId` all-zeros), so out of the box the policy is effectively **deny-all** for MCP
+  callers. This is intentional and safe — the seeded agents (`hello-world-agent`,
+  `gateway-model-agent`, `teams-agent`) do **not** call the MCP API, so nothing breaks on a
+  fresh env. Before any agent you wire up can call the MCP gateway, add its real AppId to the
+  JSON and re-apply (either re-run `azd up` or the workflow below).
+- **On demand** — `.github/workflows/deploy-compliancy.yml` (`workflow_dispatch`, self-hosted
+  VNet runner, `vnet-deploy` environment, VM MI via `az login --identity`) re-deploys ONLY
+  this module after you edit the JSON. Applying an APIM policy is an **ARM control-plane**
+  op, so it does not need to reach APIM's private data plane — just Azure RBAC.
+  Needs repo variables `AZURE_RESOURCE_GROUP`, `MCP_COMPLIANCE_APIM_NAME`,
+  `MCP_COMPLIANCE_API_NAME`, `MCP_COMPLIANCE_AUDIENCE` (Bicep outputs; `azd env refresh` if
+  missing).
+
+### Gotchas / notes
+- **`rate-limit-by-key` is supported on APIM v2 tiers** (token-bucket algorithm) but **NOT**
+  on the Consumption tier. This gateway is Standard v2 → supported.
+- Bicep does **not** interpolate `${...}` inside triple-quoted (`'''`) strings, so the policy
+  XML is built from **single-quoted** strings (with `\n`) via `join(map(config.agents, …))`.
+- APIM **policy expressions are C#**, so string literals are double-quoted. They live inside
+  double-quoted XML attributes, so every C# string quote is emitted as the entity **`&quot;`**
+  (a plain `"` would close the attribute early).
+- **v2 counters are per-gateway** (single APIM instance here, so fine). Verify Foundry
+  surfaces a 429 during an agent run gracefully.

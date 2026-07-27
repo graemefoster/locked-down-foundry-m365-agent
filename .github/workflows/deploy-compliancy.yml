@@ -1,0 +1,91 @@
+name: Deploy compliancy (MCP rate limits)
+
+# ---------------------------------------------------------------------------
+# On-demand re-apply of the MCP per-agent rate-limit policy from mcp/mcp-policy.json
+# into APIM. This is the fast path used after editing the JSON — it re-deploys ONLY the
+# apim-mcp-compliance.bicep module (the same module `azd up` runs), so the two paths can
+# never diverge. A full `azd up` is not required just to change rate limits.
+#
+# Why this runs on the self-hosted VNet runner (not a GitHub-hosted runner):
+#   * Applying an APIM policy is an ARM CONTROL-PLANE operation, so it does NOT need to
+#     reach APIM's private data-plane endpoint. It DOES need Azure RBAC, which the VM
+#     managed identity already has (Contributor on the resource group). Reusing the VM MI
+#     avoids provisioning any new OIDC federated credential.
+#   * Same lockdown as deploy-vnet.yml: workflow_dispatch only (forks cannot queue),
+#     repository guard, and the `vnet-deploy` environment (add a REQUIRED REVIEWER +
+#     branch=main in repo Settings so an approval gate precedes any change to APIM).
+#
+# Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables):
+#   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_API_NAME,
+#   MCP_COMPLIANCE_AUDIENCE. Run `azd env refresh` if any are missing. Each can be
+#   overridden per-run via the dispatch inputs below.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+    inputs:
+      resourceGroup:
+        description: "Resource group (defaults to repo variable AZURE_RESOURCE_GROUP)"
+        required: false
+        default: ""
+      apimName:
+        description: "APIM instance name (defaults to repo variable MCP_COMPLIANCE_APIM_NAME)"
+        required: false
+        default: ""
+      mcpApiName:
+        description: "MCP API name on APIM (defaults to repo variable MCP_COMPLIANCE_API_NAME, else 'mcp')"
+        required: false
+        default: ""
+      mcpAudience:
+        description: "MCP app registration audience (defaults to repo variable MCP_COMPLIANCE_AUDIENCE)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  apply-mcp-compliance:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: vnet-deploy
+    steps:
+      - uses: actions/checkout@v5
+
+      # az is installed on the Linux worker VM by cloud-init. Authenticate as the VM
+      # managed identity (holds Contributor on the resource group) — no secrets needed.
+      - name: Sign in with the VM managed identity
+        shell: pwsh
+        run: az login --identity --output none
+
+      - name: Apply MCP rate-limit policy from mcp/mcp-policy.json
+        shell: pwsh
+        env:
+          RESOURCE_GROUP: ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:      ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
+          MCP_API_NAME:   ${{ inputs.mcpApiName != '' && inputs.mcpApiName || vars.MCP_COMPLIANCE_API_NAME }}
+          MCP_AUDIENCE:   ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
+              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME and MCP_COMPLIANCE_AUDIENCE (from 'azd env get-values'), or pass them as dispatch inputs."
+          }
+          $mcpApi = if ([string]::IsNullOrWhiteSpace($env:MCP_API_NAME)) { 'mcp' } else { $env:MCP_API_NAME }
+          $tenantId = az account show --query tenantId -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+            throw "Failed to resolve tenant ID from 'az account show'."
+          }
+
+          Write-Host "Applying MCP compliance policy to APIM '$($env:APIM_NAME)' (API '$mcpApi') in RG '$($env:RESOURCE_GROUP)'."
+          az deployment group create `
+            --resource-group $env:RESOURCE_GROUP `
+            --name "mcp-compliance-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+            --template-file infra/modules/model-gateway/apim-mcp-compliance.bicep `
+            --parameters `
+              apimName=$env:APIM_NAME `
+              mcpApiName=$mcpApi `
+              mcpAudience=$env:MCP_AUDIENCE `
+              tenantId=$tenantId `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
+          Write-Host "MCP rate-limit policy applied from mcp/mcp-policy.json."

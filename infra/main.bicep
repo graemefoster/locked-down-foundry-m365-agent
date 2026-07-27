@@ -923,7 +923,19 @@ module apimMcpApi 'modules/model-gateway/apim-mcp-api.bicep' = {
   ]
 }
 
-// APIM inference API + policy (inbound token validation, backend + MI auth).
+// MCP per-agent rate-limit compliance policy — reflects mcp/mcp-policy.json into a policy
+// on the MCP API so each agent's tool calls are throttled by AppId (deny-by-default).
+// Applied here at provision time so a fresh environment starts compliant; the
+// deploy-compliancy workflow re-applies THIS SAME module on demand after the JSON changes.
+module apimMcpCompliance 'modules/model-gateway/apim-mcp-compliance.bicep' = {
+  name: 'mcp-compliance-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apim.outputs.apimName
+    mcpApiName: apimMcpApi.outputs.apiName
+    mcpAudience: mcpAppRegistration.outputs.audience
+    tenantId: tenant().tenantId
+  }
+}
 module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
   params: {
@@ -982,6 +994,7 @@ module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
     apimApiPolicy
     apimTeamsApi
     apimMcpApi
+    apimMcpCompliance
   ]
 }
 
@@ -1157,6 +1170,14 @@ output TEAMS_LOG_ANALYTICS_ID string = lanalytics.id
 
 @description('Per-environment MCP server URL (the APIM MCP gateway), identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
 output MCP_GATEWAY_URL string = '${apimMcpApi.outputs.mcpGatewayUrl}/'
+
+// --- MCP compliance (deploy-compliancy workflow) ---------------------------------
+@description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policy on demand.')
+output MCP_COMPLIANCE_APIM_NAME string = apimName
+@description('MCP API name on APIM the compliance policy targets.')
+output MCP_COMPLIANCE_API_NAME string = apimMcpApi.outputs.apiName
+@description('MCP app registration audience the compliance policy validates the agent token against.')
+output MCP_COMPLIANCE_AUDIENCE string = mcpAppRegistration.outputs.audience
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 
