@@ -349,48 +349,53 @@ module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
 // app registration audience (per-server audiences would slot in here later). Building this from
 // the module output (a single map, no nested lambda) means there is no "primary server" to
 // special-case — every server is wired symmetrically, and projectMcpConnections consumes the array.
-var mcpConnections = map(stage20.outputs.servers, srv => {
-  name: srv.connectionName
-  url: '${srv.url}/'
-  audience: stage20.outputs.mcpAudience
-})
 // URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
 // workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
 // server, and the sample 'mcp' server is the first entry by convention.
 var mcpSampleGatewayUrl = '${first(stage20.outputs.servers).url}/'
 
-// One Foundry project connection per governed MCP server. Split out of project creation: these
-// connections are not used by the Agents capability host, so they run here (after stage10, hence
-// after the capability host) rather than at project-create time.
-module projectMcpConnections 'modules/foundry/project-mcp-connections.bicep' = {
-  name: 'project-mcp-connections-${uniqueSuffix}-deployment'
+// ==================== STAGE 30 — GOVERNANCE ====================
+// Post-platform governance: project MCP connections, APIM API/policy/connection + Teams API,
+// RAI guardrail (+ non-compliant demo), APIM lockdown (STRICTLY LAST), and cross-spoke gateway
+// firewall rules. Depends only downward on stages 00/10/20 (their outputs are threaded in).
+module stage30 'stages/30-governance/30-governance.bicep' = {
+  name: 'stage30-governance-${uniqueSuffix}'
   params: {
-    accountName: stage10.outputs.aiAccountName
+    location: location
+    uniqueSuffix: uniqueSuffix
+    aiAccountName: stage10.outputs.aiAccountName
     projectName: stage10.outputs.projectName
-    mcpConnections: mcpConnections
-  }
-}
-
-
-// ==================== RAI GUARDRAIL POLICY (AUDIT) ====================
-// Assigns the built-in "[Preview]: Guardrail for Cognitive Services Deployments"
-// initiative with STRICT parameters. Audit-only (the built-in cannot block); it
-// reports every model deployment's content-filter config as Compliant / Non-compliant.
-module raiGuardrail 'modules/governance/rai-guardrail-assignment.bicep' = if (enableRaiGuardrailPolicy) {
-  name: 'rai-guardrail-${uniqueSuffix}-deployment'
-}
-
-// DEMO: a deliberately non-compliant deployment (weak custom RAI policy) so you can
-// watch the guardrail flag it. Attaches to the existing AI Services account.
-module nonCompliantModelDemo 'modules/governance/noncompliant-model-demo.bicep' = if (enableNonCompliantModelDemo) {
-  name: 'noncompliant-demo-${uniqueSuffix}-deployment'
-  params: {
-    accountName: stage10.outputs.aiAccountName
+    apimName: stage10.outputs.apimName
+    providerAccountId: stage10.outputs.providerAccountId
+    projectId: stage10.outputs.projectId
+    gatewayUrl: stage10.outputs.gatewayUrl
+    servers: stage20.outputs.servers
+    mcpAudience: stage20.outputs.mcpAudience
+    modelGatewayApimSubnetId: stage00.outputs.modelGatewayApimSubnetId
+    providerBackendBaseUrl: providerBackendBaseUrl
+    gatewayCallerAppId: gatewayCallerAppId
+    modelGatewayConnectionName: modelGatewayConnectionName
+    gatewayModelName: gatewayModelName
+    firewallPolicyName: firewallPolicyName
+    agentSubnetCidr: agentSubnetCidr
+    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
+    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
+    foundryPeSubnetCidr: foundryPeSubnetCidr
+    appServicePeSubnetCidr: appServicePeSubnetCidr
+    enableTeamsPublish: enableTeamsPublish
+    teamsBotAppIds: teamsBotAppIds
+    enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
+    enableNonCompliantModelDemo: enableNonCompliantModelDemo
     modelName: modelName
     modelFormat: modelFormat
     modelVersion: modelVersion
     modelSkuName: modelSkuName
   }
+  dependsOn: [
+    stage00
+    stage10
+    stage20
+  ]
 }
 
 
@@ -449,107 +454,6 @@ module bastionModule 'modules/resources/bastion.bicep' = if (deployBastion) {
 }
 
 
-
-// MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
-// each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
-// per server). Applied here at provision time so a fresh environment starts compliant; the
-// deploy-compliancy workflow re-applies THIS SAME module on demand after the JSON changes.
-module apimMcpComplianceAll 'modules/model-gateway/apim-mcp-compliance-all.bicep' = {
-  name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
-  params: {
-    apimName: stage10.outputs.apimName
-    mcpAudience: stage20.outputs.mcpAudience
-    tenantId: tenant().tenantId
-  }
-  dependsOn: [
-    stage10
-    stage20
-  ]
-}
-module apimApiPolicy 'modules/model-gateway/apim-api-policy.bicep' = {
-  name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
-  params: {
-    apimName: stage10.outputs.apimName
-    backendBaseUrl: providerBackendBaseUrl
-    providerAccountResourceId: stage10.outputs.providerAccountId
-    projectMiClientId: gatewayCallerAppId
-    callerProjectResourceId: stage10.outputs.projectId
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-// Advertise APIM to the primary Foundry project as an ApiManagement connection.
-module apimConnection 'modules/model-gateway/apim-connection.bicep' = {
-  name: 'model-gateway-connection-${uniqueSuffix}-deployment'
-  params: {
-    aiFoundryName: stage10.outputs.aiAccountName
-    projectName: stage10.outputs.projectName
-    connectionName: modelGatewayConnectionName
-    apimGatewayUrl: stage10.outputs.gatewayUrl
-    apiPath: apimApiPolicy.outputs.apiPath
-    exposedModelName: gatewayModelName
-  }
-  dependsOn: [
-    stage10
-  ]
-}
-
-// APIM Teams / M365 inbound API + policy (validate Bot Framework JWT, forward to the
-// agent activityProtocol endpoint on the primary Foundry PE). Teams path only.
-module apimTeamsApi 'modules/model-gateway/apim-teams-api.bicep' = if (enableTeamsPublish) {
-  name: 'teams-apim-api-${uniqueSuffix}-deployment'
-  params: {
-    apimName: stage10.outputs.apimName
-    foundryAccountName: stage10.outputs.aiAccountName
-    projectName: stage10.outputs.projectName
-    botAppIds: teamsBotAppIds
-    expectedTenantId: tenant().tenantId
-  }
-}
-
-// Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
-// private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
-// and after the API/policy children so it never races their creation.
-module apimLockdown 'modules/model-gateway/apim-lockdown.bicep' = {
-  name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
-  params: {
-    apimName: stage10.outputs.apimName
-    location: location
-    apimOutboundSubnetId: stage00.outputs.modelGatewayApimSubnetId
-  }
-  dependsOn: [
-    stage10
-    apimApiPolicy
-    apimTeamsApi
-    apimMcpComplianceAll
-    stage20
-  ]
-}
-
-// Gateway firewall rules (ALWAYS on — APIM is always-on): APIM platform egress, plus the
-// model-gateway (agent -> APIM PE) and Teams (APIM -> Foundry PE) cross-spoke allows.
-// Deliberately sequenced AFTER the APIM deployment: APIM Standard v2 takes ~15-45 min to
-// provision, which leaves the firewall long-idle after firewall.bicep's defaultRuleGroup
-// PUT before this second rule-collection-group PUT lands on the same policy. This avoids
-// the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
-// rule-collection-group PUTs arrive back-to-back.
-module gatewayFirewallRules 'modules/model-gateway/gateway-firewall-rules.bicep' = {
-  name: 'gateway-fwall-rules-${uniqueSuffix}-deployment'
-  params: {
-    firewallPolicyName: firewallPolicyName
-    agentSubnetCidr: agentSubnetCidr
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
-    foundryPeSubnetCidr: foundryPeSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
-  }
-  dependsOn: [
-    stage00
-    stage10
-  ]
-}
 
 // ==================== SEED AGENTS: VM RBAC ====================
 
@@ -664,16 +568,16 @@ output AZURE_AI_PROJECT_NAME string = stage10.outputs.projectName
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
 
 @description('Name of the strict RAI guardrail policy assignment (empty when disabled). Use to query compliance.')
-output RAI_GUARDRAIL_ASSIGNMENT_NAME string = enableRaiGuardrailPolicy ? raiGuardrail!.outputs.assignmentName : ''
+output RAI_GUARDRAIL_ASSIGNMENT_NAME string = stage30.outputs.raiAssignmentName
 
 @description('Name of the deliberately non-compliant demo deployment (empty when disabled).')
-output NONCOMPLIANT_DEMO_DEPLOYMENT_NAME string = enableNonCompliantModelDemo ? nonCompliantModelDemo!.outputs.deploymentName : ''
+output NONCOMPLIANT_DEMO_DEPLOYMENT_NAME string = stage30.outputs.nonCompliantDeploymentName
 
 @description('Whether to seed the second (model-gateway) agent. Always true — the model gateway is always deployed.')
 output SEED_ENABLE_SECOND_AGENT bool = true
 
 @description('Model reference for the second (model-gateway) agent.')
-output SEED_SECOND_AGENT_MODEL string = apimConnection.outputs.agentModelReference
+output SEED_SECOND_AGENT_MODEL string = stage30.outputs.agentModelReference
 
 // ---- Teams / M365 publish (consumed by the postdeploy hook) ----
 
@@ -690,7 +594,7 @@ output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn
 output TEAMS_APIM_NAME string = apimName
 
 @description('Name of the APIM Teams inbound API (== its path).')
-output TEAMS_APIM_API_NAME string = apimTeamsApi.?outputs.apiName ?? 'teams'
+output TEAMS_APIM_API_NAME string = stage30.outputs.teamsApiName
 
 @description('Entra tenant the single-tenant bot registration lives in.')
 output TEAMS_TENANT_ID string = tenant().tenantId
@@ -711,7 +615,7 @@ output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
 @description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')
 output MCP_COMPLIANCE_APIM_NAME string = apimName
 @description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
-output MCP_COMPLIANCE_SERVER_COUNT int = apimMcpComplianceAll.outputs.governedServerCount
+output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
 output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
 
