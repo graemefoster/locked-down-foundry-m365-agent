@@ -9,8 +9,10 @@ An **opt-in** self-hosted Actions runner on the in-VNet **Linux worker VM** so c
 representative deployments can run *inside the VNet* — reaching the **private** Foundry
 endpoint directly — instead of being marshalled through `az vm run-command`.
 
-It is **off by default**: the runner is only installed when `githubRunnerRepoUrl`
-(env var `GITHUB_RUNNER_REPO_URL`) is non-empty. Leave it unset and nothing changes.
+It is **off by default**: the runner is only installed when **both** `githubRunnerRepoUrl`
+(env var `GITHUB_RUNNER_REPO_URL`) **and** `githubRunnerPat` (`GITHUB_RUNNER_PAT`) are
+non-empty. Leave either unset and the runner is skipped entirely (no RBAC, no PAT secret,
+no Run Command) — there is no point installing a runner it can't register.
 
 ## The two VMs
 
@@ -145,9 +147,10 @@ The **PAT is a secret and is never prompted** — supply it with `azd env set GI
 before provisioning (the hook reminds you when you enter a repo URL without one set).
 
 `GITHUB_RUNNER_PAT` is a `@secure()` param sourced from `${GITHUB_RUNNER_PAT}` (empty by
-default). While set, it lives in the local, gitignored `.azure/<env>/.env`. Leaving it
-empty on later provisions reuses the already-seeded Key Vault secret (the secret write is
-conditional and ARM never deletes it).
+default). While set, it lives in the local, gitignored `.azure/<env>/.env`. It is **required**
+to install the runner: clearing it on a later provision skips the runner modules (the already
+installed systemd service and seeded Key Vault secret persist — ARM never deletes the secret —
+but the runner is not re-registered).
 
 On first provision the RBAC role assignment can take 1–5 min to propagate to the KV
 data plane (same class of delay noted for CMK enablement). If the Run Command fails

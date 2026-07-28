@@ -39,6 +39,14 @@ param githubRunnerLabels string
 @description('Local account the runner service runs as (the VM admin user). The runner refuses to run as root.')
 param runnerUser string
 
+@description('''
+Changes on every deployment (utcNow() default) so the managed Run Command re-executes each
+`azd provision`. Without this, ARM treats an unchanged script as a no-op and never retries a
+previously-failed run — e.g. one that raced ahead of the PAT secret being seeded. Safe to force:
+the bootstrap is idempotent (it exits early when the runner service is already installed).
+''')
+param reExecuteNonce string = utcNow()
+
 resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
   name: vmName
 }
@@ -46,9 +54,13 @@ resource vm 'Microsoft.Compute/virtualMachines@2023-09-01' existing = {
 // Shebang + non-secret config for the bootstrap. bootstrap-github-runner.sh deliberately
 // carries NO shebang of its own so that the one emitted here stays on line 1 of the
 // concatenated script.
+//
+// The trailing nonce comment changes the script content each deployment, which is what
+// forces ARM to re-run the Run Command (see reExecuteNonce). The bootstrap ignores it.
 var configPreamble = join(
   [
     '#!/usr/bin/env bash'
+    '# re-exec nonce: ${reExecuteNonce}'
     'export REPO_URL=\'${githubRunnerRepoUrl}\''
     'export KEY_VAULT_NAME=\'${keyVaultName}\''
     'export PAT_SECRET_NAME=\'${githubRunnerPatSecretName}\''

@@ -145,8 +145,10 @@ param deployBastion bool = deployWindowsVm
 @description('''
 GitHub repo URL (https://github.com/owner/repo) to register a self-hosted Actions
 runner on the Linux worker VM against. Leave EMPTY (default) to skip runner
-installation. When set, the VM installs a runner as a systemd service, reading a
-fine-grained PAT from Key Vault via its managed identity. See docs/github-runner.md.
+installation. When set, you MUST also supply githubRunnerPat — without a PAT there
+is no secret to seed and the runner is skipped (not installed). When both are set,
+the VM installs a runner as a systemd service, reading the fine-grained PAT from Key
+Vault via its managed identity. See docs/github-runner.md.
 ''')
 param githubRunnerRepoUrl string = ''
 
@@ -156,10 +158,12 @@ param githubRunnerPatSecretName string = 'gh-runner-pat'
 
 @description('''
 Fine-grained GitHub PAT (Administration: read & write) for the self-hosted runner.
-Written into Key Vault by Bicep (control-plane write, works despite the private KV
-firewall). Sourced from ${GITHUB_RUNNER_PAT} (empty by default). Set it with
-`azd env set GITHUB_RUNNER_PAT <pat>`; you may clear it after provisioning — the KV
-secret persists. Leave empty to reuse an already-seeded secret.
+REQUIRED to install the runner (together with githubRunnerRepoUrl) — the runner is
+skipped if either is empty. Written into Key Vault by Bicep (control-plane write,
+works despite the private KV firewall). Sourced from ${GITHUB_RUNNER_PAT} (empty by
+default). Set it with `azd env set GITHUB_RUNNER_PAT <pat>`. You may clear it after
+the runner is installed — the systemd service and KV secret persist — but a later
+`azd provision` will then skip the runner modules (it won't re-register the runner).
 ''')
 @secure()
 param githubRunnerPat string = ''

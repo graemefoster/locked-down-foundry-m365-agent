@@ -107,12 +107,17 @@ module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
 
 // ==================== SELF-HOSTED GITHUB ACTIONS RUNNER (opt-in) ====================
 
-// When githubRunnerRepoUrl is set, install a self-hosted runner on the Linux worker VM so
-// complex, representative deployments can run INSIDE the VNet (reaching the private
-// Foundry endpoint directly) instead of being marshalled through `az vm run-command`.
-// The VM MI needs Key Vault Secrets User to read the runner PAT; the Run Command that
-// runs the bootstrap is sequenced AFTER that role assignment. See docs/github-runner.md.
-var installGithubRunner = !empty(githubRunnerRepoUrl)
+// When BOTH githubRunnerRepoUrl AND githubRunnerPat are set, install a self-hosted runner
+// on the Linux worker VM so complex, representative deployments can run INSIDE the VNet
+// (reaching the private Foundry endpoint directly) instead of being marshalled through
+// `az vm run-command`. The VM MI needs Key Vault Secrets User to read the runner PAT; the
+// Run Command that runs the bootstrap is sequenced AFTER that role assignment.
+//
+// The PAT is REQUIRED: without it there is no secret to seed into Key Vault, so the on-VM
+// bootstrap would 404 reading `gh-runner-pat` and fail provisioning. There is no point
+// deploying the runner half — so a repo URL supplied without a PAT simply skips the runner
+// (no RBAC, no PAT secret, no Run Command) rather than failing. See docs/github-runner.md.
+var installGithubRunner = !empty(githubRunnerRepoUrl) && !empty(githubRunnerPat)
 
 module vmKeyVaultSecretsRole './rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
   name: 'vm-kv-secrets-role-${uniqueSuffix}'
