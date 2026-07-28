@@ -13,9 +13,9 @@ hooks:
     run: ./hooks/preprovision.ps1
     continueOnError: false
     interactive: true
-  # NOTE: azd runs NOTHING after provision. Agent seeding, MCP compliance and Teams / M365
-  # publishing are done ONLY by the in-VNet self-hosted GitHub Actions workflows
-  # (.github/workflows/deploy-vnet.yml, deploy-test-agent-one.yml, deploy-compliancy.yml),
+  # NOTE: azd runs NOTHING after provision. Agent deploys, MCP compliance and Teams / M365
+  # publishing are done ONLY by the in-VNet self-hosted GitHub Actions workflows (the per-agent
+  # .github/workflows/deploy-*-agent.yml + reusable deploy-agent.yml, and deploy-compliancy.yml),
   # which run natively on the private VM runner — no `az vm run-command` orchestration from
   # the azd host. The previous predeploy/postdeploy hooks were removed for that reason.
   predown:

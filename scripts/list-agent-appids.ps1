@@ -84,7 +84,7 @@ $rpm              = [int]$RequestsPerMinute
 $showBlueprint    = $IncludeBlueprint -eq 'true'
 
 # Acquire an https://ai.azure.com token. On the private VM the IMDS managed identity is the
-# only option (mirrors seed-agents.ps1); off-VM we fall back to the signed-in az CLI user.
+# only option; off-VM we fall back to the signed-in az CLI user.
 function Get-FoundryToken {
   try {
     $imds = Invoke-RestMethod `

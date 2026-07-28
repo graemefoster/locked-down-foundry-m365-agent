@@ -1,8 +1,8 @@
-name: Publish Foundry agent(s) to Teams / M365
+name: Publish Foundry agent to Teams / M365
 description: >-
-  Publish one or more already-seeded Foundry agents to Microsoft Teams / M365 from the in-VNet
-  self-hosted runner. Per agent it reads the agent identity, creates an Azure Bot Service, enables
-  the activity protocol and submits the app to the Microsoft 365 catalog (scripts/publish-teams-runner.ps1).
+  Publish a single already-deployed Foundry agent to Microsoft Teams / M365 from the in-VNet
+  self-hosted runner. It reads the agent identity, creates an Azure Bot Service, enables the
+  activity protocol and submits the app to the Microsoft 365 catalog (scripts/publish-teams-runner.ps1).
 
   Runs entirely on the VM as its managed identity, EXCEPT the Microsoft 365 publish call, which
   performs an on-behalf-of exchange and rejects app-only / MI tokens (HTTP 502). This action
@@ -15,11 +15,11 @@ inputs:
   foundry-endpoint:
     description: Foundry project endpoint (private).
     required: true
-  agent-names:
-    description: Comma-separated agent name(s) to publish (one Azure Bot Service each).
+  agent-name:
+    description: The agent name to publish (one Azure Bot Service).
     required: true
   resource-group:
-    description: Resource group that holds the Bot Service(s) and the VM.
+    description: Resource group that holds the Bot Service and the VM.
     required: true
   yarp-fqdn:
     description: Public YARP FQDN — the Azure Bot Service messaging endpoint host.
@@ -82,11 +82,11 @@ runs:
       # read run as the VM managed identity (which holds the required RBAC).
       run: az login --identity --output none
 
-    - name: Publish agent(s) to Teams / M365 (in-VNet, via VM managed identity)
+    - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
       shell: pwsh
       env:
         FOUNDRY_ENDPOINT: ${{ inputs.foundry-endpoint }}
-        AGENT_NAMES:      ${{ inputs.agent-names }}
+        AGENT_NAME:       ${{ inputs.agent-name }}
         RESOURCE_GROUP:   ${{ inputs.resource-group }}
         YARP_FQDN:        ${{ inputs.yarp-fqdn }}
         TENANT_ID:        ${{ inputs.tenant-id }}
@@ -95,7 +95,7 @@ runs:
         LOG_ANALYTICS_ID: ${{ inputs.log-analytics-id }}
         PUBLISH_SCOPE:    ${{ inputs.publish-scope }}
       run: |
-        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAMES','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
+        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAME','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
           if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
             throw "Publish requires '$v'. Set the corresponding repo variables (AZURE_RESOURCE_GROUP, TEAMS_YARP_FQDN, TEAMS_TENANT_ID, TEAMS_BOT_NAME, ...) from 'azd env get-values', or pass the matching action input."
           }
@@ -104,7 +104,7 @@ runs:
         ./scripts/publish-teams-runner.ps1 `
           -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
           -ResourceGroup            $env:RESOURCE_GROUP `
-          -AgentNames               $env:AGENT_NAMES `
+          -AgentName                $env:AGENT_NAME `
           -YarpFqdn                 $env:YARP_FQDN `
           -TenantId                 $env:TENANT_ID `
           -BotName                  $env:BOT_NAME `

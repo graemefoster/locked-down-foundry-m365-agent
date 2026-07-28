@@ -86,15 +86,10 @@ param gatewayCallerAppId string = ''
 // The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
 // to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
 // the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by
-// the in-VNet Teams-publish workflow path (scripts/publish-teams-runner.ps1 -> publish-teams.ps1).
-@description('Names of the seeded agents to publish to Teams / M365. Each gets its own Azure Bot Service whose messaging endpoint is https://<yarp>/teams/<agentName>; the single path-routed APIM Teams API rewrites to each agent activityProtocol endpoint. Defaults to all three seeded agents.')
-param teamsPublishAgentNames array = [
-  'hello-world-agent'
-  'gateway-model-agent'
-  'teams-agent'
-]
-
-@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; the publish hook rebuilds the full audience allowlist live once the agents are seeded.')
+// the in-VNet Teams-publish workflow path (scripts/publish-teams-runner.ps1 -> publish-teams.ps1),
+// one agent per run. The single path-routed APIM Teams API listens on /teams/{agentName}, so it
+// does not need to know the agent names ahead of time.
+@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; deploy-compliancy.yml rebuilds the full audience allowlist live once the agents are deployed.')
 param teamsBotAppIds array = []
 
 // Create a short, unique suffix, that will be unique to each resource group
@@ -475,9 +470,10 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
 
 // ==================== OUTPUTS ====================
 // Surfaced by azd as env vars (and typically mirrored to repo variables). Consumed by the
-// in-VNet self-hosted workflows (.github/workflows/deploy-vnet.yml, deploy-test-agent-one.yml,
-// deploy-compliancy.yml) which do the seeding / compliance / Teams publishing, and by the azd
-// predown hook (capability-host cleanup + runner deregistration). azd itself runs nothing after
+// in-VNet self-hosted workflows (the per-agent .github/workflows/deploy-*-agent.yml + reusable
+// deploy-agent.yml, and deploy-compliancy.yml) which do the agent deploys / compliance / Teams
+// publishing, and by the azd predown hook (capability-host cleanup + runner deregistration). azd
+// itself runs nothing after
 // provision.
 
 @description('Resource group the deployment targets.')
@@ -515,9 +511,6 @@ output SEED_SECOND_AGENT_MODEL string = stage30.outputs.agentModelReference
 
 @description('Whether the Teams / M365 publish path was deployed. Always true.')
 output SEED_ENABLE_TEAMS_PUBLISH bool = true
-
-@description('Comma-separated names of the seeded agents to publish to Teams / M365 (the publish path creates one bot per agent, endpoint /teams/<agentName>).')
-output TEAMS_PUBLISH_AGENT_NAMES string = join(teamsPublishAgentNames, ',')
 
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
 output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn

@@ -45,8 +45,9 @@ These are the design decisions — everything else follows from them.
   resource *and* its encryption/RBAC/PE together, so there is never a "where is
   the grant for this?" hunt.
 - **Rule 2 — IaC and imperative are different universes.** Agent *creation* is
-  **not** a Bicep stage. It is seeded post-provision by the in-VNet runner workflow
-  (`deploy-vnet.yml` → `scripts/seed-agents.ps1`, and torn down by `predown`). The stages are IaC only;
+  **not** a Bicep stage. It is deployed post-provision by the in-VNet runner workflows
+  (per-agent `deploy-*-agent.yml` → the reusable `deploy-agent.yml` → `scripts/create-agent.ps1`,
+  and torn down by `predown`). The stages are IaC only;
   the layering should **celebrate** that boundary (stage 40 is the in-VNet bridge
   to it), not hide agents inside a Bicep "agents layer".
 
@@ -54,7 +55,7 @@ Corollaries:
 - **Dependencies only ever point downward:** `00 ← 10 ← 20 ← 30 ← 40`. Sequential
   stage modules make that a compile-time guarantee.
 - **Growth is localized:** new MCP server → stage 20 only; new policy → stage 30
-  only; new agent → `seed-agents.ps1` only.
+  only; new agent → a manifest under `agents/` + a thin `deploy-*-agent.yml` caller only.
 - **The two hard sequencing rules survive as intra-stage ordering:**
   capability-host-after-data-plane-RBAC (stage 10) and lockdown-LAST (stage 30).
 
@@ -110,7 +111,7 @@ The app and its routing. Adding a second MCP server touches **only this stage**.
 
 ### Stage 40 — Runner (deploy enablement; the bridge to L4)
 This VM exists **only** to let the imperative stage reach private Foundry.
-- In-VNet Linux worker VM (`vm-linux`) — the seed-agents host; optional Windows VM
+- In-VNet Linux worker VM (`vm-linux`) — the agent-deploy host; optional Windows VM
   / Bastion (`if deployWindowsVm` / `if deployBastion`).
 - **Co-located (Rule 1):** runner RBAC (→Foundry/OpenAI/Key Vault secrets/VM
   contributor), runner PAT secret, and the **runner extension LAST** (bootstraps
@@ -118,7 +119,7 @@ This VM exists **only** to let the imperative stage reach private Foundry.
 - **Exposes:** vm name (→ `GITHUB_ACTIONS_RUNNER_VM_NAME`), runner facts.
 
 ### L4 — Imperative (NOT Bicep)
-Agent seeding (in-VNet runner workflow → `seed-agents.ps1`) and capability-host teardown
+Agent deploy (per-agent runner workflows → `create-agent.ps1`) and capability-host teardown
 (`predown`). Already outside Bicep — no change; stage 40 is its in-VNet bridge.
 
 ## 4. Current module → target stage map

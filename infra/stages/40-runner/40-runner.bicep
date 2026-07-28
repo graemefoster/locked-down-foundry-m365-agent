@@ -87,12 +87,12 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
   }
 }
 
-// ==================== SEED AGENTS: VM RBAC ====================
+// ==================== AGENT DEPLOY: VM RBAC ====================
 
-// Agent seeding runs from the in-VNet self-hosted GitHub Actions runner
-// (.github/workflows/deploy-vnet.yml), which executes scripts/seed-agents.ps1 natively on the
-// private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows dev
-// VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
+// Agent deploys run from the in-VNet self-hosted GitHub Actions runner (the per-agent
+// .github/workflows/deploy-*-agent.yml workflows), which execute scripts/create-agent.ps1 natively
+// on the private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows
+// dev VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
 // needs
 // Foundry User on the project so the on-VM script can acquire a token and call the
 // Agents API — that RBAC is provisioned here.

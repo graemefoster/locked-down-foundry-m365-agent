@@ -1,0 +1,27 @@
+name: Deploy hello-world-agent (VNet self-hosted)
+
+# Thin caller for the hello-world demo agent (agents/hello-world-agent/agent.yaml).
+# All the work lives in the reusable .github/workflows/deploy-agent.yml — this file only
+# targets ONE agent and supplies its per-environment model. Not published to Teams.
+on:
+  workflow_dispatch:
+    inputs:
+      foundryProjectEndpoint:
+        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
+        required: false
+        default: ""
+      model:
+        description: "Model deployment name (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-agent.yml
+    with:
+      manifest-path: agents/hello-world-agent/agent.yaml
+      model: ${{ inputs.model != '' && inputs.model || vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
+      foundry-endpoint: ${{ inputs.foundryProjectEndpoint }}

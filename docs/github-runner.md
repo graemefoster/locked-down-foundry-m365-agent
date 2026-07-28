@@ -56,9 +56,9 @@ on it**:
 | Control | Where |
 |---|---|
 | PR CI runs on **GitHub-hosted** runners only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`) |
-| VNet deploy has **no `pull_request` trigger** (dispatch only) | `.github/workflows/deploy-vnet.yml` |
-| VNet deploy is gated by a **required-reviewer environment** | `environment: vnet-deploy` |
-| `if: github.repository == ...` guard | `deploy-vnet.yml` |
+| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent `deploy-*-agent.yml` callers + reusable `.github/workflows/deploy-agent.yml` |
+| VNet deploy is gated by a **required-reviewer environment** (Teams-publish / compliance jobs) | `environment: vnet-deploy` |
+| `if: github.repository == ...` guard | `deploy-agent.yml` + each caller |
 
 A fork PR can never select the self-hosted runner (label mismatch) and can never
 invoke the deploy workflow (no PR trigger). The idle runner simply never picks up an
@@ -102,8 +102,8 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
 4. **Set the deploy-workflow repo variables** (repo Settings → Secrets and variables →
-   Actions → *Variables*) so `deploy-vnet.yml` knows what to seed — these mirror the azd
-   outputs of the target environment:
+   Actions → *Variables*) so the per-agent `deploy-*-agent.yml` workflows know the endpoint /
+   models — these mirror the azd outputs of the target environment:
 
    | Variable | Value | Source |
    |---|---|---|

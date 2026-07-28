@@ -1,12 +1,11 @@
 <#
   Publish seeded Foundry agents to Teams / M365 — FROM THE IN-VNET RUNNER
   -----------------------------------------------------------------------
-  Runs ON the locked-down VM, executed by the self-hosted GitHub Actions runner
-  (.github/workflows/deploy-vnet.yml and deploy-test-agent-one.yml, via the
-  .github/actions/publish-teams composite action). This is now the ONLY Teams / M365
-  publish path — azd runs nothing after provision. Everything runs locally on the VM
-  as the VM's system-assigned managed identity, except the Microsoft 365 publish call
-  (see the token note below).
+  Runs ON the locked-down VM, executed by the self-hosted GitHub Actions runner (the reusable
+  .github/workflows/deploy-agent.yml, via the .github/actions/publish-teams composite action).
+  This is now the ONLY Teams / M365 publish path — azd runs nothing after provision. Everything
+  runs locally on the VM as the VM's system-assigned managed identity, except the Microsoft 365
+  publish call (see the token note below).
 
   Because the runner IS the VM (a trusted, gated Posture A worker), it can:
     * call the PRIVATE Foundry endpoint directly (IMDS / az MI token), and
@@ -14,8 +13,8 @@
       Contributor over the resource group when the runner is installed —
       infra/stages/40-runner/rbac/vm-contributor-role.bicep).
 
-  Per agent it: (1) reads the agent identity, (2) creates that agent's Azure Bot
-  Service, (3) enables the activity protocol + publishes to Microsoft 365.
+  For the single named agent it: (1) reads the agent identity, (2) creates that agent's Azure
+  Bot Service, (3) enables the activity protocol + publishes to Microsoft 365.
 
   TOKEN NOTE: the Microsoft 365 publish step performs an on-behalf-of style submission
   "on your behalf" to the M365 catalog and rejects an app-only / managed-identity token
@@ -34,8 +33,8 @@
 param(
   [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
   [Parameter(Mandatory = $true)]  [string]$ResourceGroup,
-  # Comma-separated agent names to publish (one bot each, endpoint /teams/<agentName>).
-  [Parameter(Mandatory = $true)]  [string]$AgentNames,
+  # The agent name to publish (one bot, endpoint /teams/<agentName>).
+  [Parameter(Mandatory = $true)]  [string]$AgentName,
   # Public YARP FQDN — the Azure Bot Service messaging endpoint host.
   [Parameter(Mandatory = $true)]  [string]$YarpFqdn,
   # Entra tenant the single-tenant bot registration lives in.
@@ -73,8 +72,7 @@ foreach ($f in @($publishScript, $botTemplate)) {
   if (-not (Test-Path $f)) { throw "[publish-runner] Required file not found: '$f'." }
 }
 
-$agents = @($AgentNames.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-if ($agents.Count -eq 0) { throw '[publish-runner] No agent names supplied.' }
+if ([string]::IsNullOrWhiteSpace($AgentName)) { throw '[publish-runner] No agent name supplied.' }
 
 function Get-DisplayName {
   param([string]$AgentName)
@@ -126,63 +124,59 @@ foreach ($k in 'AppVersion', 'ShortDescription', 'FullDescription', 'DeveloperNa
   if ($PSBoundParameters.ContainsKey($k)) { $publishMetadata[$k] = $PSBoundParameters[$k] }
 }
 
-foreach ($agentName in $agents) {
-  $agentBotName = "$BotName-$agentName"
-  $botEndpoint  = "https://$YarpFqdn/teams/$agentName"
-  $displayName  = Get-DisplayName $agentName
+$agentBotName = "$BotName-$AgentName"
+$botEndpoint  = "https://$YarpFqdn/teams/$AgentName"
+$displayName  = Get-DisplayName $AgentName
 
-  # --- Step 1: get the agent identity (principal_id = the bot Microsoft App ID) ---
-  Write-Host "[publish-runner] ($agentName) Step 1: reading agent identity..."
-  $identityOut = & $publishScript `
-    -Mode GetIdentity `
-    -FoundryProjectEndpoint $FoundryProjectEndpoint `
-    -AgentName $agentName `
-    -AccessToken $token *>&1 | Out-String
-  Write-Host $identityOut
-  if ($identityOut -notmatch '\[publish-teams\] Done\.') {
-    throw "[publish-runner] GetIdentity did not complete for '$agentName'."
-  }
-  $principalId = ([regex]'PRINCIPAL_ID=([0-9a-fA-F-]{36})').Match($identityOut).Groups[1].Value
-  if ([string]::IsNullOrWhiteSpace($principalId)) {
-    throw "[publish-runner] Could not parse principal_id for '$agentName'."
-  }
-  Write-Host "[publish-runner] ($agentName) principal_id (bot App ID): $principalId"
-
-  # --- Step 2: create the agent's Azure Bot Service (ARM, as the VM MI / Contributor) ---
-  Write-Host "[publish-runner] ($agentName) Step 2: creating Azure Bot Service '$agentBotName' (endpoint $botEndpoint)..."
-  $botArmId = az deployment group create `
-    --resource-group $ResourceGroup `
-    --name "bot-$agentName" `
-    --template-file $botTemplate `
-    --parameters `
-      botName=$agentBotName `
-      displayName="$displayName" `
-      msaAppId=$principalId `
-      tenantId=$TenantId `
-      endpoint=$botEndpoint `
-      logAnalyticsWorkspaceId=$LogAnalyticsWorkspaceId `
-    --query 'properties.outputs.botServiceArmId.value' -o tsv
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botArmId)) {
-    throw "[publish-runner] Bot Service deployment failed for '$agentName' (exit $LASTEXITCODE)."
-  }
-  Write-Host "[publish-runner] ($agentName) Bot Service ARM ID: $botArmId"
-
-  # --- Steps 3+4: enable activity protocol + publish to Microsoft 365 ---
-  Write-Host "[publish-runner] ($agentName) Steps 3+4: publishing to Teams / M365 (scope=$PublishScope)..."
-  $publishOut = & $publishScript `
-    -Mode Publish `
-    -FoundryProjectEndpoint $FoundryProjectEndpoint `
-    -AgentName $agentName `
-    -BotServiceArmId $botArmId `
-    -AccessToken $publishToken `
-    -DisplayName $displayName `
-    -PublishScope $PublishScope `
-    @publishMetadata *>&1 | Out-String
-  Write-Host $publishOut
-  if ($publishOut -notmatch '\[publish-teams\] Done\.') {
-    throw "[publish-runner] Publish did not complete for '$agentName'."
-  }
-  Write-Host "[publish-runner] ($agentName) Teams / M365 publish complete. Bot: $agentBotName."
+# --- Step 1: get the agent identity (principal_id = the bot Microsoft App ID) ---
+Write-Host "[publish-runner] ($AgentName) Step 1: reading agent identity..."
+$identityOut = & $publishScript `
+  -Mode GetIdentity `
+  -FoundryProjectEndpoint $FoundryProjectEndpoint `
+  -AgentName $AgentName `
+  -AccessToken $token *>&1 | Out-String
+Write-Host $identityOut
+if ($identityOut -notmatch '\[publish-teams\] Done\.') {
+  throw "[publish-runner] GetIdentity did not complete for '$AgentName'."
 }
+$principalId = ([regex]'PRINCIPAL_ID=([0-9a-fA-F-]{36})').Match($identityOut).Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($principalId)) {
+  throw "[publish-runner] Could not parse principal_id for '$AgentName'."
+}
+Write-Host "[publish-runner] ($AgentName) principal_id (bot App ID): $principalId"
 
-Write-Host "[publish-runner] All agents published (scope=$PublishScope): $($agents -join ', ')."
+# --- Step 2: create the agent's Azure Bot Service (ARM, as the VM MI / Contributor) ---
+Write-Host "[publish-runner] ($AgentName) Step 2: creating Azure Bot Service '$agentBotName' (endpoint $botEndpoint)..."
+$botArmId = az deployment group create `
+  --resource-group $ResourceGroup `
+  --name "bot-$AgentName" `
+  --template-file $botTemplate `
+  --parameters `
+    botName=$agentBotName `
+    displayName="$displayName" `
+    msaAppId=$principalId `
+    tenantId=$TenantId `
+    endpoint=$botEndpoint `
+    logAnalyticsWorkspaceId=$LogAnalyticsWorkspaceId `
+  --query 'properties.outputs.botServiceArmId.value' -o tsv
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botArmId)) {
+  throw "[publish-runner] Bot Service deployment failed for '$AgentName' (exit $LASTEXITCODE)."
+}
+Write-Host "[publish-runner] ($AgentName) Bot Service ARM ID: $botArmId"
+
+# --- Steps 3+4: enable activity protocol + publish to Microsoft 365 ---
+Write-Host "[publish-runner] ($AgentName) Steps 3+4: publishing to Teams / M365 (scope=$PublishScope)..."
+$publishOut = & $publishScript `
+  -Mode Publish `
+  -FoundryProjectEndpoint $FoundryProjectEndpoint `
+  -AgentName $AgentName `
+  -BotServiceArmId $botArmId `
+  -AccessToken $publishToken `
+  -DisplayName $displayName `
+  -PublishScope $PublishScope `
+  @publishMetadata *>&1 | Out-String
+Write-Host $publishOut
+if ($publishOut -notmatch '\[publish-teams\] Done\.') {
+  throw "[publish-runner] Publish did not complete for '$AgentName'."
+}
+Write-Host "[publish-runner] ($AgentName) Teams / M365 publish complete (scope=$PublishScope). Bot: $agentBotName."

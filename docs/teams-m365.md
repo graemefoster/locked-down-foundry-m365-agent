@@ -2,12 +2,11 @@
 
 > Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
 
-The Teams / M365 publish path is **always deployed**. It publishes **every seeded agent** (`hello-world-agent`,
-`gateway-model-agent`, `teams-agent`) to Teams / M365, each with its own Azure Bot
-Service. A **single, path-routed APIM Teams API** listens on `/teams/{agentName}` and
-rewrites each request to the matching agent's activityProtocol endpoint, so one API
-backs any number of agents. Edit `teamsPublishAgentNames` to change which agents are
-published. This publishes to
+The Teams / M365 publish path is **always deployed**. Each agent that wants a Teams presence is
+published by **its own deploy workflow** (`deploy-teams-agent.yml`, `deploy-test-agent-one.yml`,
+… — set `publishToTeams: true`), one Azure Bot Service per agent. A **single, path-routed APIM
+Teams API** listens on `/teams/{agentName}` and rewrites each request to the matching agent's
+activityProtocol endpoint, so one API backs any number of agents. This publishes to
 **Microsoft Teams and Microsoft 365 Copilot**, even
 though the Foundry endpoint has public network access disabled. This follows the
 Learn article
@@ -87,17 +86,17 @@ activityProtocol endpoint.
 
 ### Workflow-driven publish
 
-Steps 2–4 need values that only exist **after** the agents are seeded (each agent
-identity `principal_id` = that bot's Microsoft App ID), so publishing is driven by the
-in-VNet self-hosted GitHub Actions workflows
-([`deploy-vnet.yml`](../.github/workflows/deploy-vnet.yml) and
-[`deploy-test-agent-one.yml`](../.github/workflows/deploy-test-agent-one.yml), via the
+Steps 2–4 need values that only exist **after** the agent is deployed (the agent identity
+`principal_id` = that bot's Microsoft App ID), so publishing is driven by the in-VNet
+self-hosted GitHub Actions workflows (the reusable
+[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml), called by each per-agent workflow
+with `publishToTeams: true`, via the
 [`publish-teams`](../.github/actions/publish-teams/action.yml) composite action →
 [`scripts/publish-teams-runner.ps1`](../scripts/publish-teams-runner.ps1)) rather than
-Bicep or azd. The runner loops over the requested agent names, publishing each with its
-own bot. Because the runner **is** the in-VNet VM, everything — including the Bot Service
-ARM deployment — runs there as the VM's managed identity (Contributor on the resource
-group); there is no host-side orchestration and no `az vm run-command`.
+Bicep or azd. Each per-agent workflow publishes its single agent with its own bot. Because the
+runner **is** the in-VNet VM, everything — including the Bot Service ARM deployment — runs there
+as the VM's managed identity (Contributor on the resource group); there is no host-side
+orchestration and no `az vm run-command`.
 
 Per agent:
 
@@ -131,10 +130,10 @@ Key parameters:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `teamsPublishAgentNames` | `['hello-world-agent','gateway-model-agent','teams-agent']` | Seeded agents to publish. Each gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
-| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by the hook once all agents are seeded. |
+| `agent-name` (publish-teams action) | — | The single agent to publish. Each per-agent workflow passes the agent it just deployed. Each agent gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
+| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by `deploy-compliancy.yml` once agents are deployed. |
 
-Optional publish metadata is read from env by the hook (`azd env set`):
+Optional publish metadata is read from repo variables by the `publish-teams` action:
 `TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,
 `TEAMS_SHORT_DESCRIPTION`, `TEAMS_FULL_DESCRIPTION`, `TEAMS_DEVELOPER_NAME`,
 `TEAMS_DEVELOPER_WEBSITE_URL`, `TEAMS_PRIVACY_URL`, `TEAMS_TERMS_OF_USE_URL`.

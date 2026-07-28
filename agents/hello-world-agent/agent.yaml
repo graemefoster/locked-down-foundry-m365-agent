@@ -1,0 +1,11 @@
+object: agent.version
+name: hello-world-agent
+description: A minimal demo prompt agent (no tools).
+definition:
+  kind: prompt
+  # The model is INJECTED at deploy time by .github/workflows/deploy-agent.yml from the caller's
+  # `model` input (deploy-hello-world-agent.yml passes vars.AZURE_AI_MODEL_DEPLOYMENT_NAME), so
+  # this manifest stays promotable across environments. The placeholder below is only used if a
+  # caller runs without a model override.
+  model: PLACEHOLDER_MODEL
+  instructions: You are a helpful AI assistant. Answer questions clearly and concisely.

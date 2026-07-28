@@ -128,7 +128,7 @@ existing VNet-integrated App Service pattern used by the Teams/YARP path.
 **Rationale:** supports every goal; keeps the reference implementation approachable and trustworthy.
 
 - [ ] **(S)** Add **GitHub issue templates** (epic / backlog item) and a `CONTRIBUTING.md` that points here.
-- [ ] **(M)** Add **PowerShell script tests** (Pester) for `scripts/*.ps1` (agent create/publish, seeding) runnable on hosted runners.
+- [ ] **(M)** Add **PowerShell script tests** (Pester) for `scripts/*.ps1` (agent create/publish, Teams publish) runnable on hosted runners.
 - [ ] **(S)** Keep the **Bicep build green** in CI (already enforced) and add `bicep lint`/`az bicep build` for every module.
 - [ ] **(S)** Add an **end-to-end runbook** ("from empty subscription to a deployed, evaluated, Teams-published agent") to the docs index.
 - [ ] **(S)** Add a **glossary / architecture diagram** covering prompt vs. hosted agents, the eval loop, and the promotion flow.

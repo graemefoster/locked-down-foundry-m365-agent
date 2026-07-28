@@ -124,37 +124,41 @@ never stored in the repo.
 
 ---
 
-## Seeding agents
+## Deploying agents
 
-The Foundry endpoint is private, so agents are created by running
-[`scripts/seed-agents.ps1`](../scripts/seed-agents.ps1) **on the locked-down VM** (the only
-host inside the VNet that can reach the private endpoint). azd no longer does this — seeding
-runs on the **in-VNet self-hosted GitHub Actions runner**, which executes the script natively
-on the VM as its managed identity. So you must have the runner enabled
+The Foundry endpoint is private, so agents are created/updated **on the locked-down VM** (the
+only host inside the VNet that can reach the private endpoint). azd no longer does this — it runs
+on the **in-VNet self-hosted GitHub Actions runner**, which executes natively on the VM as its
+managed identity. So you must have the runner enabled
 (see [docs/github-runner.md](./github-runner.md)).
 
-Once infrastructure is provisioned and the runner is installed:
+**One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
+caller workflow (`deploy-<name>-agent.yml`) that calls the reusable
+[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml). The reusable workflow converts the
+manifest with `yq`, injects the per-environment model (and MCP `server_url` if the manifest has an
+MCP tool), then creates/updates the agent version and publishes it. Once infrastructure is
+provisioned and the runner is installed:
 
 ```bash
-# Seed (or re-seed) the agents from inside the VNet:
-gh workflow run deploy-vnet.yml
+# Deploy (or re-deploy) an agent from inside the VNet — run whichever you need:
+gh workflow run deploy-hello-world-agent.yml
+gh workflow run deploy-gateway-model-agent.yml
+gh workflow run deploy-teams-agent.yml       # also publishes to Teams (gated by vnet-deploy)
+gh workflow run deploy-test-agent-one.yml
 ```
 
-To change which agents are created, edit the `$agentsToCreate` array in
-`scripts/seed-agents.ps1`. The script is **idempotent** — an existing agent (matched by name)
+To add an agent, add a manifest folder under `agents/` and a thin caller workflow (copy an
+existing `deploy-*-agent.yml`). Deploys are **idempotent** — an existing agent (matched by name)
 gets a fresh version rather than a duplicate, so re-running is safe.
 
 **Requirements:**
 - The in-VNet self-hosted runner must be installed (`GITHUB_RUNNER_REPO_URL` set before
   provisioning). The runner VM's managed identity already holds **Foundry User** on the project
-  (granted by the template), so `seed-agents.ps1` can call the Agents API via IMDS — no
-  `az login` needed.
-- `deploy-vnet.yml` is `workflow_dispatch`-only, guarded by a repository check and the
-  `vnet-deploy` environment (add a required reviewer for an approval gate).
-
-If you need to (re)seed from another host inside the VNet, run `scripts/seed-agents.ps1`
-directly on that host under `pwsh`, passing `-FoundryProjectEndpoint` and
-`-ModelDeploymentName`.
+  (granted by the template), so `create-agent.ps1` / `publish-agent.ps1` call the Agents API via
+  IMDS — no `az login` needed.
+- The per-agent workflows are `workflow_dispatch`-only, guarded by a repository check; the
+  optional Teams-publish job is gated by the `vnet-deploy` environment (add a required reviewer
+  for an approval gate).
 
 ## Maintenance
 

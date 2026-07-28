@@ -1,0 +1,11 @@
+object: agent.version
+name: gateway-model-agent
+description: Demo prompt agent served through the enterprise model gateway (APIM).
+definition:
+  kind: prompt
+  # INJECTED at deploy time from the caller's `model` input
+  # (deploy-gateway-model-agent.yml passes vars.SEED_SECOND_AGENT_MODEL, the
+  # "<apim-connection-name>/<exposed-model-name>" gateway reference — env-specific, so it must
+  # NOT be hardcoded here). The placeholder is only used if a caller runs without a model override.
+  model: PLACEHOLDER_MODEL
+  instructions: You are a helpful AI assistant served through the enterprise model gateway. Answer questions clearly and concisely.

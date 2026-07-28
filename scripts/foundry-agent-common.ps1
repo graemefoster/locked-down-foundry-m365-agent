@@ -3,20 +3,19 @@
   ------------------------------------------------------------------------------------
   These functions run ON the private VNet self-hosted runner (the only host that can reach
   the Foundry private endpoint). They acquire a managed-identity token via IMDS and call the
-  Agents REST API, mirroring the proven pattern in scripts/seed-agents.ps1.
+  Agents REST API. This is the single source of truth for the Foundry Agents REST helpers.
 
   PowerShell 7 (pwsh) and cross-platform: no external modules, no ConvertFrom-Yaml.
 
-  Callers set the script-scoped $script:FoundryEndpoint and $script:ApiVersion before use, or
-  pass them through the functions below.
+  Callers pass the Foundry endpoint and API version through each function's -Endpoint /
+  -ApiVersion parameters (see create-agent.ps1 / publish-agent.ps1).
 #>
 $ErrorActionPreference = 'Stop'
 
 function Get-FoundryToken {
   # Acquire a token for the Foundry data plane (https://ai.azure.com) from the VM managed
   # identity via IMDS. We use IMDS directly rather than the Azure CLI because the self-hosted
-  # runner service can hold a stale PATH in which `az` is not resolvable. This mirrors the
-  # proven approach in scripts/seed-agents.ps1.
+  # runner service can hold a stale PATH in which `az` is not resolvable.
   $response = Invoke-RestMethod `
     -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fai.azure.com%2F' `
     -Headers @{ Metadata = 'true' } `

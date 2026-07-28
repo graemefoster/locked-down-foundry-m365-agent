@@ -13,7 +13,8 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `azure.yaml` | Wires `infra/` + the `preprovision` and `predown` hooks. **azd runs nothing after provision** — no predeploy/postdeploy. |
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the in-VNet GitHub runner (on the VM) + deletes capability hosts before teardown. |
 | `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. Now used only by `predown` (runner deregistration). |
-| `scripts/seed-agents.ps1` | Runs **on the private Linux VM**, natively via the in-VNet runner workflow (`deploy-vnet.yml`), to create agents. |
+| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
+| `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; env-specific model / MCP URL are injected at deploy time. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
 Most don't reference Bicep file paths; the exception is the in-VNet MCP-compliance workflow
@@ -28,8 +29,10 @@ azd up
  └─ provision  → deploys infra/main.bicep (all Azure resources). Nothing runs after provision.
 
 Post-provision (agent seeding, MCP compliance, Teams publish)
- └─ in-VNet self-hosted runner workflows (.github/workflows/deploy-vnet.yml,
-    deploy-test-agent-one.yml, deploy-compliancy.yml) — run natively on the private VM.
+ └─ in-VNet self-hosted runner workflows — run natively on the private VM:
+    * one thin per-agent workflow each (deploy-hello-world-agent.yml, deploy-gateway-model-agent.yml,
+      deploy-teams-agent.yml, deploy-test-agent-one.yml) → the reusable deploy-agent.yml
+    * deploy-compliancy.yml (MCP compliance)
 
 azd down
  └─ (predown hook) → deregisters the runner + deletes capability hosts, then teardown.
@@ -51,18 +54,23 @@ azd down
   `azd provision`. It is not a soft-delete or name-collision problem.
 
 ### 2. Post-provision — in-VNet runner workflows (no azd involvement)
-- The Foundry endpoint is **private**, so agent seeding / Teams publishing / MCP compliance run
+- The Foundry endpoint is **private**, so agent deploys / Teams publishing / MCP compliance run
   on the **in-VNet self-hosted GitHub Actions runner** (which IS the private Linux VM), reaching
   the endpoint directly. The runner is therefore **required** for these steps.
-- `deploy-vnet.yml` runs `scripts/seed-agents.ps1` (and, optionally, the `publish-teams`
-  composite action → `scripts/publish-teams-runner.ps1`). `deploy-compliancy.yml` applies MCP
-  compliance. All are `workflow_dispatch`-only, repository-guarded, and gated by the
-  `vnet-deploy` environment.
-- Idempotent: an existing agent (matched by name) gets a fresh version. Edit the
-  `$agentsToCreate` array in `scripts/seed-agents.ps1` to change which agents are seeded.
-- The runner VM's managed identity holds **Foundry User** on the project (so `seed-agents.ps1`
-  calls the Agents API via IMDS) and **Contributor** on the RG (so the Teams path can deploy the
-  Bot Service). VM name is surfaced as the `GITHUB_ACTIONS_RUNNER_VM_NAME` Bicep output.
+- **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
+  caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
+  `.github/workflows/deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
+  injects the per-env model (and MCP `server_url` if present), then runs the `create-agent` and
+  `publish-agent` composite actions; an optional gated `publish-teams` job publishes that single
+  agent. `deploy-compliancy.yml` applies MCP compliance. All are `workflow_dispatch`-only,
+  repository-guarded; the Teams-publish / compliance steps are gated by the `vnet-deploy`
+  environment.
+- Idempotent: an existing agent (matched by name) gets a fresh version. Add an agent by adding a
+  manifest folder + a thin caller workflow.
+- The runner VM's managed identity holds **Foundry User** on the project (so `create-agent.ps1` /
+  `publish-agent.ps1` call the Agents API via IMDS) and **Contributor** on the RG (so the Teams
+  path can deploy the Bot Service). VM name is surfaced as the `GITHUB_ACTIONS_RUNNER_VM_NAME`
+  Bicep output.
 
 ### 3. Predown hook — runner deregistration + capability-host cleanup (`hooks/predown.ps1`)
 - Runs on the azd host **before** `azd down` deletes anything. Two best-effort phases.

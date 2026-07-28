@@ -1,0 +1,11 @@
+object: agent.version
+name: teams-agent
+description: The agent published to Microsoft Teams / M365, served through the model gateway.
+definition:
+  kind: prompt
+  # INJECTED at deploy time from the caller's `model` input
+  # (deploy-teams-agent.yml passes vars.SEED_SECOND_AGENT_MODEL, the gateway
+  # "<apim-connection-name>/<exposed-model-name>" reference — env-specific, do NOT hardcode).
+  # The placeholder is only used if a caller runs without a model override.
+  model: PLACEHOLDER_MODEL
+  instructions: You are a helpful AI assistant available in Microsoft Teams, served through the enterprise model gateway. Answer questions clearly and concisely.
