@@ -1,5 +1,8 @@
 # Architecture deep dive
 
+> **Cross-cutting foundation** (underpins all three levels). Part of the
+> [locked-down Foundry agent](../README.md) reference implementation.
+
 Resource-by-resource detail of the network-secured Foundry agent environment. For the rule-by-rule networking reference see [NETWORKING.md](../NETWORKING.md); for deployment steps see [deployment.md](./deployment.md).
 
 ## Network Secured Agent Project Architecture Deep Dive
@@ -149,19 +152,27 @@ Private endpoints ensure secure, internal-only connectivity. Private endpoints a
 
 ```text
 infra/
-├── main.bicep                  # Orchestrator: wires all modules + emits azd outputs
+├── main.bicep                  # Thin orchestrator: declares params + calls the stages, emits azd outputs
 ├── main.parameters.json        # azd parameter file (${VAR=default} env bindings)
-└── modules/
-    ├── network/                # VNets (hub + spokes), subnets, peering, DNS resolver,
-    │                           #   firewall, private endpoints, flow logs
-    ├── foundry/                # AI account/project identity, capability host,
-    │                           #   workspace-id formatting
-    ├── resources/              # ACR, Key Vault, VMs (Linux worker + optional Windows
-    │                           #   dev VM), Bastion, App Service, dependent resources
-    │                           #   (Cosmos/Storage/Search)
-    ├── encryption/             # CMK encryption for ACR, AI account, Storage
-    ├── rbac/                   # All role assignments (incl. Linux VM → Foundry User)
-    └── model-gateway/          # Optional APIM Standard v2 + provider Foundry spoke
+└── stages/                     # Sequential deployment stages (deps point downward: 00 ← 10 ← 13 ← 15 ← 20 ← 30 ← 40)
+    ├── 00-foundation/          # Networking (hub + spokes, subnets, peering, DNS resolver,
+    │                           #   firewall, flow logs) + observability
+    ├── 10-platform/            # Key Vault, ACR, dependent resources (Cosmos/Storage/Search),
+    │                           #   App Service + YARP, APIM/provider Foundry (model gateway),
+    │                           #   data-resource private endpoints, Storage CMK encryption
+    ├── 13-foundry/             # Foundry (AI Services) account + model + its private endpoint,
+    │                           #   Key Vault / App Insights RBAC, and account CMK encryption
+    ├── 15-foundry-project/     # AI project + BYO connections, project data-plane RBAC,
+    │                           #   Key Vault RBAC, and the Agents capability host
+    ├── 20-workload-mcp/        # MCP web app, app registration, builtin-auth, APIM MCP servers
+    ├── 30-governance/          # Project MCP connections, APIM policies/compliance/lockdown,
+    │                           #   RAI guardrail, Teams API, firewall rules
+    └── 40-runner/              # Linux worker VM (+ optional Windows dev VM / Bastion),
+                                #   runner RBAC, PAT secret, runner extension
 ```
+
+Each stage co-locates the Bicep modules it owns under category subfolders
+(`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`,
+`governance/`, `model-gateway/`) — there is no shared `infra/modules/` tree.
 
 > **Note:** The template always creates the VNet and delegates the Agents subnet to `Microsoft.App/environments` for you.

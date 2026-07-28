@@ -1,5 +1,9 @@
 # Deployment guide
 
+> **Level 2 — Automate agent deployment.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. The in-VNet runner that
+> makes private-endpoint agent deployment possible: [github-runner.md](./github-runner.md).
+
 How to deploy, seed agents, and operate the network-secured Foundry agent environment. See the [README](../README.md) for the quick start and [architecture.md](./architecture.md) for the resource/design deep dive.
 
 ## Prerequisites
@@ -86,11 +90,11 @@ self-contained.
 
 [Azure Developer CLI](https://aka.ms/azd) (`azd`) is the only supported deployment path.
 All infrastructure lives under [`infra/`](../infra) and is wired through
-[`azure.yaml`](./azure.yaml).
+[`azure.yaml`](../azure.yaml).
 
 ```bash
-azd up          # provision infrastructure (+ predeploy hook once a service is defined)
-# or, to provision only:
+azd up          # provision infrastructure ONLY (azd deploys no agents post-provision)
+# or, equivalently:
 azd provision
 ```
 
@@ -109,8 +113,11 @@ never stored in the repo.
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
-> **Note:** `azd provision` creates all infrastructure but **does not seed agents**. Seed
-> them separately (see below).
+> **Note:** `azd` **only provisions infrastructure** — it deploys no agents. Its sole
+> post-provision step is the `postprovision` hook, which pushes the azd outputs into the repo's
+> GitHub Actions variables (`gh variable set`) so the deploy workflows work without hand-copying
+> values. Agent seeding, MCP compliance and Teams / M365 publishing all run from the in-VNet
+> self-hosted GitHub Actions runner (see below).
 
 > **Note — CMK / Key Vault propagation:** provisioning may occasionally fail the first time
 > with `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`
@@ -123,50 +130,41 @@ never stored in the repo.
 
 ---
 
-## Seeding agents
+## Deploying agents
 
-The Foundry endpoint is private, so agents are created by running
-[`scripts/seed-agents.ps1`](../scripts/seed-agents.ps1) **on the locked-down VM** (the only
-host inside the VNet that can reach the private endpoint). This is wired as an
-[Azure Developer CLI](https://aka.ms/azd) **`predeploy` hook**
-([`hooks/predeploy.ps1`](../hooks/predeploy.ps1)), which uses `az vm run-command` to execute
-the script on the VM.
+The Foundry endpoint is private, so agents are created/updated **on the locked-down VM** (the
+only host inside the VNet that can reach the private endpoint). azd no longer does this — it runs
+on the **in-VNet self-hosted GitHub Actions runner**, which executes natively on the VM as its
+managed identity. So you must have the runner enabled
+(see [docs/github-runner.md](./github-runner.md)).
 
-Once infrastructure is provisioned (so the Bicep outputs are in the azd environment):
+**One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
+caller workflow (`deploy-<name>-agent.yml`) that calls the reusable
+[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml). The reusable workflow converts the
+manifest with `yq`, injects the MCP `server_url` if the manifest has an
+MCP tool, then creates/updates the agent version and publishes it. Once infrastructure is
+provisioned and the runner is installed:
 
 ```bash
-# Iterate on agents without re-provisioning:
-azd hooks run predeploy
-
-# Or, as part of a full deploy (runs the predeploy hook first):
-azd deploy
+# Deploy (or re-deploy) an agent from inside the VNet — run whichever you need:
+gh workflow run deploy-hello-world-agent.yml
+gh workflow run deploy-gateway-model-agent.yml
+gh workflow run deploy-teams-agent.yml       # also publishes to Teams (gated by vnet-deploy)
+gh workflow run deploy-test-agent-one.yml
 ```
 
-To change which agents are created, edit the `$agentsToCreate` array in
-`scripts/seed-agents.ps1`. The script is **idempotent** — agents that already exist (matched
-by name) are skipped, so re-running is safe.
+To add an agent, add a manifest folder under `agents/` and a thin caller workflow (copy an
+existing `deploy-*-agent.yml`). Deploys are **idempotent** — an existing agent (matched by name)
+gets a fresh version rather than a duplicate, so re-running is safe.
 
 **Requirements:**
-- `az` CLI and PowerShell (`pwsh`) on the machine running the hook.
-- The caller needs permission to invoke VM run-commands
-  (`Microsoft.Compute/virtualMachines/runCommands/*`, e.g. **Virtual Machine Contributor**
-  on the VM/resource group). The VM's own managed identity already holds **Foundry User** on
-  the project (granted by the template) so the on-VM script can call the Agents API.
-- `azd deploy` only triggers the hook once a service is defined in `azure.yaml`;
-  `azd hooks run predeploy` works regardless and is the quickest way to (re)seed.
-
-To (re)seed agents manually — for example outside the hook or from another host inside the
-VNet — run the seeding script yourself. The seed target is the **Linux** worker VM, so use
-`RunShellScript` and invoke `pwsh` explicitly (which is exactly what the
-`hooks/vm-run-command.ps1` shim does on the hooks' behalf):
-
-```bash
-az vm run-command invoke --command-id RunShellScript --name <linux-vm-name> -g <rg> \
-  --scripts "pwsh -NoProfile -File /tmp/seed-agents.ps1 -FoundryProjectEndpoint '<endpoint>' -ModelDeploymentName '<model>'"
-```
-
-(copy `scripts/seed-agents.ps1` to `/tmp` on the VM first — or just run
-`azd hooks run predeploy`, which handles the copy for you).
+- The in-VNet self-hosted runner must be installed (`GITHUB_RUNNER_REPO_URL` set before
+  provisioning). The runner VM's managed identity already holds **Foundry User** on the project
+  (granted by the template), so `create-agent.ps1` / `publish-agent.ps1` call the Agents API via
+  IMDS — no `az login` needed.
+- The per-agent workflows are `workflow_dispatch`-only, guarded by a repository check; the
+  optional Teams-publish job is gated by the `vnet-deploy` environment (add a required reviewer
+  for an approval gate).
 
 ## Maintenance
 

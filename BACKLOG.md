@@ -41,8 +41,8 @@ Understanding the current state keeps the backlog honest. Already shipped:
   against the **private** Foundry endpoint from an in-VNet self-hosted runner.
 - **Offline evals in CI**: [`.github/workflows/nightly-eval-agent-one.yml`](./.github/workflows/nightly-eval-agent-one.yml)
   runs `microsoft/ai-agent-evals` against `agents/test-agent-one/eval-data.json` on a schedule.
-- **Teams / M365 publish path** and an **always-on private APIM model gateway**
-  ([docs/teams-m365.md](./docs/teams-m365.md), [docs/model-gateway.md](./docs/model-gateway.md)).
+- **Teams / M365 publish path** and an **always-on private APIM AI gateway** (models + MCP +
+  M365 auth) ([docs/teams-m365.md](./docs/teams-m365.md), [docs/ai-gateway.md](./docs/ai-gateway.md)).
 - **In-VNet self-hosted GitHub Actions runner** so pipelines can reach the private endpoint
   ([docs/github-runner.md](./docs/github-runner.md)).
 
@@ -101,10 +101,10 @@ environment, evaluate it, then promote the *same* agent definition to a higher e
 
 ## Epic 5 — Governance: RPM, token usage & cost controls (blue-sky)
 
-**Rationale:** goal 5. The private APIM model gateway is the natural enforcement point for
+**Rationale:** goal 5. The private APIM AI gateway is the natural enforcement point for
 rate limiting, quotas, and usage attribution.
 
-- [x] Private APIM model gateway fronting the models (enforcement point exists).
+- [x] Private APIM AI gateway fronting the models (enforcement point exists).
 - [ ] **(M)** Add APIM **rate-limit / quota policies** (RPM and token-based) per agent or per consumer, driven from Bicep parameters.
 - [ ] **(M)** Capture **token-usage metrics** per agent and export to Log Analytics for cost attribution / chargeback.
 - [ ] **(M)** Build a **usage & cost dashboard** (tokens, RPM, top consumers) and budget **alerts**.
@@ -128,7 +128,7 @@ existing VNet-integrated App Service pattern used by the Teams/YARP path.
 **Rationale:** supports every goal; keeps the reference implementation approachable and trustworthy.
 
 - [ ] **(S)** Add **GitHub issue templates** (epic / backlog item) and a `CONTRIBUTING.md` that points here.
-- [ ] **(M)** Add **PowerShell script tests** (Pester) for `scripts/*.ps1` (agent create/publish, seeding) runnable on hosted runners.
+- [ ] **(M)** Add **PowerShell script tests** (Pester) for `scripts/*.ps1` (agent create/publish, Teams publish) runnable on hosted runners.
 - [ ] **(S)** Keep the **Bicep build green** in CI (already enforced) and add `bicep lint`/`az bicep build` for every module.
 - [ ] **(S)** Add an **end-to-end runbook** ("from empty subscription to a deployed, evaluated, Teams-published agent") to the docs index.
 - [ ] **(S)** Add a **glossary / architecture diagram** covering prompt vs. hosted agents, the eval loop, and the promotion flow.

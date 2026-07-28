@@ -1,26 +1,32 @@
 <#
   Publish a seeded Foundry agent to Teams / M365 (runs ON the private VM)
   ----------------------------------------------------------------------
-  Executed on the locked-down VM (inside the private VNet) by the azd `postdeploy`
-  hook (hooks/postdeploy.ps1) via `az vm run-command`, because Steps 1/3/4 call the
-  PRIVATE Foundry endpoint that only the VM can reach.
+  Executed on the locked-down VM (inside the private VNet) by the in-VNet Teams-publish
+  workflow path (scripts/publish-teams-runner.ps1, driven by the publish-teams composite
+  action), because Steps 1/3/4 call the PRIVATE Foundry endpoint that only the VM can reach.
 
   Ref: https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot-virtual-network
 
-  Two modes (the hook needs the agent identity BEFORE it can create the bot):
+  Two modes (the caller needs the agent identity BEFORE it can create the bot):
 
     -Mode GetIdentity : Step 1 — GET the agent, print instance_identity.principal_id /
-                        client_id as parseable markers for the host hook.
+                        client_id as parseable markers for the caller.
     -Mode Publish     : Step 3 — PATCH the agent to add the `activity` protocol +
                         BotServiceRbac scheme (keeping responses + Entra), then
                         Step 4 — POST the Microsoft 365 publish API with the bot ARM ID.
+
+  Step 2 (create the Azure Bot Service) is NOT here — the caller (publish-teams-runner.ps1)
+  does it between the two modes, using the principal_id this script prints in Step 1.
 
   Idempotent: re-running GetIdentity is read-only; the PATCH is a merge-patch; and a
   publish of an already-published appVersion ("version already exists") is treated as
   success. Prints '[publish-teams] Done.' only on success (the host gates on this marker).
 
-  Both modes require -AccessToken: a delegated USER token (aud https://ai.azure.com) the
-  host hook acquires and forwards. The publish OBO step rejects app-only / MI tokens (502).
+  Token: all calls hit the https://ai.azure.com audience. Step 1 (GET) and Step 3 (PATCH)
+  accept ANY valid token — the runner passes the VM managed-identity token for those. Only
+  Step 4 (the M365 publish OBO exchange) needs a delegated USER token; an app-only / MI token
+  has no user context and fails with a bare HTTP 502. The runner therefore forwards the user
+  token only for the Publish mode call (see its TOKEN NOTE).
 #>
 param(
   [Parameter(Mandatory = $true)]  [ValidateSet('GetIdentity', 'Publish')] [string]$Mode,
@@ -39,12 +45,12 @@ param(
   [Parameter(Mandatory = $false)] [string]$PrivacyUrl = 'https://privacy.microsoft.com',
   [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl = 'https://www.microsoft.com/legal/terms-of-use',
 
-  # REQUIRED delegated USER bearer token for the https://ai.azure.com audience, acquired
-  # host-side by the postdeploy hook (`az account get-access-token`). This script only ever
-  # runs as part of publishing an agent, and the Microsoft 365 publish step (Step 4) performs
-  # an on-behalf-of (OBO) exchange with the caller's token to submit the app to the M365
-  # catalog. An app-only / managed-identity token has no user context and fails server-side
-  # with a bare HTTP 502, so a USER token is mandatory (the read + PATCH steps accept it too).
+  # REQUIRED bearer token for the https://ai.azure.com audience. GetIdentity (Step 1) and the
+  # Step 3 PATCH accept any valid token — the runner passes the VM managed-identity token there.
+  # Mode Publish MUST be given a delegated USER token: the Step 4 M365 publish does an
+  # on-behalf-of (OBO) exchange, and an app-only / MI token has no user context and fails with a
+  # bare HTTP 502. The caller (publish-teams composite action) acquires the user token via
+  # device-code sign-in and forwards it for the Publish call only.
   [Parameter(Mandatory = $true)] [string]$AccessToken
 )
 $ErrorActionPreference = 'Stop'

@@ -1,5 +1,9 @@
 # Foundry Standard Agent — Network Lockdown Reference
 
+> **Level 1 — Lock down the network.** Part of the
+> [locked-down Foundry agent](./README.md) reference implementation.
+> Resource deep dive: [docs/architecture.md](./docs/architecture.md).
+
 > The definitive, rule-by-rule reference for the network posture in this sample
 > (`99-private-network-standard-agent-firewall`). Every NSG rule and every
 > firewall rule is documented here with its purpose and its source-of-truth
@@ -66,7 +70,7 @@ tags** — the tightest option that still works without breaking the platform.
 ## Agent subnet NSG (`<vnet>-agent-nsg`)
 
 Attached to `agent-subnet` only. Deny-by-default in **both** directions.
-Defined in [`infra/modules/network/foundry-spoke-vnet.bicep`](./infra/modules/network/foundry-spoke-vnet.bicep).
+Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](./infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
 
 ### Inbound
 
@@ -231,7 +235,7 @@ against a dataset. The action can also produce a **version-over-version comparis
 
 ## Azure Firewall — deny-by-default for the agent subnet
 
-Basic tier, defined in [`infra/modules/network/firewall.bicep`](./infra/modules/network/firewall.bicep).
+Basic tier, defined in [`infra/stages/00-foundation/network/firewall.bicep`](./infra/stages/00-foundation/network/firewall.bicep).
 Azure Firewall has an **implicit final DENY**: anything not matched by an Allow
 rule is dropped. We exploit that to lock the agent subnet while leaving the dev
 VM and App Service spoke on their existing general egress.
@@ -277,6 +281,10 @@ control-plane surfaces plus the single A365 hostname.
 ---
 
 ## Optional: Model Gateway spoke (APIM + provider Foundry)
+
+> **Naming:** the Bicep/spoke is called *model-gateway*, but conceptually this APIM is the
+> shared **AI gateway** (models + MCP + M365 auth). See [docs/ai-gateway.md](./docs/ai-gateway.md).
+> The rule and resource names below keep the `model-gateway` prefix.
 
 Always deployed. It adds a
 third spoke that fronts a "real" model provider Foundry behind Azure API
@@ -345,9 +353,9 @@ service-scoped `applicationinsights` diagnostic, W3C correlation, 100% sampling)
 
 ---
 
-## Optional: Teams / M365 publish inbound path
+## Teams / M365 publish inbound path
 
-Enabled by default (`enableTeamsPublish=true`; set `false` to opt out). Publishes the primary
+Always deployed. Publishes the primary
 agent to Microsoft Teams / M365 Copilot per the Learn article
 [Publish agents to Microsoft 365 and Teams by using the REST API](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network).
 Reuses the (now always-on) shared APIM gateway spoke.
@@ -390,7 +398,9 @@ Teams / M365 Copilot
 The original Bot Framework JWT is **forwarded unchanged** to Foundry (Foundry
 re-validates it and authorizes the end user); the APIM `validate-jwt` is
 defense-in-depth. The bot App ID = the agent identity `principal_id`, which only
-exists after seeding, so the audience is pinned live by the postdeploy hook.
+exists after seeding; the audience allowlist is not pinned automatically (the former
+postdeploy Phase B was removed), so issuer validation + IP restriction carry the check
+unless you pin it manually.
 
 > **Single-tenant lockdown via `serviceurl`.** The Bot Framework token has **no `tid`
 > claim**, but its signed `serviceurl` embeds the caller's tenant GUID
@@ -410,10 +420,11 @@ exists after seeding, so the audience is pinned live by the postdeploy hook.
   > ⚠️ The `AzureBotService` service tag is the wrong allow-list here — it covers
   > DirectLine + the Bot Service token cache, **not** the Teams channel adapter's
   > source IPs, so using it silently blocks all Teams traffic.
-  > ⚠️ **Orphan-PE trap:** flipping `enableTeamsPublish` on an *already-provisioned*
-  > environment leaves the pre-flag YARP private endpoint behind, unmanaged by azd. It
-  > keeps YARP effectively private (PNA Disabled) and blocks inbound. Delete the PE and
-  > set `publicNetworkAccess=Enabled` manually (the Bicep is correct for fresh deploys).
+  > ⚠️ **Legacy orphan-PE trap:** environments provisioned before Teams publish became
+  > always-on (i.e. with the removed `enableTeamsPublish=false` opt-out) may have a pre-flag
+  > YARP private endpoint left behind, unmanaged by azd. It keeps YARP effectively private
+  > (PNA Disabled) and blocks inbound. Delete the PE and set `publicNetworkAccess=Enabled`
+  > manually (the Bicep is correct for fresh deploys).
 - **APIM → Bot Framework IdP** (`login.botframework.com`, HTTPS:443) — a new firewall
   **application rule** (`AllowApimBotFrameworkOidc`, source apim-subnet) so `validate-jwt`
   can fetch the OIDC signing keys. Without it, inbound activities 401 (see the trap above).
@@ -480,7 +491,7 @@ AZFWNetworkRule
 NSG flow logs are **retired** (no new logs after **2025-06-30**, full retirement
 **2027-09-30**), so this sample uses the successor **VNet flow logs** on the
 agent subnet, defined in
-[`infra/modules/network/agent-flow-logs.bicep`](./infra/modules/network/agent-flow-logs.bicep):
+[`infra/stages/00-foundation/network/agent-flow-logs.bicep`](./infra/stages/00-foundation/network/agent-flow-logs.bicep):
 
 - Target: the agent subnet.
 - Storage: a dedicated locked-down account (no anonymous blob access, HTTPS
@@ -535,7 +546,7 @@ order — the earlier items are the ones that actually bit us.
    agent NSG blocks outbound to the APIM private endpoint unless explicitly
    allowed. The fix that finally worked was the `Allow-ModelGatewayApim-Outbound`
    rule (agent subnet → APIM PE CIDR :443) in
-   [`foundry-spoke-vnet.bicep`](./infra/modules/network/foundry-spoke-vnet.bicep).
+   [`foundry-spoke-vnet.bicep`](./infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
    **Verify the runtime path in the firewall** — you should see the agent subnet
    reach the APIM PE IP:
 

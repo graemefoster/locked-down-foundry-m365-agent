@@ -6,17 +6,17 @@
 
   Phase 0 - GitHub runner deregistration (only if a self-hosted runner was installed):
     Deleting the VM would otherwise leave a stale, permanently "offline" runner registered on
-    the repo. VMs have no reliable pre-delete trigger, so we do it here. The PAT lives in Key
-    Vault behind a private endpoint, so the actual work must run ON the VM (scripts/
-    deregister-runner.ps1, shipped via the vm-run-command.ps1 shim) using the VM managed
-    identity over the private data plane.
+    the repo. VMs have no reliable pre-delete trigger, so we do it here, HOST-SIDE, with the
+    GitHub CLI (`gh`) using the caller's own credentials - no PAT, no Key Vault, no VM round-
+    trip. The runner name is deterministic ('<vmName>-vnet', since the bootstrap names it
+    '<hostname>-vnet' and the VM's computerName IS the VM name), so we just delete it by name.
 
   Phase 1/2 - Foundry capability-host cleanup:
     A Foundry (Cognitive Services) account/project with an Agents capability host cannot be
     deleted cleanly while the capability host still exists - `azd down` will hang or fail on the
     account. We enumerate the capability hosts on the project (and account, to catch any
     auto-created one) and delete each. This is a control-plane (ARM) operation, so - unlike the
-    private data-plane Agents API used by predeploy - it does NOT need the in-VNet VM.
+    runner deregistration in Phase 0 - it does NOT need the in-VNet VM.
 
   Best-effort by design: if a phase's inputs can't be resolved (or Foundry / the runner were
   never provisioned), it warns and lets azd proceed. Runner deregistration NEVER fails teardown
@@ -26,13 +26,12 @@
   Required env vars (surfaced by azd from the Bicep outputs; run `azd env refresh` if missing):
       Capability hosts: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_AI_ACCOUNT_NAME,
                         AZURE_AI_PROJECT_NAME
-      Runner (Phase 0): AZURE_RESOURCE_GROUP, SEED_AGENTS_VM_NAME, GITHUB_RUNNER_REPO_URL,
-                        KEY_VAULT_NAME, GITHUB_RUNNER_PAT_SECRET_NAME, GITHUB_RUNNER_USER
+      Runner (Phase 0): GITHUB_RUNNER_REPO_URL, GITHUB_ACTIONS_RUNNER_VM_NAME (plus the GitHub
+                        CLI `gh` on the host, authenticated with admin on the repo)
 
   Caller RBAC: permission to delete capability hosts
   (Microsoft.CognitiveServices/accounts/.../capabilityHosts/delete), e.g. Cognitive Services
-  Contributor, plus - for Phase 0 - permission to invoke VM run-commands (e.g. Virtual Machine
-  Contributor).
+  Contributor. Phase 0 needs no Azure RBAC - just a `gh` login with admin on the repo.
 
   Requires: the `az` CLI, signed in (`az login`). No Az PowerShell modules are needed.
 #>
@@ -57,53 +56,53 @@ $projectName    = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME'
 # when Foundry was never provisioned (the Foundry gates below can exit early). Never fails the
 # teardown: a lingering offline runner is harmless and GitHub prunes it eventually.
 function Remove-GithubRunner {
-  $vmName        = Get-OptionalEnv 'SEED_AGENTS_VM_NAME'
-  $repoUrl       = Get-OptionalEnv 'GITHUB_RUNNER_REPO_URL'
-  $keyVaultName  = Get-OptionalEnv 'KEY_VAULT_NAME'
-  $patSecretName = Get-OptionalEnv 'GITHUB_RUNNER_PAT_SECRET_NAME'
-  $runnerUser    = Get-OptionalEnv 'GITHUB_RUNNER_USER'
+  $repoUrl = Get-OptionalEnv 'GITHUB_RUNNER_REPO_URL'
+  $vmName  = Get-OptionalEnv 'GITHUB_ACTIONS_RUNNER_VM_NAME'
 
   if ([string]::IsNullOrWhiteSpace($repoUrl)) {
     Write-Host '[predown] No GITHUB_RUNNER_REPO_URL set; no self-hosted runner to deregister. Skipping.'
     return
   }
-  if ([string]::IsNullOrWhiteSpace($resourceGroup) -or [string]::IsNullOrWhiteSpace($vmName) `
-      -or [string]::IsNullOrWhiteSpace($keyVaultName) -or [string]::IsNullOrWhiteSpace($patSecretName)) {
-    Write-Warning "[predown] Runner deregistration needs AZURE_RESOURCE_GROUP, SEED_AGENTS_VM_NAME, KEY_VAULT_NAME and GITHUB_RUNNER_PAT_SECRET_NAME (run 'azd env refresh'). Skipping - the runner may linger as offline."
+  if ([string]::IsNullOrWhiteSpace($vmName)) {
+    Write-Warning "[predown] GITHUB_ACTIONS_RUNNER_VM_NAME not set (run 'azd env refresh'); cannot derive the runner name. Skipping - the runner may linger as offline."
     return
   }
 
-  $deregisterScript = Join-Path (Split-Path $PSScriptRoot -Parent) 'scripts/deregister-runner.ps1'
-  if (-not (Test-Path $deregisterScript)) {
-    Write-Warning "[predown] Deregister script not found at '$deregisterScript'. Skipping runner deregistration."
+  # The bootstrap registers the runner as '<hostname>-vnet', and the VM's computerName IS the
+  # VM name (infra/stages/40-runner/resources/vm-linux.bicep), so the runner name is fully
+  # deterministic from host-side outputs - no need to look anything up on the VM.
+  $runnerName = "$vmName-vnet"
+  $repoPath   = ($repoUrl -replace '^https?://[^/]+/', '') -replace '/+$', ''
+
+  # gh runs on the HOST with the caller's own credentials, so this needs no PAT, no Key Vault
+  # and no VM round-trip - and it still works when the VM's egress is locked down or the VM is
+  # already unhealthy. (This repo already assumes `gh` on the host - see hooks/postprovision.ps1.)
+  if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+    Write-Warning "[predown] GitHub CLI ('gh') not found; cannot deregister runner '$runnerName'. Remove it manually from the repo's Actions settings. Skipping."
     return
   }
 
-  # Ships the .ps1 to the LINUX worker VM and runs it under pwsh (only the VM can reach the
-  # private Key Vault to read the PAT and mint a GitHub remove-token).
-  . (Join-Path $PSScriptRoot 'vm-run-command.ps1')
-
-  Write-Host "[predown] Deregistering the GitHub runner on VM '$vmName'..."
-  $result = Invoke-VmPwshScript `
-    -ResourceGroup $resourceGroup `
-    -VmName $vmName `
-    -ScriptPath $deregisterScript `
-    -Parameters @{
-      RepoUrl       = $repoUrl
-      KeyVaultName  = $keyVaultName
-      PatSecretName = $patSecretName
-      RunnerUser    = ($runnerUser ?? '')
+  Write-Host "[predown] Deregistering GitHub runner '$runnerName' from '$repoPath' (host-side via gh)..."
+  $jq = '.runners[] | select(.name == "' + $runnerName + '") | .id'
+  $runnerIds = gh api "repos/$repoPath/actions/runners" --paginate --jq $jq 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "[predown] Could not list runners for '$repoPath' (is gh authenticated with admin on the repo?). Skipping - the runner may linger as offline."
+    return
+  }
+  $ids = @($runnerIds -split '\s+' | Where-Object { $_ })
+  if ($ids.Count -eq 0) {
+    Write-Host "[predown] No runner named '$runnerName' registered on '$repoPath'. Nothing to deregister."
+    return
+  }
+  # Delete every id that matched the name (guards against accidental duplicates).
+  foreach ($id in $ids) {
+    gh api -X DELETE "repos/$repoPath/actions/runners/$id" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "[predown] Removed runner '$runnerName' (id=$id)."
     }
-
-  $message = ($result.Value | ForEach-Object { $_.Message }) -join "`n"
-  Write-Host '----- deregister-runner output (from VM) -----'
-  Write-Host $message
-  Write-Host '----------------------------------------------'
-  if ($message -notmatch '\[deregister-runner\] Done\.') {
-    Write-Warning '[predown] Runner deregistration did not report completion (see VM output above). The runner may show as offline until GitHub prunes it.'
-  }
-  else {
-    Write-Host '[predown] Runner deregistration complete.'
+    else {
+      Write-Warning "[predown] Failed to delete runner id=$id (is gh authenticated with admin on the repo?). It may linger as offline."
+    }
   }
 }
 
@@ -113,6 +112,12 @@ try {
 catch {
   Write-Warning "[predown] Runner deregistration failed ($($_.Exception.Message)). Continuing with teardown - the runner may show as offline until GitHub prunes it."
 }
+
+# =========================================================================================
+# Phases 1/2 setup: resolve the subscription + validate the Foundry inputs before touching
+# any capability host. Everything below is control-plane ARM (no VM); each gate is a
+# best-effort exit that lets azd proceed when there is nothing (or not enough info) to clean.
+# =========================================================================================
 
 # Subscription can also be discovered from the current az CLI account.
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {

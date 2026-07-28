@@ -1,5 +1,5 @@
 ---
-description: This set of templates demonstrates how to set up Azure AI Agent Service with virtual network isolation with private network links to connect the agent to your secure data.
+description: A reference implementation that shows how to run an Azure AI Foundry agent inside a locked-down, network-isolated Azure landing zone, automate its deployment, and publish it to Microsoft Teams / M365 Copilot.
 page_type: sample
 products:
 - azure
@@ -11,99 +11,187 @@ languages:
 ---
 # Locked-down Azure AI Foundry agent, published to Microsoft Teams / M365 Copilot
 
-A network-isolated Azure AI Foundry agent — private VNet, private endpoints on every
-dependency, deny-by-default firewall egress, CMK encryption, and RBAC — that can still be
-**published to Microsoft Teams / M365 Copilot** and optionally front its models through a
-private APIM model gateway.
+A reference implementation for running an **Azure AI Foundry agent inside a private,
+network-isolated Azure landing zone** — and still being able to deploy it through CI/CD
+and publish it to **Microsoft Teams / M365 Copilot**.
 
-## Overview
+Everything is infrastructure-as-code, deployed with [`azd`](https://aka.ms/azd) (the only
+supported path). Public network access is disabled by default: every service talks over
+private endpoints inside a VNet, and all egress is forced through a deny-by-default Azure
+Firewall.
 
-Infrastructure-as-code, deployed with [`azd`](https://aka.ms/azd) (the only supported
-path). Public network access is disabled by default — everything talks over private
-endpoints inside the VNet, with egress forced through a deny-by-default Azure Firewall.
+## Who this is for — and the three things it teaches
+
+This sample is written for engineers who are **comfortable with Azure** (VNets, private
+endpoints, RBAC, `azd`/Bicep) but **newer to Azure AI Foundry**. It answers three questions,
+in order, each building on the last:
+
+| Level | Question | Start here |
+|:-----:|----------|------------|
+| **1** | **How do I lock down the network** around a Foundry agent so nothing leaks in or out? | [Level 1 — Network lockdown](#level-1--lock-down-the-network) |
+| **2** | **How do I automate deployment** of agents into that locked-down environment when the endpoint is private? | [Level 2 — Automate agent deployment](#level-2--automate-agent-deployment) |
+| **3** | **How do I publish an agent to M365 / Teams** even though Foundry is unreachable from the public internet? | [Level 3 — Publish to Teams / M365](#level-3--publish-to-teams--m365-copilot) |
+
+If you just want to deploy it, jump to the [Quick start](#quick-start). If you're new to
+Foundry, read the primer first.
+
+> **A cross-cutting fourth theme — governance — runs through all three levels:** who may call
+> which model or tool, at what rate, under which content-safety baseline. It's enforced mostly at
+> the shared private **[AI gateway](./docs/ai-gateway.md)** and summarised in
+> **[docs/governance.md](./docs/governance.md)**.
+
+## New to Foundry? A 5-minute primer
+
+A few Foundry concepts explain *why* the locked-down design looks the way it does. If these
+are already familiar, skip to [What gets deployed](#what-gets-deployed).
+
+- **Foundry account & project.** The **account** (an `Microsoft.CognitiveServices` resource
+  of kind `AIServices`) is the top-level Foundry resource; a **project** is an isolated
+  workspace inside it. Agents live in a project, and all agents in a project share the same
+  file storage, conversation (thread) storage, and search indexes. Projects are the unit of
+  isolation.
+- **Agents.** An agent is a model + instructions (+ optional tools). This sample deploys
+  **prompt agents** (declared in `agents/<name>/agent.yaml`). Foundry also supports **hosted**
+  (containerized) agents — see the [roadmap](./BACKLOG.md).
+- **Bring-Your-Own (BYO) data plane.** Foundry agents are **stateful**, and their state is
+  stored in **your own** Azure resources, not Microsoft-managed ones: **Azure Cosmos DB**
+  (threads/conversation history), **Azure AI Search** (vector stores), and **Azure Storage**
+  (files). Locking down the agent therefore means locking down *all* of these too.
+- **Capability host.** When you enable the Agents feature on a project, Foundry provisions an
+  **Agents capability host** — the managed compute (an Azure Container Apps environment) that
+  actually runs agents, injected into a **delegated subnet** in your VNet. This is why the
+  agent subnet is delegated to `Microsoft.App/environments`, and why teardown has to delete
+  the capability host *before* the account/project.
+- **Why "private" is the hard part.** With public network access disabled, the Foundry data
+  plane (the Agents REST API) is reachable **only from inside the VNet**. That single fact
+  drives Level 2 and Level 3: you can't create, publish, or govern agents from your laptop or
+  a GitHub-hosted runner — you need compute *inside* the network. This sample solves that with
+  an **in-VNet self-hosted GitHub Actions runner**.
 
 ## What gets deployed
 
-- **Azure AI Foundry** account + project (private endpoint, public access off, CMK).
+`azd up` provisions a complete, self-contained landing zone:
+
+- **Azure AI Foundry** account + project (private endpoint, public access off, CMK encryption).
 - **BYO data plane:** Azure Cosmos DB (threads), Azure AI Search (vectors), Azure Storage
   (files) — all private-endpoint only.
 - **Networking:** hub + spoke VNets, Azure Firewall (deny-by-default egress), private DNS
-  zones, a locked-down VM for in-VNet access, and VNet flow logs.
-- **Always-on shared APIM** (Standard v2, private) fronting the Teams and model-gateway paths.
-- **Teams / M365 publish path** *(on by default):* a public YARP proxy (App Service, VNet
-  integrated, Teams-IP restricted), an MCP web app, and an Azure Bot Service registration
-  that points the Teams channel at the agent.
-- Key Vault + Container Registry (private), and all supporting role assignments.
+  zones, a locked-down in-VNet VM, and VNet flow logs.
+- **Always-on private APIM (AI gateway)** (Standard v2) — one shared instance fronting models,
+  MCP servers, and the Teams/M365 inbound path.
+- **Teams / M365 publish path:** a public YARP proxy (App Service, VNet-integrated,
+  Teams-IP restricted), an MCP web app, and an Azure Bot Service registration.
+- **Model gateway:** an APIM-fronted "provider" Foundry plus a second agent routed through it
+  (one of the AI gateway's roles — see [docs/ai-gateway.md](./docs/ai-gateway.md)).
+- **Governance:** an **RAI guardrail** (Azure Policy, Audit) auditing every model deployment's
+  content filters, plus **MCP per-agent rate limiting / deny-by-default allowlists** at the
+  gateway ([docs/governance.md](./docs/governance.md)).
+- Key Vault + Container Registry (private) and all supporting role assignments.
 
-See **[docs/architecture.md](./docs/architecture.md)** for the resource-by-resource detail
-and **[NETWORKING.md](./NETWORKING.md)** for the rule-by-rule network lockdown.
+Full resource-by-resource detail: **[docs/architecture.md](./docs/architecture.md)**.
 
 ## Quick start
 
-**Prerequisites:** an Azure subscription where you can register resource providers and
-assign RBAC (Azure AI Account Owner + Role Based Access Administrator or Owner), the
+**Prerequisites:** an Azure subscription where you can register resource providers and assign
+RBAC (Azure AI Account Owner + Role Based Access Administrator or Owner), the
 [`az` CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli),
-[`azd`](https://aka.ms/azd), and PowerShell (`pwsh`). Full list + provider registration:
-**[docs/deployment.md](./docs/deployment.md)**.
+[`azd`](https://aka.ms/azd), the [GitHub CLI](https://cli.github.com/) (`gh`), and PowerShell
+(`pwsh`). Full list + provider registration: **[docs/deployment.md](./docs/deployment.md)**.
 
 ```bash
-# 1. Provision all infrastructure
-#    azd prompts for the VM admin password, and a preprovision hook asks (once)
-#    whether to deploy the Windows dev VM and/or the in-VNet self-hosted runner.
+# 1. Provision all infrastructure.
+#    azd prompts for the VM admin password, and a preprovision hook asks (once) whether to
+#    deploy the optional Windows dev VM and/or the in-VNet self-hosted runner.
 azd up
+```
 
-# 2. Seed agents on the private VM (runs the predeploy hook)
-azd hooks run predeploy
+`azd` **only provisions infrastructure — it deploys no agents.** Its one post-provision step
+is a host-side hook that copies the azd outputs into GitHub Actions repo variables (via
+`gh variable set`) so the workflows below "just work". Because the Foundry endpoint is private,
+**agent seeding, MCP compliance and Teams publishing all run from the in-VNet self-hosted
+runner** — so enable it ([Level 2](#level-2--automate-agent-deployment)), then:
+
+```bash
+# 2. Deploy agents from inside the VNet (requires the self-hosted runner).
+#    One workflow per agent — run whichever you need:
+gh workflow run deploy-hello-world-agent.yml
+gh workflow run deploy-gateway-model-agent.yml
+gh workflow run deploy-teams-agent.yml      # also publishes to Teams (gated)
 ```
 
 `azd` reads defaults from [`infra/main.parameters.json`](./infra/main.parameters.json);
 override any value with `azd env set VAR value`. Provisioning may need one retry on a
-transient Key Vault CMK propagation delay — it is idempotent. Details, seeding options,
-and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
+transient Key Vault CMK propagation delay — it is idempotent. Full walkthrough, seeding
+options, and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 
-## Optional capabilities
+---
 
-- **Publish an agent to Teams / M365 Copilot** *(on by default)* — exposes the seeded
-  agent to Microsoft Teams even though Foundry is private, via a public YARP proxy →
-  private APIM → the agent's activityProtocol endpoint, with Bot Framework JWT validation
-  and single-tenant lockdown. **[docs/teams-m365.md](./docs/teams-m365.md)**.
-- **Model gateway (APIM + provider Foundry)** *(on by default)* — front models with APIM
-  Standard v2 (private), dynamic model discovery, and defense-in-depth auth.
-  **[docs/model-gateway.md](./docs/model-gateway.md)** ·
-  [deep dive](./apim-model-gateway.md).
-- **RAI guardrail policy (Azure Policy · Audit)** *(on by default)* — assigns the built-in
-  "Guardrail for Cognitive Services Deployments" initiative with a strict content-filter
-  baseline that audits every model deployment. Audit-only (reports, does not block); an
-  optional flag deploys a deliberately non-compliant model to see it flagged.
-  **[docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md)**.
-- **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
-  the in-VNet **Linux** worker VM so complex deployments run *inside the VNet*, reaching
-  the private Foundry endpoint directly instead of via `az vm run-command`. `azd up`'s
-  preprovision hook prompts for the repo URL (or set `GITHUB_RUNNER_REPO_URL` directly).
-  **[docs/github-runner.md](./docs/github-runner.md)**.
-- **Optional Windows dev VM** *(off by default)* — the RDP-in-and-run-Edge box for
-  inspecting the environment from behind the firewall. All automation lives on the Linux
-  worker VM, so this stays off unless you want that interactive session: `azd up`'s
-  preprovision hook prompts for it (or set `DEPLOY_WINDOWS_VM true`), which also brings up
-  Azure Bastion to reach it.
+## Level 1 — Lock down the network
 
-## Documentation
+Establish a deny-by-default perimeter around the agent and every BYO dependency: private
+endpoints on all services, an agent subnet that is deny-by-default on both the NSG and the
+Azure Firewall, service-tag-only egress (no FQDN wildcards, no TLS inspection), CMK
+encryption, and VNet flow logs for observability.
 
 | Doc | What's inside |
 |-----|---------------|
-| [docs/deployment.md](./docs/deployment.md) | Prerequisites, pre-deployment planning, `azd` deploy, seeding agents, maintenance & troubleshooting. |
-| [docs/architecture.md](./docs/architecture.md) | Resource-by-resource deep dive, private DNS zones, RBAC, module structure. |
-| [NETWORKING.md](./NETWORKING.md) | Rule-by-rule network lockdown: NSG, firewall, flow logs, validation. |
-| [docs/teams-m365.md](./docs/teams-m365.md) | Publish an agent to Teams / M365 Copilot (inbound path, hooks, JWT). |
-| [docs/model-gateway.md](./docs/model-gateway.md) · [apim-model-gateway.md](./apim-model-gateway.md) | Optional APIM model gateway overview + full walkthrough. |
-| [docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md) | RAI content-filter guardrail (Azure Policy, Audit): strict baseline, why it can't block, the non-compliant demo, compliance checks. |
-| [docs/github-runner.md](./docs/github-runner.md) | Optional in-VNet self-hosted GitHub Actions runner: security model, auth, setup. |
-| [BACKLOG.md](./BACKLOG.md) | Project backlog: aim, goals, and epics for evolving this reference implementation. |
+| **[NETWORKING.md](./NETWORKING.md)** | The definitive, rule-by-rule network reference: topology, every NSG and firewall rule with its purpose, the two known limitations to raise with the product team, observability (firewall logs + VNet flow logs), and a debugging playbook. |
+| **[docs/architecture.md](./docs/architecture.md)** | Resource-by-resource deep dive: Foundry account/project, BYO Cosmos/Search/Storage, private DNS zones, RBAC role assignments, and the Bicep `stages/` module structure. |
+| **[docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md)** | Governing the *model* layer: a strict content-filter (Responsible AI) baseline assigned as an Azure Policy initiative (Audit), why it can't block, and an optional non-compliant demo. (Part of the broader [governance](./docs/governance.md) story.) |
+
+## Level 2 — Automate agent deployment
+
+The Foundry endpoint is private, so agents can't be created from a laptop or a GitHub-hosted
+runner. The pattern here: an **in-VNet self-hosted GitHub Actions runner** (the locked-down
+Linux VM) reaches the private endpoint directly and authenticates as its **managed identity**;
+each agent is a manifest plus a thin caller workflow that reuses one shared deploy workflow.
+
+| Doc | What's inside |
+|-----|---------------|
+| **[docs/deployment.md](./docs/deployment.md)** | Prerequisites, provider registration, `azd` provisioning, deploying/seeding agents from the runner, maintenance & troubleshooting. |
+| **[docs/github-runner.md](./docs/github-runner.md)** | The in-VNet self-hosted runner: why it's needed, its "trusted-only" security model, how it authenticates (managed identity → Key Vault PAT), setup, verification, and teardown. |
+| **[docs/what-runs-where.md](./docs/what-runs-where.md)** | Orientation map of every `hooks/` and `scripts/` file: what triggers it, where it runs (azd host vs in-VNet VM), and which identity it uses. |
+| **[docs/ai-gateway.md](./docs/ai-gateway.md)** | The always-on private **AI gateway** — one shared APIM (Standard v2, private) fronting **models** (keyless Entra auth, dynamic discovery), **MCP servers** (per-agent rate limiting / deny-by-default allowlists), and the **Teams/M365** inbound auth checks. |
+
+## Level 3 — Publish to Teams / M365 Copilot
+
+Expose a private agent to Microsoft Teams and M365 Copilot even though Foundry has no public
+endpoint. Microsoft's public Bot Connector can't reach a private endpoint, so the inbound path
+is **Teams → Bot Connector → public YARP proxy (Teams-IP restricted) → private APIM
+(`validate-jwt`) → the agent's activityProtocol endpoint**, with Bot Framework JWT validation
+and single-tenant lockdown.
+
+| Doc | What's inside |
+|-----|---------------|
+| **[docs/teams-m365.md](./docs/teams-m365.md)** | The full publish path: why the Azure Bot Service is a registration (not an appliance), the inbound firewall/JWT flow, the DNS/firewall tradeoff, the workflow-driven publish, and the delegated-token requirement. |
+| **[NETWORKING.md § Teams / M365 publish inbound path](./NETWORKING.md#teams--m365-publish-inbound-path)** | The network-level detail: the `401` trap (APIM → `login.botframework.com`), the cross-spoke APIM → Foundry path, and the Teams published-IP allow-list. |
+
+---
+
+## Documentation map
+
+**Cross-cutting** (used by all three levels):
+
+| Doc | What's inside |
+|-----|---------------|
+| [docs/architecture.md](./docs/architecture.md) | Resource-by-resource deep dive, private DNS zones, RBAC, Bicep `stages/` module structure. |
+| [docs/governance.md](./docs/governance.md) | How governance is layered (model content safety, agent/tool access, gateway & M365 auth) and where it lives in the code. |
+| [docs/ai-gateway.md](./docs/ai-gateway.md) | The shared private AI gateway (APIM) that fronts models, MCP servers, and the Teams/M365 inbound path. |
+| [docs/what-runs-where.md](./docs/what-runs-where.md) | What each `hooks/`/`scripts/` file does, where it runs, and which identity it uses. |
+
+**By level:** Level 1 → [NETWORKING.md](./NETWORKING.md) · [architecture](./docs/architecture.md) ·
+[RAI guardrail](./docs/rai-guardrail-policy.md) — Level 2 → [deployment](./docs/deployment.md) ·
+[github-runner](./docs/github-runner.md) · [ai-gateway](./docs/ai-gateway.md) — Level 3 →
+[teams-m365](./docs/teams-m365.md). **Cross-cutting** → [governance](./docs/governance.md).
+
+> **Roadmap.** Where this reference implementation is heading (hosted agents, eval gates,
+> multi-environment promotion, governance, a sample UI) lives in
+> **[BACKLOG.md](./BACKLOG.md)** — it's project direction, not part of the learning path above.
 
 ## References
 
-- [Azure AI Foundry Networking Documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/configure-private-link?tabs=azure-portal&pivots=fdp-project)
-- [Azure AI Foundry RBAC Documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/concepts/rbac-azure-ai-foundry?pivots=fdp-project)
-- [Private Endpoint Documentation](https://learn.microsoft.com/en-us/azure/private-link/)
-- [RBAC Documentation](https://learn.microsoft.com/en-us/azure/role-based-access-control/)
-- [Network Security Best Practices](https://learn.microsoft.com/en-us/azure/security/fundamentals/network-best-practices)
+- [Azure AI Foundry networking (private link)](https://learn.microsoft.com/en-us/azure/ai-foundry/how-to/configure-private-link?tabs=azure-portal&pivots=fdp-project)
+- [Azure AI Foundry RBAC](https://learn.microsoft.com/en-us/azure/ai-foundry/concepts/rbac-azure-ai-foundry?pivots=fdp-project)
+- [Publish agents to Microsoft 365 and Teams (REST API)](https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/publish-copilot-virtual-network)
+- [Private Endpoint documentation](https://learn.microsoft.com/en-us/azure/private-link/)
+- [Network security best practices](https://learn.microsoft.com/en-us/azure/security/fundamentals/network-best-practices)

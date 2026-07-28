@@ -1,0 +1,17 @@
+name: Deploy hello-world-agent (VNet self-hosted)
+
+# Thin caller for the hello-world demo agent (agents/hello-world-agent/agent.yaml).
+# All the work lives in the reusable .github/workflows/deploy-agent.yml — this file only
+# targets ONE agent. The endpoint + model come from repo variables / the manifest. Not
+# published to Teams.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-agent.yml
+    with:
+      manifest-path: agents/hello-world-agent/agent.yaml

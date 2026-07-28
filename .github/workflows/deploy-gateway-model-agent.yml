@@ -1,0 +1,17 @@
+name: Deploy gateway-model-agent (VNet self-hosted)
+
+# Thin caller for the gateway demo agent (agents/gateway-model-agent/agent.yaml), served through
+# the enterprise model gateway (APIM). All the work lives in the reusable
+# .github/workflows/deploy-agent.yml — this file only targets ONE agent. The endpoint + gateway
+# model come from repo variables / the manifest. Not published to Teams.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/deploy-agent.yml
+    with:
+      manifest-path: agents/gateway-model-agent/agent.yaml

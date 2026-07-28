@@ -1,6 +1,7 @@
 # RAI Guardrail Policy (Azure Policy · Audit)
 
-> Part of the [network-secured Foundry agent](../README.md) accelerator. Governs the
+> **Level 1 — Lock down the network.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. Governs the
 > **content-filter / Responsible AI (RAI)** configuration of model deployments.
 
 This capability assigns a **built-in Azure Policy initiative** that audits every
@@ -44,7 +45,7 @@ Policy definitions (per-filter rules, e.g. "Hate")
 
 ### The strict baseline this repo applies
 
-`infra/modules/governance/rai-guardrail-assignment.bicep` narrows every knob to its
+`infra/stages/30-governance/governance/rai-guardrail-assignment.bicep` narrows every knob to its
 strictest value (a single allowed value = *mandatory*; two values would mean *either is fine*):
 
 | Filter | Prompt | Completion | Requirement |
@@ -101,7 +102,7 @@ azd provision
 
 ## The non-compliant demo
 
-When enabled, `infra/modules/governance/noncompliant-model-demo.bicep` creates:
+When enabled, `infra/stages/30-governance/governance/noncompliant-model-demo.bicep` creates:
 
 1. A **weak custom RAI policy** (`weak-demo-policy`) that violates the baseline several ways:
    - `mode: Asynchronous_filter` → breaks `raiPolicyMode = Default`
@@ -149,7 +150,7 @@ and re-provision to remove it.
 
 | File | Purpose |
 |---|---|
-| `infra/modules/governance/rai-guardrail-assignment.bicep` | Policy assignment (built-in initiative, strict Audit params). |
-| `infra/modules/governance/noncompliant-model-demo.bicep` | Optional weak RAI policy + model deployment for the demo. |
+| `infra/stages/30-governance/governance/rai-guardrail-assignment.bicep` | Policy assignment (built-in initiative, strict Audit params). |
+| `infra/stages/30-governance/governance/noncompliant-model-demo.bicep` | Optional weak RAI policy + model deployment for the demo. |
 | `infra/main.bicep` | Feature flags, module wiring, `RAI_GUARDRAIL_ASSIGNMENT_NAME` / `NONCOMPLIANT_DEMO_DEPLOYMENT_NAME` outputs. |
 | `infra/main.parameters.json` | `RAI_GUARDRAIL_ENABLED`, `NONCOMPLIANT_MODEL_DEMO_ENABLED` defaults. |

@@ -13,15 +13,17 @@ hooks:
     run: ./hooks/preprovision.ps1
     continueOnError: false
     interactive: true
-  predeploy:
+  # After provision, azd runs ONE narrow host-side step: postprovision pushes the Bicep outputs
+  # that the workflows consume into GitHub Actions repo variables (via `gh variable set`) so the
+  # deploy workflows "just work". That is the ONLY post-provision automation. Agent deploys, MCP
+  # compliance and Teams / M365 publishing are still done ONLY by the in-VNet self-hosted GitHub
+  # Actions workflows (the per-agent .github/workflows/deploy-*-agent.yml + reusable
+  # deploy-agent.yml, and deploy-compliancy.yml), which run natively on the private VM runner -
+  # no `az vm run-command` orchestration from the azd host.
+  postprovision:
     shell: pwsh
-    run: ./hooks/predeploy.ps1
-    continueOnError: false
-    interactive: false
-  postdeploy:
-    shell: pwsh
-    run: ./hooks/postdeploy.ps1
-    continueOnError: false
+    run: ./hooks/postprovision.ps1
+    continueOnError: true
     interactive: false
   predown:
     shell: pwsh

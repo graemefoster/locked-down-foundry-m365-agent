@@ -1,20 +1,27 @@
 # Self-hosted GitHub Actions runner (in-VNet)
 
+> **Level 2 — Automate agent deployment.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. This runner is what lets
+> CI/CD reach the **private** Foundry endpoint; see [deployment.md](./deployment.md) for the
+> agent-deploy flow it enables.
+
 An **opt-in** self-hosted Actions runner on the in-VNet **Linux worker VM** so complex,
 representative deployments can run *inside the VNet* — reaching the **private** Foundry
 endpoint directly — instead of being marshalled through `az vm run-command`.
 
-It is **off by default**: the runner is only installed when `githubRunnerRepoUrl`
-(env var `GITHUB_RUNNER_REPO_URL`) is non-empty. Leave it unset and nothing changes.
+It is **off by default**: the runner is only installed when **both** `githubRunnerRepoUrl`
+(env var `GITHUB_RUNNER_REPO_URL`) **and** `githubRunnerPat` (`GITHUB_RUNNER_PAT`) are
+non-empty. Leave either unset and the runner is skipped entirely (no RBAC, no PAT secret,
+no Run Command) — there is no point installing a runner it can't register.
 
 ## The two VMs
 
 | VM | Module | When | Purpose |
 |---|---|---|---|
-| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/modules/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
-| **Windows dev VM** | `infra/modules/resources/vm.bicep` | only when `deployWindowsVm` is true (**default false**) | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
+| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/stages/40-runner/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
+| **Windows dev VM** | `infra/stages/40-runner/resources/vm.bicep` | only when `deployWindowsVm` is true (**default false**) | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
 
-Azure Bastion lives in its own module (`infra/modules/resources/bastion.bicep`) and exists
+Azure Bastion lives in its own module (`infra/stages/40-runner/resources/bastion.bicep`) and exists
 purely for **interactive human access**. It is the only way into the Windows dev VM (RDP),
 so it is gated by `deployBastion`, which **defaults to `deployWindowsVm`** — bring the
 Windows VM up and Bastion comes with it. The Linux worker needs no interactive path (agent
@@ -33,7 +40,7 @@ default). If you want Bastion SSH into the Linux VM *without* the Windows VM, se
 
 ### Dependencies on the Linux VM
 
-`infra/modules/resources/cloud-init-linux-vm.yaml` installs everything at first boot:
+`infra/stages/40-runner/resources/cloud-init-linux-vm.yaml` installs everything at first boot:
 `pwsh`, `azure-cli` (so `az acr build` covers container builds without a Docker daemon),
 `python3`/`pip`/`venv` (the `microsoft/ai-agent-evals` action pip-installs into a venv),
 plus `git`, `jq` and `yq`. That cloud-init file is the **only** shell script in the repo
@@ -56,9 +63,9 @@ on it**:
 | Control | Where |
 |---|---|
 | PR CI runs on **GitHub-hosted** runners only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`) |
-| VNet deploy has **no `pull_request` trigger** (dispatch only) | `.github/workflows/deploy-vnet.yml` |
-| VNet deploy is gated by a **required-reviewer environment** | `environment: vnet-deploy` |
-| `if: github.repository == ...` guard | `deploy-vnet.yml` |
+| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent `deploy-*-agent.yml` callers + reusable `.github/workflows/deploy-agent.yml` |
+| VNet deploy is gated by a **required-reviewer environment** (Teams-publish / compliance jobs) | `environment: vnet-deploy` |
+| `if: github.repository == ...` guard | `deploy-agent.yml` + each caller |
 
 A fork PR can never select the self-hosted runner (label mismatch) and can never
 invoke the deploy workflow (no PR trigger). The idle runner simply never picks up an
@@ -83,11 +90,11 @@ VM managed identity --(IMDS)--> KV token --> read PAT (data plane, private endpo
    --> config.sh --unattended + svc.sh install   (persistent, non-ephemeral)
 ```
 
-Bootstrap: `infra/modules/resources/bootstrap-github-runner.sh`, run on the VM as a
-managed **Run Command** by `infra/modules/resources/vm-runner-extension.bicep` (config is
+Bootstrap: `infra/stages/40-runner/resources/bootstrap-github-runner.sh`, run on the VM as a
+managed **Run Command** by `infra/stages/40-runner/resources/vm-runner-extension.bicep` (config is
 injected as an `export` preamble; the PAT is never in the template). It blocks on
 `cloud-init status --wait`, so it can never race the dependency install. The VM MI is
-granted **Key Vault Secrets User** by `infra/modules/rbac/vm-keyvault-secrets-role.bicep`,
+granted **Key Vault Secrets User** by `infra/stages/40-runner/rbac/vm-keyvault-secrets-role.bicep`,
 and the Run Command is sequenced **after** both that assignment and the PAT-secret write.
 
 ## One-time setup
@@ -101,21 +108,26 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
 3. **Repo Settings → Actions → General:** require approval for **all outside
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
-4. **Set the deploy-workflow repo variables** (repo Settings → Secrets and variables →
-   Actions → *Variables*) so `deploy-vnet.yml` knows what to seed — these mirror the azd
-   outputs of the target environment:
+4. **Set the deploy-workflow repo variables.** The `postprovision` hook does this for you: after
+   `azd provision` succeeds it runs `hooks/postprovision.ps1`, which pushes the relevant azd
+   outputs into repo Settings → Secrets and variables → Actions → *Variables* via `gh variable set`
+   (so the per-agent `deploy-*-agent.yml` and `deploy-compliancy.yml` workflows "just work"). It
+   needs the GitHub CLI authenticated (`gh auth login`) with permission to write repo variables.
+   Re-run it any time with `azd hooks run postprovision`.
 
-   | Variable | Value | Source |
-   |---|---|---|
-   | `AZURE_AI_PROJECT_ENDPOINT` | e.g. `https://<aiservices>.services.ai.azure.com/api/projects/<project>` | `azd env get-value AZURE_AI_PROJECT_ENDPOINT` |
-   | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | e.g. `gpt-5.4` | `azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME` |
+   It syncs the same-named outputs (`AZURE_RESOURCE_GROUP`, `AZURE_AI_PROJECT_ENDPOINT`,
+   `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `MCP_COMPLIANCE_APIM_NAME`, `MCP_COMPLIANCE_AUDIENCE`,
+   `TEAMS_*`) plus one rename — `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`. `TEAMS_PUBLISH_SCOPE` has no
+   output (it is an operator choice), so set it manually if you use Teams publishing.
+
+   To set any variable by hand instead (e.g. from a different environment), mirror the azd output:
 
    ```bash
    gh variable set AZURE_AI_PROJECT_ENDPOINT --body "$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)"
-   gh variable set AZURE_AI_MODEL_DEPLOYMENT_NAME --body "$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+   gh variable set MCP_SERVER_URL --body "$(azd env get-value MCP_GATEWAY_URL)"
    ```
 
-   You can also override either per-run via the workflow's dispatch inputs; the inputs take
+   You can also override any variable per-run via the workflow's dispatch inputs; the inputs take
    precedence over the variables.
 
 ## Enable it
@@ -135,9 +147,10 @@ The **PAT is a secret and is never prompted** — supply it with `azd env set GI
 before provisioning (the hook reminds you when you enter a repo URL without one set).
 
 `GITHUB_RUNNER_PAT` is a `@secure()` param sourced from `${GITHUB_RUNNER_PAT}` (empty by
-default). While set, it lives in the local, gitignored `.azure/<env>/.env`. Leaving it
-empty on later provisions reuses the already-seeded Key Vault secret (the secret write is
-conditional and ARM never deletes it).
+default). While set, it lives in the local, gitignored `.azure/<env>/.env`. It is **required**
+to install the runner: clearing it on a later provision skips the runner modules (the already
+installed systemd service and seeded Key Vault secret persist — ARM never deletes the secret —
+but the runner is not re-registered).
 
 On first provision the RBAC role assignment can take 1–5 min to propagate to the KV
 data plane (same class of delay noted for CMK enablement). If the Run Command fails
@@ -156,13 +169,14 @@ runner service already exists).
 
 `azd down`'s **predown hook** (`hooks/predown.ps1`) automatically deregisters the runner
 before the VM is deleted, so it doesn't linger as a permanently **offline** runner in the
-repo. Because the PAT lives in Key Vault behind a private endpoint, the work runs **on the
-VM** (`scripts/deregister-runner.ps1`, shipped via the `vm-run-command.ps1` shim): it reads
-the PAT with the VM managed identity, mints a GitHub **remove-token**, then runs
-`svc.sh uninstall` + `config.sh remove`.
+repo. It runs **host-side** with the GitHub CLI (`gh`) using your own credentials — no PAT,
+no Key Vault and no VM round-trip. The runner name is deterministic (`<vmName>-vnet`, because
+the bootstrap names it `<hostname>-vnet` and the VM's `computerName` is the VM name), so the
+hook simply looks it up via `gh api .../actions/runners` and deletes it by id. This works
+even when the VM's egress is locked down or the VM is already unhealthy.
 
 This phase is **best-effort** and never fails the teardown — it only runs when
 `GITHUB_RUNNER_REPO_URL` is set, and a lingering offline runner is harmless (GitHub prunes
 it, or remove it manually under *Settings → Actions → Runners*). It relies on the
-`GITHUB_RUNNER_REPO_URL`, `KEY_VAULT_NAME`, `GITHUB_RUNNER_PAT_SECRET_NAME` and
-`GITHUB_RUNNER_USER` Bicep outputs; run `azd env refresh` if they're missing.
+`GITHUB_RUNNER_REPO_URL` and `GITHUB_ACTIONS_RUNNER_VM_NAME` Bicep outputs (run
+`azd env refresh` if they're missing) plus a host-side `gh` login with **admin** on the repo.

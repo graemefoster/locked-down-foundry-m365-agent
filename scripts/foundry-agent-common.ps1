@@ -3,20 +3,45 @@
   ------------------------------------------------------------------------------------
   These functions run ON the private VNet self-hosted runner (the only host that can reach
   the Foundry private endpoint). They acquire a managed-identity token via IMDS and call the
-  Agents REST API, mirroring the proven pattern in scripts/seed-agents.ps1.
+  Agents REST API. This is the single source of truth for the Foundry Agents REST helpers.
 
   PowerShell 7 (pwsh) and cross-platform: no external modules, no ConvertFrom-Yaml.
 
-  Callers set the script-scoped $script:FoundryEndpoint and $script:ApiVersion before use, or
-  pass them through the functions below.
+  Callers pass the Foundry endpoint and API version through each function's -Endpoint /
+  -ApiVersion parameters (see create-agent.ps1 / publish-agent.ps1).
+
+  ── The Foundry Agents model (what a newcomer needs to know) ─────────────────────────
+  An "agent" is a named container. Each agent has one or more immutable, auto-numbered
+  VERSIONS (1, 2, 3, ...); a version holds the actual definition (model, instructions,
+  tools). A separate "served version" selector routes 100% of endpoint traffic to one
+  chosen version. So the lifecycle is three distinct steps:
+
+    1. CREATE      first POST /agents            -> agent + version 1     (New-Agent)
+    2. VERSION     later POST .../versions       -> version N+1           (New-AgentVersion)
+    3. SERVE       PATCH the version selector    -> route traffic to N    (Set-ServedAgentVersion)
+
+  Key gotcha: the API DE-DUPLICATES identical definitions. POSTing an unchanged definition
+  does NOT create a new version — it returns the current latest. That is why create-agent.ps1
+  compares the version before/after to tell "updated" from "unchanged". Creating/adding a
+  version never shifts live traffic; only step 3 (publish-agent.ps1) does.
+
+  ── Function index ──────────────────────────────────────────────────────────────────
+    Get-FoundryToken           managed-identity token for the data plane (via IMDS)
+    Get-HttpErrorDetail        unwrap the real {error} body from a failed REST call
+    Invoke-FoundryRequest      wrapper: retry w/ backoff + print failure bodies
+    Get-ExistingAgents         list agents (used to decide create vs. version)
+    New-Agent                  step 1 — create a brand-new agent
+    New-AgentVersion           step 2 — add a version to an existing agent
+    Get-LatestAgentVersion     highest version number (int) for an agent
+    Get-AgentVersionsDescending all versions, highest-first (nightly eval baseline pick)
+    Set-ServedAgentVersion     step 3 — point live traffic at a specific version
 #>
 $ErrorActionPreference = 'Stop'
 
 function Get-FoundryToken {
   # Acquire a token for the Foundry data plane (https://ai.azure.com) from the VM managed
   # identity via IMDS. We use IMDS directly rather than the Azure CLI because the self-hosted
-  # runner service can hold a stale PATH in which `az` is not resolvable. This mirrors the
-  # proven approach in scripts/seed-agents.ps1.
+  # runner service can hold a stale PATH in which `az` is not resolvable.
   $response = Invoke-RestMethod `
     -Uri 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fai.azure.com%2F' `
     -Headers @{ Metadata = 'true' } `

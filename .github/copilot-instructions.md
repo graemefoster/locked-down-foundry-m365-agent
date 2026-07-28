@@ -7,27 +7,37 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 
 | Path | Purpose |
 |---|---|
-| `infra/main.bicep` | Deployment orchestrator. All resources are declared/wired here. |
+| `infra/main.bicep` | Thin deployment orchestrator — declares params + addressing vars and calls the sequential stages under `infra/stages/`. |
 | `infra/main.parameters.json` | **azd** parameter source. Maps each Bicep param to an env var with an inline default (`${VAR=default}`). |
-| `infra/modules/{network,foundry,resources,encryption,rbac,model-gateway}/` | Categorized Bicep modules. |
-| `azure.yaml` | Wires `infra/` + the `predeploy` and `predown` hooks. |
-| `hooks/predeploy.ps1` | azd **predeploy** hook — seeds Foundry agents. |
-| `hooks/predown.ps1` | azd **predown** hook — deletes capability hosts before teardown. |
-| `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. |
-| `scripts/seed-agents.ps1` | Runs **on the private Linux VM** (via `hooks/vm-run-command.ps1`) to create agents. |
+| `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
+| `azure.yaml` | Wires `infra/` + the `preprovision`, `postprovision` and `predown` hooks. The only post-provision automation is the host-side `postprovision` repo-variable sync — no predeploy/postdeploy, no agent deploys. |
+| `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
+| `hooks/predown.ps1` | azd **predown** hook — deregisters the GitHub runner **host-side via `gh`** (delete by name `<vmName>-vnet`) + deletes capability hosts before teardown. |
+| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
+| `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
 
-`hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration,
-not IaC) and do **not** reference Bicep file paths, so moving modules never breaks them.
+`hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
+For a per-file map of what triggers each one, where it runs (azd host vs in-VNet VM) and which
+identity it uses, see `docs/what-runs-where.md`.
+Most don't reference Bicep file paths; the exception is the in-VNet MCP-compliance workflow
+(`.github/workflows/deploy-compliancy.yml`), which deploys
+`infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` by path — keep
+that path in sync if the module moves.
 
 ## Deployment lifecycle
 
 ```
 azd up
- ├─ provision  → deploys infra/main.bicep (all Azure resources)
- └─ deploy     → (predeploy hook) → deploys services (none defined yet)
+ └─ provision  → deploys infra/main.bicep (all Azure resources). Nothing runs after provision.
+
+Post-provision (agent seeding, MCP compliance, Teams publish)
+ └─ in-VNet self-hosted runner workflows — run natively on the private VM:
+    * one thin per-agent workflow each (deploy-hello-world-agent.yml, deploy-gateway-model-agent.yml,
+      deploy-teams-agent.yml, deploy-test-agent-one.yml) → the reusable deploy-agent.yml
+    * deploy-compliancy.yml (MCP compliance)
 
 azd down
- └─ (predown hook) → deletes the resource group
+ └─ (predown hook) → deregisters the runner + deletes capability hosts, then teardown.
 ```
 
 ### 1. Provision (`azd provision`, or the provision phase of `azd up`)
@@ -37,7 +47,9 @@ azd down
   requires it (use lowercase `true`/`false`).
 - `vmAdminPassword` has **no** default and is **omitted** from `main.parameters.json`, so azd
   **prompts for it interactively** — it is never stored in the repo.
-- **Does NOT seed agents** — seeding is a separate deploy-time step (below).
+- **azd deploys no agents** — its only post-provision step is the `postprovision` hook, which
+  syncs repo variables (`gh variable set`) so the workflows just work. Seeding/compliance/publish
+  are workflow-only (below).
 - **Known transient failure:** provisioning can fail the first time with
   `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`. This is an RBAC
   **role-assignment propagation delay** (the Key Vault Crypto role granted to the AI Services /
@@ -45,34 +57,47 @@ azd down
   enablement step can run before it does). The deployment is **idempotent** — just re-run
   `azd provision`. It is not a soft-delete or name-collision problem.
 
-### 2. Predeploy hook — seed agents (`hooks/predeploy.ps1`)
-- Runs on the azd host (laptop / CI), triggered by `azd deploy` (once a service is defined) or
-  directly via `azd hooks run predeploy`.
-- The Foundry endpoint is **private**, so the host cannot call the Agents API directly. The
-  hook instead uses `az vm run-command` (via the `hooks/vm-run-command.ps1` shim, which
-  wraps the script in a `RunShellScript` heredoc and executes it with `pwsh`) to run
-  `scripts/seed-agents.ps1` **on the locked-down Linux worker VM inside the VNet**, which
-  can reach the private endpoint.
-- Idempotent: existing agents (matched by name) are skipped. Edit the `$agentsToCreate` array
-  in `scripts/seed-agents.ps1` to change which agents are seeded.
-- Requires these Bicep **outputs** (surfaced by azd as env vars): `AZURE_RESOURCE_GROUP`,
-  `SEED_AGENTS_VM_NAME`, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`,
-  `SEED_ENABLE_SECOND_AGENT`, `SEED_SECOND_AGENT_MODEL`. Run `azd env refresh` if missing.
-- Caller RBAC: permission to invoke VM run-commands (e.g. Virtual Machine Contributor).
+### 2. Post-provision — in-VNet runner workflows (no azd involvement)
+- The Foundry endpoint is **private**, so agent deploys / Teams publishing / MCP compliance run
+  on the **in-VNet self-hosted GitHub Actions runner** (which IS the private Linux VM), reaching
+  the endpoint directly. The runner is therefore **required** for these steps.
+- **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
+  caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
+  `.github/workflows/deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
+  injects the MCP `server_url` if present, then runs the `create-agent` and
+  `publish-agent` composite actions; an optional gated `publish-teams` job publishes that single
+  agent. `deploy-compliancy.yml` applies MCP compliance. All are `workflow_dispatch`-only,
+  repository-guarded; the Teams-publish / compliance steps are gated by the `vnet-deploy`
+  environment.
+- Idempotent: an existing agent (matched by name) gets a fresh version. Add an agent by adding a
+  manifest folder + a thin caller workflow.
+- The runner VM's managed identity holds **Foundry User** on the project (so `create-agent.ps1` /
+  `publish-agent.ps1` call the Agents API via IMDS) and **Contributor** on the RG (so the Teams
+  path can deploy the Bot Service). VM name is surfaced as the `GITHUB_ACTIONS_RUNNER_VM_NAME`
+  Bicep output.
 
-### 3. Predown hook — capability-host cleanup (`hooks/predown.ps1`)
-- Runs on the azd host **before** `azd down` deletes anything.
-- A Foundry account/project with an **Agents capability host** cannot be deleted cleanly while
-  the capability host exists, so the hook deletes it first, in strict order:
-  **project-scope capability hosts, THEN account-scope** (`az resource delete` polls the
-  long-running delete to completion before proceeding).
+### 3. Predown hook — runner deregistration + capability-host cleanup (`hooks/predown.ps1`)
+- Runs on the azd host **before** `azd down` deletes anything. Two best-effort phases.
+- **Phase 0 (runner):** if a self-hosted runner was installed, deregisters it BEFORE the VM is
+  deleted (else it lingers as "offline"). Runs **host-side** with the GitHub CLI (`gh`) using the
+  caller's own credentials — no PAT, no Key Vault, no VM round-trip. The runner name is
+  deterministic (`<vmName>-vnet`: the bootstrap names it `<hostname>-vnet` and the VM's
+  `computerName` IS the VM name), so it deletes by name via `gh api .../actions/runners`. Needs
+  `GITHUB_RUNNER_REPO_URL`, `GITHUB_ACTIONS_RUNNER_VM_NAME`, and a host `gh` login with repo
+  admin. Never fails teardown. (No on-VM script — the old `deregister-runner.ps1` +
+  `vm-run-command.ps1` shim were removed; there is now no host→VM path at all.)
+- **Phase 1/2 (capability hosts):** a Foundry account/project with an **Agents capability host**
+  cannot be deleted cleanly while the capability host exists, so the hook deletes it first, in
+  strict order: **project-scope capability hosts, THEN account-scope** (`az resource delete`
+  polls the long-running delete to completion). Control-plane ARM — does NOT need the VM.
 - Requires `AZURE_RESOURCE_GROUP`, `AZURE_AI_ACCOUNT_NAME`, `AZURE_AI_PROJECT_NAME` (Bicep
   outputs) plus `AZURE_SUBSCRIPTION_ID` (an azd built-in env var; falls back to
   `az account show`). Run `azd env refresh` if the Bicep outputs are missing.
 - Best-effort by design: if Foundry was never provisioned it no-ops; if a real enumeration or
   delete error occurs it throws (with `continueOnError: false` this fails `azd down` early,
   which is correct — the teardown would fail anyway).
-- Caller RBAC: permission to delete capability hosts (e.g. Cognitive Services Contributor).
+- Caller RBAC: delete capability hosts (e.g. Cognitive Services Contributor) + invoke VM
+  run-commands (e.g. Virtual Machine Contributor) for Phase 0.
 
 ## Conventions & gotchas
 
@@ -88,29 +113,32 @@ azd down
   captured output; piping that array to `ConvertFrom-Json` throws on success-with-warning.
   Filter `Where-Object { $_ -is [string] }` before parsing (see `hooks/predown.ps1`).
 - **Foundry Agents API** returns agents under `.data` (OpenAI schema), **not** `.value`.
-- **Adding a new hook env var:** add a matching `output NAME ...` in `infra/main.bicep` (azd
-  surfaces outputs as env vars verbatim; they are already UPPER_SNAKE), then read it in the hook.
-- **`services:` is not yet defined in `azure.yaml`**, so `azd deploy`'s predeploy hook only fires
-  once a service exists; `azd hooks run predeploy` works regardless. `predown` runs on any
-  `azd down`.
+- **Adding a new env var for a workflow/hook:** add a matching `output NAME ...` in
+  `infra/main.bicep` (azd surfaces outputs as env vars verbatim; they are already UPPER_SNAKE).
+  If a workflow reads it as `vars.NAME`, also add it to the `$variableMap` in
+  `hooks/postprovision.ps1` so the postprovision sync pushes it to repo variables. Hooks (predown)
+  read outputs straight from the env.
+- **`azure.yaml` has no `services:` and no predeploy/postdeploy hooks.** azd provisions and then
+  runs one host-side `postprovision` step (repo-variable sync only). `predown` runs on any
+  `azd down`. All agent/compliance/publish work is the in-VNet runner workflows.
 
-## Model gateway
-The model gateway is always deployed: an APIM-fronted provider Foundry and a
-second seeded agent routed through it. See `apim-model-gateway.md`. Networking deep-dive:
-`NETWORKING.md`.
+## AI gateway (a.k.a. model gateway in Bicep)
+The shared private APIM instance is always deployed. Bicep still names it `model-gateway`
+(modules, the `model-gateway` connection, the `10.3.0.0/16` spoke), but the docs frame it as the
+broader **AI gateway**: it fronts models (APIM-fronted provider Foundry + a second seeded agent
+routed through it), MCP servers, and the Teams/M365 inbound auth checks. See `docs/ai-gateway.md`
+(full design + MCP governance) and `docs/governance.md` (governance overview). Networking
+deep-dive: `NETWORKING.md`.
 
 ## MCP compliance (agent → APIM allowlist)
 `mcp/mcp-policy.json` is the **name-only** source of truth (deny-by-default). At apply time,
-`scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its Entra
-`ServiceIdentity` SP AppId via the **control plane** (`az ad sp list` on display name
-`<account>-<project>-<agent>-AgentIdentity`, newest `createdDateTime` wins on duplicates), then
-`infra/modules/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. This runs
-automatically on `azd up` (`hooks/postdeploy.ps1` → `hooks/apply-mcp-compliance.ps1`,
-non-fatal + loud) and on-demand via `.github/workflows/deploy-compliancy.yml`.
-
-> **⚠️ NOTE (per @graemefoster, 2026-07-27): if the `azd`/postdeploy flow is ever removed,
-> switch MCP AppId resolution from the control plane back to the Foundry DATA plane** (the
-> in-VNet VM reading `instance_identity.client_id`, i.e. DISCOVERY mode in
-> `scripts/list-agent-appids.ps1`). The data plane is the authoritative identity source and
-> avoids the control-plane display-name trust model — see the SECURITY header block in that
-> script.
+`scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its live AppId read from the
+Foundry **data plane** (`instance_identity.client_id` on the project endpoint — the authoritative
+runtime identity; names with no matching / identity-less agent are dropped), then
+`infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. At
+provision, `main.bicep` applies a deny-all policy; the real (resolved) policy is then applied
+**only** by `.github/workflows/deploy-compliancy.yml` (run it after agents are seeded, and again
+whenever you edit the JSON). Because resolution reads the private data plane, that workflow **must**
+run on the in-VNet self-hosted runner (VM managed identity via IMDS) — no Microsoft Graph
+permission is needed. azd deploys no agents post-provision, so a fresh `azd up` leaves MCP deny-all
+until that workflow runs.

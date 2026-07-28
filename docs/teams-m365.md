@@ -1,14 +1,14 @@
 # Publish an agent to Teams / M365 Copilot
 
-> Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#optional-teams--m365-publish-inbound-path).
+> **Level 3 — Publish to Teams / M365.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. Networking deep-dive:
+> [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
 
-The Teams / M365 publish path is **on by default** (`enableTeamsPublish=true`; set it
-`false` to opt out). It publishes **every seeded agent** (`hello-world-agent`,
-`gateway-model-agent`, `teams-agent`) to Teams / M365, each with its own Azure Bot
-Service. A **single, path-routed APIM Teams API** listens on `/teams/{agentName}` and
-rewrites each request to the matching agent's activityProtocol endpoint, so one API
-backs any number of agents. Edit `teamsPublishAgentNames` to change which agents are
-published. This publishes to
+The Teams / M365 publish path is **always deployed**. Each agent that wants a Teams presence is
+published by **its own deploy workflow** (`deploy-teams-agent.yml`, `deploy-test-agent-one.yml`,
+… — set `publishToTeams: true`), one Azure Bot Service per agent. A **single, path-routed APIM
+Teams API** listens on `/teams/{agentName}` and rewrites each request to the matching agent's
+activityProtocol endpoint, so one API backs any number of agents. This publishes to
 **Microsoft Teams and Microsoft 365 Copilot**, even
 though the Foundry endpoint has public network access disabled. This follows the
 Learn article
@@ -49,7 +49,7 @@ Two firewall dependencies make this work:
   Framework IdP's OpenID Connect metadata + signing keys. APIM is force-tunnelled
   through the firewall, so **without this rule every inbound activity fails with a
   `401`** (the signing-key fetch is denied). See
-  [`gateway-firewall-rules.bicep`](../infra/modules/model-gateway/gateway-firewall-rules.bicep).
+  [`gateway-firewall-rules.bicep`](../infra/stages/30-governance/model-gateway/gateway-firewall-rules.bicep).
 - **APIM → primary Foundry private endpoint** (a cross-spoke network rule) to reach the
   activityProtocol endpoint.
 
@@ -86,55 +86,56 @@ activityProtocol endpoint.
 > [M365 endpoints service](https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges)
 > (service area `Skype`), as this template does.
 
-### Hook-driven publish
+### Workflow-driven publish
 
-Steps 2–4 need values that only exist **after** the agents are seeded (each agent
-identity `principal_id` = that bot's Microsoft App ID), so publishing is driven by the
-azd **postdeploy** hook ([`hooks/postdeploy.ps1`](../hooks/postdeploy.ps1)) rather than
-Bicep. The hook **loops over `TEAMS_PUBLISH_AGENT_NAMES`**, publishing each agent with
-its own bot. **Strict boundary:** the private VM only ever calls Foundry REST APIs; every
-ARM / Bicep / APIM control-plane action runs host-side, outside the VNet.
+Steps 2–4 need values that only exist **after** the agent is deployed (the agent identity
+`principal_id` = that bot's Microsoft App ID), so publishing is driven by the in-VNet
+self-hosted GitHub Actions workflows (the reusable
+[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml), called by each per-agent workflow
+with `publishToTeams: true`, via the
+[`publish-teams`](../.github/actions/publish-teams/action.yml) composite action →
+[`scripts/publish-teams-runner.ps1`](../scripts/publish-teams-runner.ps1)) rather than
+Bicep or azd. Each per-agent workflow publishes its single agent with its own bot. Because the
+runner **is** the in-VNet VM, everything — including the Bot Service ARM deployment — runs there
+as the VM's managed identity (Contributor on the resource group); there is no host-side
+orchestration and no `az vm run-command`.
 
 Per agent:
 
-1. **Get identity** *(on the VM — Foundry REST)* — runs
-   [`scripts/publish-teams.ps1`](../scripts/publish-teams.ps1) on the private VM (via
-   `az vm run-command`) to read `instance_identity.principal_id`.
-2. **Create the Azure Bot Service registration** *(host-side)* — `az deployment group create` of
+1. **Get identity** *(Foundry REST)* — runs
+   [`scripts/publish-teams.ps1`](../scripts/publish-teams.ps1) to read
+   `instance_identity.principal_id`.
+2. **Create the Azure Bot Service registration** *(ARM, as the VM MI)* — `az deployment group create` of
    [`hooks/bot-service.bicep`](../hooks/bot-service.bicep) (azurebot, PNA disabled,
    single-tenant, **Teams channel**; name `<TEAMS_BOT_NAME>-<agentName>`, messaging
    endpoint = YARP public FQDN + `/teams/<agentName>`). This is registration/config only —
    it points the Teams channel at YARP; it does not receive traffic itself.
-4. **Publish** *(on the VM — Foundry REST)* — the VM script enables the `activity`
+4. **Publish** *(Foundry REST)* — the runner enables the `activity`
    protocol + `BotServiceRbac` scheme (keeping `responses` + `Entra`), then calls the
    Microsoft 365 publish API.
 
-Then **once**, after every bot exists:
-
-3. **Set the APIM `validate-jwt` audience allowlist** *(host-side)* to the SET of all
-   published bot App IDs (best-effort; issuer validation + IP restriction stay active if
-   it fails).
+The APIM `validate-jwt` audience allowlist (formerly a host-side "Phase B" step) is **not**
+performed by the workflow path — it focuses on the publish flow itself; issuer validation +
+IP restriction remain active.
 
 > **Publish needs a delegated *user* token (OBO), not the VM managed identity.**
 > Foundry's `microsoft365/publish` API performs an on-behalf-of exchange with the
 > caller's token to submit to the M365 catalog, so an app-only / MSI token fails
-> server-side with a bare `502`. The hook acquires a **host-side user token**
-> (`az account get-access-token --resource https://ai.azure.com`) and passes it to the
-> publish call only; the earlier PATCH steps still run under the VM MSI. This preserves
-> the boundary — the VM never handles ARM/control-plane, only Foundry REST.
+> server-side with a bare `502`. The `publish-teams` composite action acquires a
+> **delegated user token via device-code sign-in** and passes it to the publish call
+> only; the earlier read + PATCH steps run under the VM MSI.
 
-The hook is idempotent — re-running skips an already-published `appVersion`. Bump
-`TEAMS_APP_VERSION` (via `azd env set`) to roll out user-facing metadata changes.
+The path is idempotent — re-running skips an already-published `appVersion`. Bump
+`TEAMS_APP_VERSION` (repo variable / action input) to roll out user-facing metadata changes.
 
 Key parameters:
 
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
-| `enableTeamsPublish` | `true` | Master switch: Teams APIM API + public YARP flip + the postdeploy publish hook. Set `false` to opt out. |
-| `teamsPublishAgentNames` | `['hello-world-agent','gateway-model-agent','teams-agent']` | Seeded agents to publish. Each gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
-| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by the hook once all agents are seeded. |
+| `agent-name` (publish-teams action) | — | The single agent to publish. Each per-agent workflow passes the agent it just deployed. Each agent gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
+| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by `deploy-compliancy.yml` once agents are deployed. |
 
-Optional publish metadata is read from env by the hook (`azd env set`):
+Optional publish metadata is read from repo variables by the `publish-teams` action:
 `TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,
 `TEAMS_SHORT_DESCRIPTION`, `TEAMS_FULL_DESCRIPTION`, `TEAMS_DEVELOPER_NAME`,
 `TEAMS_DEVELOPER_WEBSITE_URL`, `TEAMS_PRIVACY_URL`, `TEAMS_TERMS_OF_USE_URL`.
@@ -148,5 +149,5 @@ Optional publish metadata is read from env by the hook (`azd env set`):
 > *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.
 > The `Microsoft.BotService` resource provider is registered by the hook.
 
-See [NETWORKING.md](../NETWORKING.md#optional-teams--m365-publish-inbound-path) for
+See [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path) for
 the inbound/return firewall and routing details.
