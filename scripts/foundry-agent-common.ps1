@@ -9,6 +9,32 @@
 
   Callers pass the Foundry endpoint and API version through each function's -Endpoint /
   -ApiVersion parameters (see create-agent.ps1 / publish-agent.ps1).
+
+  ── The Foundry Agents model (what a newcomer needs to know) ─────────────────────────
+  An "agent" is a named container. Each agent has one or more immutable, auto-numbered
+  VERSIONS (1, 2, 3, ...); a version holds the actual definition (model, instructions,
+  tools). A separate "served version" selector routes 100% of endpoint traffic to one
+  chosen version. So the lifecycle is three distinct steps:
+
+    1. CREATE      first POST /agents            -> agent + version 1     (New-Agent)
+    2. VERSION     later POST .../versions       -> version N+1           (New-AgentVersion)
+    3. SERVE       PATCH the version selector    -> route traffic to N    (Set-ServedAgentVersion)
+
+  Key gotcha: the API DE-DUPLICATES identical definitions. POSTing an unchanged definition
+  does NOT create a new version — it returns the current latest. That is why create-agent.ps1
+  compares the version before/after to tell "updated" from "unchanged". Creating/adding a
+  version never shifts live traffic; only step 3 (publish-agent.ps1) does.
+
+  ── Function index ──────────────────────────────────────────────────────────────────
+    Get-FoundryToken           managed-identity token for the data plane (via IMDS)
+    Get-HttpErrorDetail        unwrap the real {error} body from a failed REST call
+    Invoke-FoundryRequest      wrapper: retry w/ backoff + print failure bodies
+    Get-ExistingAgents         list agents (used to decide create vs. version)
+    New-Agent                  step 1 — create a brand-new agent
+    New-AgentVersion           step 2 — add a version to an existing agent
+    Get-LatestAgentVersion     highest version number (int) for an agent
+    Get-AgentVersionsDescending all versions, highest-first (nightly eval baseline pick)
+    Set-ServedAgentVersion     step 3 — point live traffic at a specific version
 #>
 $ErrorActionPreference = 'Stop'
 
