@@ -108,11 +108,10 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
    needs the GitHub CLI authenticated (`gh auth login`) with permission to write repo variables.
    Re-run it any time with `azd hooks run postprovision`.
 
-   It syncs the same-named outputs (`AZURE_RESOURCE_GROUP`, `AZURE_AI_ACCOUNT_NAME`,
-   `AZURE_AI_PROJECT_NAME`, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`,
-   `MCP_COMPLIANCE_APIM_NAME`, `MCP_COMPLIANCE_AUDIENCE`, `TEAMS_*`) plus one rename —
-   `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`. `TEAMS_PUBLISH_SCOPE` has no output (it is an operator
-   choice), so set it manually if you use Teams publishing.
+   It syncs the same-named outputs (`AZURE_RESOURCE_GROUP`, `AZURE_AI_PROJECT_ENDPOINT`,
+   `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `MCP_COMPLIANCE_APIM_NAME`, `MCP_COMPLIANCE_AUDIENCE`,
+   `TEAMS_*`) plus one rename — `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`. `TEAMS_PUBLISH_SCOPE` has no
+   output (it is an operator choice), so set it manually if you use Teams publishing.
 
    To set any variable by hand instead (e.g. from a different environment), mirror the azd output:
 

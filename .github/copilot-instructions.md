@@ -128,18 +128,13 @@ second seeded agent routed through it. See `apim-model-gateway.md`. Networking d
 
 ## MCP compliance (agent → APIM allowlist)
 `mcp/mcp-policy.json` is the **name-only** source of truth (deny-by-default). At apply time,
-`scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its Entra
-`ServiceIdentity` SP AppId via the **control plane** (`az ad sp list` on display name
-`<account>-<project>-<agent>-AgentIdentity`, newest `createdDateTime` wins on duplicates), then
+`scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its live AppId read from the
+Foundry **data plane** (`instance_identity.client_id` on the project endpoint — the authoritative
+runtime identity; names with no matching / identity-less agent are dropped), then
 `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. At
 provision, `main.bicep` applies a deny-all policy; the real (resolved) policy is then applied
 **only** by `.github/workflows/deploy-compliancy.yml` (run it after agents are seeded, and again
-whenever you edit the JSON). azd deploys no agents post-provision, so a fresh `azd up` leaves MCP
-deny-all until that workflow runs.
-
-> **⚠️ NOTE (per @graemefoster, 2026-07-27): the azd/postdeploy compliance flow has now been
-> removed** (azd provisions only). MCP compliance is workflow-only and still resolves AppIds via
-> the **control plane** (`az ad sp list`). If you want the authoritative DATA-plane resolution
-> instead (the in-VNet VM reading `instance_identity.client_id`, i.e. DISCOVERY mode in
-> `scripts/list-agent-appids.ps1`), switch `deploy-compliancy.yml` to it — the data plane avoids
-> the control-plane display-name trust model (see the SECURITY header block in that script).
+whenever you edit the JSON). Because resolution reads the private data plane, that workflow **must**
+run on the in-VNet self-hosted runner (VM managed identity via IMDS) — no Microsoft Graph
+permission is needed. azd deploys no agents post-provision, so a fresh `azd up` leaves MCP deny-all
+until that workflow runs.

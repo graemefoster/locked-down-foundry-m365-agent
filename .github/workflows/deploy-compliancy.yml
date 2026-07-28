@@ -9,29 +9,29 @@ name: Deploy compliancy (MCP rate limits)
 #
 # NAME-ONLY policy + deploy-time resolution:
 #   mcp/mcp-policy.json lists agents by NAME only (no AppId GUIDs committed). This workflow runs
-#   scripts/list-agent-appids.ps1 -ResolvePolicyPath to join each name to its live AgentIdentity
-#   AppId via Microsoft Graph (az ad sp list on the SP '<account>-<project>-<name>-AgentIdentity')
-#   — dropping any name with no matching identity — then passes the resolved (AppId-enriched)
-#   policy to the Bicep wrapper as the `mcpPolicy` parameter. This workflow is now the ONLY way
-#   MCP compliance is applied — azd runs nothing after provision, so run this after `azd up`
-#   (once the agents are deployed by the per-agent deploy-*-agent.yml workflows) and again
-#   whenever you edit the JSON.
+#   scripts/list-agent-appids.ps1 -ResolvePolicyPath to join each name to its live AppId read from
+#   the Foundry DATA PLANE (instance_identity.client_id on the project endpoint) — dropping any
+#   name with no matching / identity-less agent — then passes the resolved (AppId-enriched) policy
+#   to the Bicep wrapper as the `mcpPolicy` parameter. This workflow is now the ONLY way MCP
+#   compliance is applied — azd deploys no agents post-provision, so run this after `azd up` (once
+#   the agents are deployed by the per-agent deploy-*-agent.yml workflows) and again whenever you
+#   edit the JSON.
 #
 # Runner:
-#   Resolution is now a CONTROL-PLANE call (Graph), and applying the APIM policy is an ARM
-#   control-plane op — neither needs the private Foundry data plane, so this no longer requires the
-#   in-VNet runner. It is kept on the self-hosted VNet runner only to reuse the VM managed identity
-#   (Contributor on the resource group) and the same lockdown as the deploy workflows. IMPORTANT: the VM
-#   managed identity must also be granted Microsoft Graph Directory.Read.All (or Application.Read.All)
-#   so `az ad sp list` can read the agent identity SPs; interactive users usually have this already.
-#   Lockdown: workflow_dispatch only (forks cannot queue), repository guard, and the `vnet-deploy`
-#   environment (add a REQUIRED REVIEWER + branch=main in repo Settings for an approval gate).
+#   Resolution reads the Foundry DATA PLANE (the project endpoint is private), so this MUST run on
+#   the in-VNet self-hosted runner — the VM authenticates to Foundry with its own managed identity
+#   (IMDS) and holds Contributor on the resource group for the APIM policy deployment (an ARM
+#   control-plane op). No Microsoft Graph permission is needed (the old control-plane resolver is
+#   gone). Lockdown: workflow_dispatch only (forks cannot queue), repository guard, and the
+#   `vnet-deploy` environment (add a REQUIRED REVIEWER + branch=main in repo Settings for an
+#   approval gate).
 #
-# Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables):
+# Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables — the
+# postprovision hook syncs these automatically):
 #   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE,
-#   AZURE_AI_ACCOUNT_NAME, AZURE_AI_PROJECT_NAME. Run `azd env refresh` if any are missing. Each
-#   can be overridden per-run via the dispatch inputs below. Which servers get a policy is driven
-#   by mcp/mcp.json (no input needed).
+#   AZURE_AI_PROJECT_ENDPOINT. Run `azd env refresh` if any are missing. Each can be overridden
+#   per-run via the dispatch inputs below. Which servers get a policy is driven by mcp/mcp.json
+#   (no input needed).
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -48,12 +48,8 @@ on:
         description: "MCP app registration audience (defaults to repo variable MCP_COMPLIANCE_AUDIENCE)"
         required: false
         default: ""
-      accountName:
-        description: "Foundry account name (defaults to repo variable AZURE_AI_ACCOUNT_NAME)"
-        required: false
-        default: ""
-      projectName:
-        description: "Foundry project name (defaults to repo variable AZURE_AI_PROJECT_NAME)"
+      foundryEndpoint:
+        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
         required: false
         default: ""
 
@@ -80,29 +76,27 @@ jobs:
           RESOURCE_GROUP: ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:      ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
           MCP_AUDIENCE:   ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
-          ACCOUNT_NAME:   ${{ inputs.accountName != '' && inputs.accountName || vars.AZURE_AI_ACCOUNT_NAME }}
-          PROJECT_NAME:   ${{ inputs.projectName != '' && inputs.projectName || vars.AZURE_AI_PROJECT_NAME }}
+          FOUNDRY_ENDPOINT: ${{ inputs.foundryEndpoint != '' && inputs.foundryEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
               [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE) -or
-              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:PROJECT_NAME)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_ACCOUNT_NAME and AZURE_AI_PROJECT_NAME (from 'azd env get-values'), or pass them as dispatch inputs."
+              [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (from 'azd env get-values'), or pass them as dispatch inputs."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
           }
 
-          # Resolve the name-only mcp/mcp-policy.json against LIVE agent identities via Graph
-          # (az ad sp list on '<account>-<project>-<name>-AgentIdentity'). Names with no matching SP
-          # are dropped (deny-by-default). Control-plane only — no private Foundry endpoint needed.
+          # Resolve the name-only mcp/mcp-policy.json against LIVE agent identities read from the
+          # Foundry DATA PLANE (instance_identity.client_id on the project endpoint). Names with no
+          # matching / identity-less agent are dropped (deny-by-default). Needs the private endpoint,
+          # which the in-VNet runner can reach (VM managed identity via IMDS).
           $resolvedPolicy = Join-Path $env:RUNNER_TEMP 'resolved-mcp-policy.json'
-          Write-Host "Resolving agent names -> AppIds for '$($env:ACCOUNT_NAME)-$($env:PROJECT_NAME)-<name>-AgentIdentity'."
+          Write-Host "Resolving agent names -> AppIds from the Foundry project at '$($env:FOUNDRY_ENDPOINT)'."
           pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
-            -AccountName $env:ACCOUNT_NAME `
-            -ProjectName $env:PROJECT_NAME `
+            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
             -ResolvePolicyPath mcp/mcp-policy.json `
             -OutFile $resolvedPolicy
           if ($LASTEXITCODE -ne 0) { throw "Agent name resolution failed." }

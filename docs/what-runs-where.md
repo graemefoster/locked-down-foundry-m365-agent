@@ -38,8 +38,7 @@ hook script.
 
 Everything under `scripts/` runs on the VM because it needs the private Foundry endpoint (or, for
 teardown, the Key-Vault-protected PAT). They authenticate as the **VM managed identity via IMDS**
-— never `az login`. The one exception is `list-agent-appids.ps1` RESOLVE mode (control-plane; see
-below).
+— never `az login`.
 
 ### Agent create / publish (reusable `deploy-agent.yml`)
 
@@ -66,11 +65,7 @@ delegated **user** token (device-code sign-in) and forwards it for that step onl
 
 | File | Invoked by | Runs on | Identity | What it does |
 |---|---|---|---|---|
-| `list-agent-appids.ps1` | `deploy-compliancy.yml` (RESOLVE mode) | VM runner | `az` / Graph (**control plane**) | Joins each agent **name** in `mcp/mcp-policy.json` to its live Entra `AgentIdentity` **AppId** and emits the resolved policy for the APIM allowlist Bicep. **DISCOVERY** mode (default) instead reads AppIds from the Foundry **data plane** (needs the private endpoint → VM). |
-
-> **Note:** RESOLVE mode uses the **control plane** (`az ad sp list`), so it does not strictly need
-> the private endpoint — it is kept on the VNet runner to reuse the VM identity. See the ⚠️ NOTE in
-> `.github/copilot-instructions.md` about switching back to the data-plane (DISCOVERY) resolution.
+| `list-agent-appids.ps1` | `deploy-compliancy.yml` (RESOLVE mode) | VM runner | VM MI (IMDS) — **data plane** | Joins each agent **name** in `mcp/mcp-policy.json` to its live `instance_identity.client_id` read from the Foundry data plane and emits the resolved policy for the APIM allowlist Bicep. DISCOVERY mode (default) prints every agent's AppId + a paste-ready policy array. Both modes need the private endpoint → the VM. |
 
 ### Teardown
 
