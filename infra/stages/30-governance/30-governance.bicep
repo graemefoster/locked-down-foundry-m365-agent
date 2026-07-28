@@ -70,7 +70,7 @@ var mcpConnections = map(servers, srv => {
   audience: mcpAudience
 })
 
-module projectMcpConnections '../../modules/foundry/project-mcp-connections.bicep' = {
+module projectMcpConnections './foundry/project-mcp-connections.bicep' = {
   name: 'project-mcp-connections-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccountName
@@ -83,13 +83,13 @@ module projectMcpConnections '../../modules/foundry/project-mcp-connections.bice
 // Assigns the built-in "[Preview]: Guardrail for Cognitive Services Deployments"
 // initiative with STRICT parameters. Audit-only (the built-in cannot block); it
 // reports every model deployment's content-filter config as Compliant / Non-compliant.
-module raiGuardrail '../../modules/governance/rai-guardrail-assignment.bicep' = if (enableRaiGuardrailPolicy) {
+module raiGuardrail './governance/rai-guardrail-assignment.bicep' = if (enableRaiGuardrailPolicy) {
   name: 'rai-guardrail-${uniqueSuffix}-deployment'
 }
 
 // DEMO: a deliberately non-compliant deployment (weak custom RAI policy) so you can
 // watch the guardrail flag it. Attaches to the existing AI Services account.
-module nonCompliantModelDemo '../../modules/governance/noncompliant-model-demo.bicep' = if (enableNonCompliantModelDemo) {
+module nonCompliantModelDemo './governance/noncompliant-model-demo.bicep' = if (enableNonCompliantModelDemo) {
   name: 'noncompliant-demo-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccountName
@@ -104,7 +104,7 @@ module nonCompliantModelDemo '../../modules/governance/noncompliant-model-demo.b
 // each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
 // per server). Applied here at provision time so a fresh environment starts compliant; the
 // deploy-compliancy workflow re-applies THIS SAME module on demand after the JSON changes.
-module apimMcpComplianceAll '../../modules/model-gateway/apim-mcp-compliance-all.bicep' = {
+module apimMcpComplianceAll './model-gateway/apim-mcp-compliance-all.bicep' = {
   name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -113,7 +113,7 @@ module apimMcpComplianceAll '../../modules/model-gateway/apim-mcp-compliance-all
   }
 }
 
-module apimApiPolicy '../../modules/model-gateway/apim-api-policy.bicep' = {
+module apimApiPolicy './model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -125,7 +125,7 @@ module apimApiPolicy '../../modules/model-gateway/apim-api-policy.bicep' = {
 }
 
 // Advertise APIM to the primary Foundry project as an ApiManagement connection.
-module apimConnection '../../modules/model-gateway/apim-connection.bicep' = {
+module apimConnection './model-gateway/apim-connection.bicep' = {
   name: 'model-gateway-connection-${uniqueSuffix}-deployment'
   params: {
     aiFoundryName: aiAccountName
@@ -139,7 +139,7 @@ module apimConnection '../../modules/model-gateway/apim-connection.bicep' = {
 
 // APIM Teams / M365 inbound API + policy (validate Bot Framework JWT, forward to the
 // agent activityProtocol endpoint on the primary Foundry PE). Always deployed.
-module apimTeamsApi '../../modules/model-gateway/apim-teams-api.bicep' = {
+module apimTeamsApi './model-gateway/apim-teams-api.bicep' = {
   name: 'teams-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -153,7 +153,7 @@ module apimTeamsApi '../../modules/model-gateway/apim-teams-api.bicep' = {
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
 // private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
 // and after the API/policy children so it never races their creation.
-module apimLockdown '../../modules/model-gateway/apim-lockdown.bicep' = {
+module apimLockdown './model-gateway/apim-lockdown.bicep' = {
   name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -174,7 +174,7 @@ module apimLockdown '../../modules/model-gateway/apim-lockdown.bicep' = {
 // PUT before this second rule-collection-group PUT lands on the same policy. This avoids
 // the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
 // rule-collection-group PUTs arrive back-to-back.
-module gatewayFirewallRules '../../modules/model-gateway/gateway-firewall-rules.bicep' = {
+module gatewayFirewallRules './model-gateway/gateway-firewall-rules.bicep' = {
   name: 'gateway-fwall-rules-${uniqueSuffix}-deployment'
   params: {
     firewallPolicyName: firewallPolicyName

@@ -45,7 +45,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = 
 /*
   Creates a new project (sub-resource of the AI Services account)
 */
-module aiProject '../../modules/foundry/ai-project-identity.bicep' = {
+module aiProject './foundry/ai-project-identity.bicep' = {
   name: 'ai-${projectName}-${uniqueSuffix}-deployment'
   params: {
     // workspace organization
@@ -78,7 +78,7 @@ module aiProject '../../modules/foundry/ai-project-identity.bicep' = {
   ]
 }
 
-module formatProjectWorkspaceId '../../modules/foundry/format-project-workspace-id.bicep' = {
+module formatProjectWorkspaceId './foundry/format-project-workspace-id.bicep' = {
   name: 'format-project-workspace-id-${uniqueSuffix}-deployment'
   params: {
     projectWorkspaceId: aiProject.outputs.projectWorkspaceId

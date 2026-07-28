@@ -43,7 +43,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = 
 /*
   Assigns the project SMI the storage blob data contributor role on the storage account
 */
-module storageAccountRoleAssignment '../../modules/rbac/azure-storage-account-role-assignment.bicep' = {
+module storageAccountRoleAssignment './rbac/azure-storage-account-role-assignment.bicep' = {
   name: 'storage-ra-${uniqueSuffix}-deployment'
   params: {
     azureStorageName: azureStorageName
@@ -58,7 +58,7 @@ module storageAccountRoleAssignment '../../modules/rbac/azure-storage-account-ro
   Assigns the project SMI Reader role on Application Insights.
   This supports running Evaluations on existing traces.
 */
-module appInsightsRoleAssignment '../../modules/rbac/app-insights-role-assignment.bicep' = {
+module appInsightsRoleAssignment './rbac/app-insights-role-assignment.bicep' = {
   name: 'appi-ra-${uniqueSuffix}-deployment'
   params: {
     appInsightsName: appInsightsName
@@ -70,7 +70,7 @@ module appInsightsRoleAssignment '../../modules/rbac/app-insights-role-assignmen
 /*
   Assigns the project SMI Container Registry Repository Reader role on ACR.
 */
-module acrRoleAssignment '../../modules/rbac/acr-role-assignment.bicep' = {
+module acrRoleAssignment './rbac/acr-role-assignment.bicep' = {
   name: 'acr-ra-${uniqueSuffix}-deployment'
   params: {
     acrName: acrName
@@ -81,7 +81,7 @@ module acrRoleAssignment '../../modules/rbac/acr-role-assignment.bicep' = {
 /*
   Assigns Foundry User role to the project SMI on the Foundry project resource.
 */
-module foundryProjectRoleAssignment '../../modules/rbac/foundry-project-role-assignment.bicep' = {
+module foundryProjectRoleAssignment './rbac/foundry-project-role-assignment.bicep' = {
   name: 'foundry-project-ra-${uniqueSuffix}-deployment'
   params: {
     accountName: accountName
@@ -91,7 +91,7 @@ module foundryProjectRoleAssignment '../../modules/rbac/foundry-project-role-ass
 }
 
 // The Comos DB Operator role must be assigned before the caphost is created
-module cosmosAccountRoleAssignments '../../modules/rbac/cosmosdb-account-role-assignment.bicep' = {
+module cosmosAccountRoleAssignments './rbac/cosmosdb-account-role-assignment.bicep' = {
   name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosDBName: cosmosDBName
@@ -103,7 +103,7 @@ module cosmosAccountRoleAssignments '../../modules/rbac/cosmosdb-account-role-as
 }
 
 // This role can be assigned before or after the caphost is created
-module aiSearchRoleAssignments '../../modules/rbac/ai-search-role-assignments.bicep' = {
+module aiSearchRoleAssignments './rbac/ai-search-role-assignments.bicep' = {
   name: 'ai-search-ra-${uniqueSuffix}-deployment'
   params: {
     aiSearchName: aiSearchName
@@ -115,7 +115,7 @@ module aiSearchRoleAssignments '../../modules/rbac/ai-search-role-assignments.bi
 }
 
 // This module creates the capability host for the project and account
-module addProjectCapabilityHost '../../modules/foundry/add-project-capability-host.bicep' = {
+module addProjectCapabilityHost './foundry/add-project-capability-host.bicep' = {
   name: 'capabilityHost-configuration-${uniqueSuffix}-deployment'
   params: {
     accountName: accountName
@@ -136,7 +136,7 @@ module addProjectCapabilityHost '../../modules/foundry/add-project-capability-ho
 }
 
 // The Storage Blob Data Owner role must be assigned after the caphost is created
-module storageContainersRoleAssignment '../../modules/rbac/blob-storage-container-role-assignments.bicep' = {
+module storageContainersRoleAssignment './rbac/blob-storage-container-role-assignments.bicep' = {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
   params: {
     aiProjectPrincipalId: projectPrincipalId
@@ -149,7 +149,7 @@ module storageContainersRoleAssignment '../../modules/rbac/blob-storage-containe
 }
 
 // The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
-module cosmosContainerRoleAssignments '../../modules/rbac/cosmos-container-role-assignments.bicep' = {
+module cosmosContainerRoleAssignments './rbac/cosmos-container-role-assignments.bicep' = {
   name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosAccountName: cosmosDBName

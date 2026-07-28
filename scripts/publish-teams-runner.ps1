@@ -11,7 +11,7 @@
     * call the PRIVATE Foundry endpoint directly (IMDS / az MI token), and
     * do the Azure Bot Service ARM deployment itself (the VM MI is granted
       Contributor over the resource group when the runner is installed —
-      infra/modules/rbac/vm-contributor-role.bicep).
+      infra/stages/40-runner/rbac/vm-contributor-role.bicep).
 
   Per agent it: (1) reads the agent identity, (2) creates that agent's Azure Bot
   Service, (3) enables the activity protocol + publishes to Microsoft 365.

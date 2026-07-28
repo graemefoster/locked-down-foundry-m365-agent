@@ -43,7 +43,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = 
   name: cosmosDBName
 }
 
-module privateEndpointAndDNS '../../modules/network/private-endpoint-and-dns.bicep' = {
+module privateEndpointAndDNS './network/private-endpoint-and-dns.bicep' = {
   name: '${uniqueSuffix}-private-endpoint'
   params: {
     aiAccountName: aiAccountName

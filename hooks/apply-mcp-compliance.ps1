@@ -9,7 +9,7 @@
                 agent NAME to its live AgentIdentity AppId via Microsoft Graph (az ad sp list).
                 This is a CONTROL-PLANE call — no private Foundry endpoint / VM round-trip needed —
                 so it runs right here on the azd host.
-    2. APPLY    az deployment group create against infra/modules/model-gateway/
+    2. APPLY    az deployment group create against infra/stages/30-governance/model-gateway/
                 apim-mcp-compliance-all.bicep with the resolved policy as the mcpPolicy parameter
                 (the same module `azd up`'s main.bicep runs, so the two paths cannot diverge).
 
@@ -39,7 +39,7 @@ function Get-RequiredEnv {
 # Repo root is the parent of this hooks/ directory, regardless of the caller's working directory.
 $repoRoot   = Split-Path -Parent $PSScriptRoot
 $resolver   = Join-Path $repoRoot 'scripts/list-agent-appids.ps1'
-$template   = Join-Path $repoRoot 'infra/modules/model-gateway/apim-mcp-compliance-all.bicep'
+$template   = Join-Path $repoRoot 'infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep'
 $policyFile = Join-Path $repoRoot 'mcp/mcp-policy.json'
 
 $rg       = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'

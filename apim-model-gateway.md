@@ -100,18 +100,18 @@ connection — the portal emits the flat `authHeaderName`/`authHeaderFormat` met
 
 ## 6. Files
 
-`infra/modules/model-gateway/`
-- `model-gateway-spoke-vnet.bicep` — new spoke VNet, subnets, UDR, NSGs, PE network policies.
-- `provider-foundry.bicep` — provider AIServices account + model deployment + MI, public access disabled.
-- `apim.bicep` — APIM Standard v2 + VNet integration + system MI. **Create Enabled, then flip
+Model-gateway Bicep modules are localised under each owning stage's `model-gateway/` subfolder:
+- `infra/stages/00-foundation/model-gateway/model-gateway-spoke-vnet.bicep` — new spoke VNet, subnets, UDR, NSGs, PE network policies.
+- `infra/stages/10-platform/model-gateway/provider-foundry.bicep` — provider AIServices account + model deployment + MI, public access disabled.
+- `infra/stages/10-platform/model-gateway/apim.bicep` — APIM Standard v2 + VNet integration + system MI. **Create Enabled, then flip
   `publicNetworkAccess=Disabled` in a second update after the PE** (v2 can't be created Disabled).
-- `apim-api-policy.bicep` — inference API, `chat-completions` op (v1), discovery ops, inbound
+- `infra/stages/30-governance/model-gateway/apim-api-policy.bicep` — inference API, `chat-completions` op (v1), discovery ops, inbound
   JWT+xms_mirid policy, backend MI auth. **Uses `@@TOKEN@@` placeholders + `replace()`;
   replace LONGEST tokens first** (`@@PROJID@@` is a substring of `@@PROJID_RGLOWER@@`/`_LOWER@@`).
-- `apim-connection.bicep` — primary project → APIM `ApiManagement` connection (see §4/§5).
-- `model-gateway-private-endpoints.bicep` — APIM PE (`privatelink.azure-api.net`) + provider PE + DNS links.
-- `apim-provider-role-assignment.bicep` — APIM MI → `Cognitive Services OpenAI User` on provider.
-- `apim-mcp-compliance.bicep` — MCP per-agent rate-limit policy (see §13).
+- `infra/stages/30-governance/model-gateway/apim-connection.bicep` — primary project → APIM `ApiManagement` connection (see §4/§5).
+- `infra/stages/10-platform/model-gateway/model-gateway-private-endpoints.bicep` — APIM PE (`privatelink.azure-api.net`) + provider PE + DNS links.
+- `infra/stages/10-platform/model-gateway/apim-provider-role-assignment.bicep` — APIM MI → `Cognitive Services OpenAI User` on provider.
+- `infra/stages/30-governance/model-gateway/apim-mcp-compliance.bicep` — MCP per-agent rate-limit policy (see §13).
 
 Modified core:
 - `infra/main.bicep` — always-deployed model-gateway modules; firewall rule; hub↔spoke
@@ -169,13 +169,13 @@ KEY=$(az rest --method post --url "https://management.azure.com/subscriptions/$S
 PROVID="/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/gwprovider32cm"
 PROJID="/subscriptions/$SUB/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/aiservices32cm/projects/project32cm"
 az deployment group create -g $RG --name gw-policy-v1-patch \
-  --template-file infra/modules/model-gateway/apim-api-policy.bicep \
+  --template-file infra/stages/30-governance/model-gateway/apim-api-policy.bicep \
   --parameters apimName=apim-32cm-modelgw backendBaseUrl="https://gwprovider32cm.openai.azure.com/openai" \
     providerAccountResourceId="$PROVID" callerProjectResourceId="$PROJID" apiSubscriptionKey="$KEY"
 
 # Targeted deploy: connection module (creates/updates the 'model-gateway' connection)
 az deployment group create -g $RG --name gw-connection-v1-patch \
-  --template-file infra/modules/model-gateway/apim-connection.bicep \
+  --template-file infra/stages/30-governance/model-gateway/apim-connection.bicep \
   --parameters aiFoundryName=aiservices32cm projectName=project32cm connectionName=model-gateway \
     apimGatewayUrl="https://apim-32cm-modelgw.azure-api.net" apiPath=inference \
     exposedModelName=gpt-5.4-mini apiKey="$KEY"

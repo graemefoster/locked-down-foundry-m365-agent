@@ -48,7 +48,7 @@ Two firewall dependencies make this work:
   Framework IdP's OpenID Connect metadata + signing keys. APIM is force-tunnelled
   through the firewall, so **without this rule every inbound activity fails with a
   `401`** (the signing-key fetch is denied). See
-  [`gateway-firewall-rules.bicep`](../infra/modules/model-gateway/gateway-firewall-rules.bicep).
+  [`gateway-firewall-rules.bicep`](../infra/stages/30-governance/model-gateway/gateway-firewall-rules.bicep).
 - **APIM → primary Foundry private endpoint** (a cross-spoke network rule) to reach the
   activityProtocol endpoint.
 

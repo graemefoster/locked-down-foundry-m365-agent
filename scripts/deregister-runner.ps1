@@ -1,7 +1,7 @@
 <#
   Deregister the self-hosted GitHub Actions runner (runs ON the private VM)
   ------------------------------------------------------------------------
-  The teardown counterpart of infra/modules/resources/bootstrap-github-runner.sh.
+  The teardown counterpart of infra/stages/40-runner/resources/bootstrap-github-runner.sh.
   Executed on the locked-down Linux worker VM by the azd `predown` hook
   (hooks/predown.ps1), which ships this file over `RunShellScript` and runs it under pwsh
   via the hooks/vm-run-command.ps1 shim — BEFORE `azd down` deletes the VM.

@@ -29,7 +29,7 @@ param logAnalyticsId string
 param logAnalyticsCustomerId string
 
 // Step 1: Deploy Hub VNet + DNS Resolver
-module hubNetwork '../../modules/network/network-agent-vnet.bicep' = {
+module hubNetwork './network/network-agent-vnet.bicep' = {
   name: 'hub-network-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -38,7 +38,7 @@ module hubNetwork '../../modules/network/network-agent-vnet.bicep' = {
 }
 
 // Step 2: Deploy Firewall into Hub VNet
-module firewall '../../modules/network/firewall.bicep' = {
+module firewall './network/firewall.bicep' = {
   name: 'stage00-networking-${uniqueSuffix}-fwall'
   params: {
     firewallPipName: '${uniqueSuffix}-fwall-pip'
@@ -57,7 +57,7 @@ module firewall '../../modules/network/firewall.bicep' = {
 }
 
 // Step 3: Deploy Foundry Spoke VNet (needs firewall IP + DNS resolver IP)
-module foundrySpokeVnet '../../modules/network/foundry-spoke-vnet.bicep' = {
+module foundrySpokeVnet './network/foundry-spoke-vnet.bicep' = {
   name: 'foundry-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -76,7 +76,7 @@ module foundrySpokeVnet '../../modules/network/foundry-spoke-vnet.bicep' = {
 }
 
 // Step 4: Deploy App Service Spoke VNet (needs firewall IP + DNS resolver IP)
-module appServiceSpokeVnet '../../modules/network/appservice-spoke-vnet.bicep' = {
+module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
   name: 'appservice-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -108,7 +108,7 @@ resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 }
 
 // VNet flow logs live under the regional Network Watcher in NetworkWatcherRG.
-module agentFlowLogs '../../modules/network/agent-flow-logs.bicep' = {
+module agentFlowLogs './network/agent-flow-logs.bicep' = {
   name: 'agent-flow-logs-${uniqueSuffix}-deployment'
   scope: resourceGroup('NetworkWatcherRG')
   params: {
@@ -123,7 +123,7 @@ module agentFlowLogs '../../modules/network/agent-flow-logs.bicep' = {
 }
 
 // Step 5: VNet Peerings (Hub ↔ Foundry Spoke)
-module hubToFoundryPeering '../../modules/network/vnet-peering.bicep' = {
+module hubToFoundryPeering './network/vnet-peering.bicep' = {
   name: 'hub-foundry-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -134,7 +134,7 @@ module hubToFoundryPeering '../../modules/network/vnet-peering.bicep' = {
 }
 
 // Step 6: VNet Peerings (Hub ↔ App Service Spoke)
-module hubToAppServicePeering '../../modules/network/vnet-peering.bicep' = {
+module hubToAppServicePeering './network/vnet-peering.bicep' = {
   name: 'hub-appservice-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName
@@ -147,7 +147,7 @@ module hubToAppServicePeering '../../modules/network/vnet-peering.bicep' = {
 // Step 7: model-gateway spoke VNet (always deployed; pure network — moved up from its
 // former late position). APIM (which lives in this spoke) is shared by the model gateway
 // AND the Teams/M365 publish inbound path.
-module modelGatewaySpokeVnet '../../modules/model-gateway/model-gateway-spoke-vnet.bicep' = {
+module modelGatewaySpokeVnet './model-gateway/model-gateway-spoke-vnet.bicep' = {
   name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -159,7 +159,7 @@ module modelGatewaySpokeVnet '../../modules/model-gateway/model-gateway-spoke-vn
 }
 
 // Step 8: peer hub <-> model-gateway spoke (always, alongside the spoke VNet)
-module hubToModelGatewayPeering '../../modules/network/vnet-peering.bicep' = {
+module hubToModelGatewayPeering './network/vnet-peering.bicep' = {
   name: 'hub-model-gateway-peering-${uniqueSuffix}'
   params: {
     hubVnetName: hubNetwork.outputs.hubVnetName

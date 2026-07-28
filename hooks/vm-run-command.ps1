@@ -4,7 +4,7 @@
   Dot-sourced by hooks/predeploy.ps1 and hooks/postdeploy.ps1.
 
   Why a shim instead of calling `az vm run-command invoke` directly:
-    The in-VNet worker VM is now LINUX (see infra/modules/resources/vm-linux.bicep),
+    The in-VNet worker VM is now LINUX (see infra/stages/40-runner/resources/vm-linux.bicep),
     so the 'RunPowerShellScript' command id no longer applies — Linux VMs only accept
     'RunShellScript', whose --scripts value is a shell script, not the named PowerShell
     parameters our scripts declare.

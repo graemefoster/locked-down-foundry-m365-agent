@@ -37,7 +37,7 @@ module mcpWebApp 'mcp-web-app.bicep' = {
 
 // The YARP proxy is the public ingress (its own FQDN + managed cert is the Bot Channel
 // Adapter entry point), so it gets NO private endpoint — only the MCP web app does.
-module appServicePrivateEndpoint '../../modules/network/app-service-private-endpoint.bicep' = {
+module appServicePrivateEndpoint './network/app-service-private-endpoint.bicep' = {
   name: 'stage20-mcp-private-endpoint-${uniqueSuffix}'
   params: {
     appServiceSpokeVnetName: appServiceSpokeVnetName
@@ -51,7 +51,7 @@ module appServicePrivateEndpoint '../../modules/network/app-service-private-endp
   Entra app registration guarding the private MCP web app. Federated to the MCP web app's
   user-assigned managed identity (MI-as-FIC) so App Service built-in auth is secretless.
 */
-module mcpAppRegistration '../../modules/gateway/app-registration.bicep' = {
+module mcpAppRegistration './gateway/app-registration.bicep' = {
   name: 'mcp-appreg-${uniqueSuffix}-deployment'
   params: {
     clientAppName: 'mcp-gateway-${uniqueSuffix}'
@@ -65,7 +65,7 @@ module mcpAppRegistration '../../modules/gateway/app-registration.bicep' = {
 // the App Service private endpoints, so all MCP tool traffic flows through the gateway.
 // Backend FQDNs are generated at provision time, so they are NOT stored in mcp/mcp.json — they
 // are flowed in here, keyed by server name. The existing sample is the server named 'mcp'.
-module apimMcpServers '../../modules/model-gateway/apim-mcp-servers.bicep' = {
+module apimMcpServers './model-gateway/apim-mcp-servers.bicep' = {
   name: 'mcp-apim-servers-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -80,7 +80,7 @@ module apimMcpServers '../../modules/model-gateway/apim-mcp-servers.bicep' = {
   requests (machine-to-machine, no interactive redirect) and validates the AgenticIdentityToken
   audience against the app registration's Application ID URI.
 */
-module mcpBuiltinAuth '../../modules/gateway/builtin-auth.bicep' = {
+module mcpBuiltinAuth './gateway/builtin-auth.bicep' = {
   name: 'mcp-auth-${uniqueSuffix}-deployment'
   params: {
     appServiceName: mcpWebApp.outputs.mcpWebAppName

@@ -15,7 +15,7 @@ name: Nightly eval — test-agent-one (VNet self-hosted)
 #   DefaultAzureCredential, which picks up the VM's SYSTEM-ASSIGNED managed identity via
 #   IMDS — no `azure/login` / OIDC and no id-token permission needed.
 #
-# The runner VM is LINUX (infra/modules/resources/vm-linux.bicep), which is why this
+# The runner VM is LINUX (infra/stages/40-runner/resources/vm-linux.bicep), which is why this
 # workflow can consume `microsoft/ai-agent-evals` directly: the action's steps declare
 # `shell: bash` and pass ${{ github.action_path }} unquoted, which used to break on the
 # old Windows runner's backslash paths and forced a manual checkout of the action.

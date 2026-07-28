@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@v5
 
       # yq is installed by cloud-init on the in-VNet Linux runner
-      # (infra/modules/resources/cloud-init-linux-vm.yaml).
+      # (infra/stages/40-runner/resources/cloud-init-linux-vm.yaml).
       - name: Convert agent.yaml -> agent.json (yq)
         env:
           MANIFEST: ${{ env.MANIFEST_PATH }}

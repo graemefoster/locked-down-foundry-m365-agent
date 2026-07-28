@@ -3,7 +3,7 @@
   ---------------------------------
   Grants the Linux worker VM's system-assigned managed identity read access to Key
   Vault secrets, so the self-hosted GitHub Actions runner bootstrap
-  (infra/modules/resources/bootstrap-github-runner.sh, run via a managed Run
+  (infra/stages/40-runner/resources/bootstrap-github-runner.sh, run via a managed Run
   Command) can read the fine-grained PAT over the private KV data plane. Only
   wired when the runner is being installed.
 */

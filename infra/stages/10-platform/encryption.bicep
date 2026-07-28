@@ -38,7 +38,7 @@ param allowedFqdnList array
 param storageSkuName string
 
 // Assign Key Vault Crypto Service Encryption User to service identities (post-creation)
-module keyVaultRoleAssignments '../../modules/rbac/keyvault-role-assignments.bicep' = {
+module keyVaultRoleAssignments './rbac/keyvault-role-assignments.bicep' = {
   name: 'keyvault-rbac-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: keyVaultName
@@ -50,7 +50,7 @@ module keyVaultRoleAssignments '../../modules/rbac/keyvault-role-assignments.bic
 }
 
 // Update AI Services account with CMK encryption (must be after RBAC assignment)
-module aiAccountEncryption '../../modules/encryption/ai-account-encryption.bicep' = {
+module aiAccountEncryption './encryption/ai-account-encryption.bicep' = {
   name: 'ai-encryption-${uniqueSuffix}-deployment'
   params: {
     accountName: accountName
@@ -68,7 +68,7 @@ module aiAccountEncryption '../../modules/encryption/ai-account-encryption.bicep
 }
 
 // Update Storage Account with CMK encryption (must be after RBAC assignment)
-module storageEncryption '../../modules/encryption/storage-encryption.bicep' = {
+module storageEncryption './encryption/storage-encryption.bicep' = {
   name: 'storage-encryption-${uniqueSuffix}-deployment'
   params: {
     storageName: azureStorageName

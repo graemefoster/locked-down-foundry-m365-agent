@@ -11,10 +11,10 @@ It is **off by default**: the runner is only installed when `githubRunnerRepoUrl
 
 | VM | Module | When | Purpose |
 |---|---|---|---|
-| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/modules/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
-| **Windows dev VM** | `infra/modules/resources/vm.bicep` | only when `deployWindowsVm` is true (**default false**) | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
+| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/stages/40-runner/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
+| **Windows dev VM** | `infra/stages/40-runner/resources/vm.bicep` | only when `deployWindowsVm` is true (**default false**) | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
 
-Azure Bastion lives in its own module (`infra/modules/resources/bastion.bicep`) and exists
+Azure Bastion lives in its own module (`infra/stages/40-runner/resources/bastion.bicep`) and exists
 purely for **interactive human access**. It is the only way into the Windows dev VM (RDP),
 so it is gated by `deployBastion`, which **defaults to `deployWindowsVm`** — bring the
 Windows VM up and Bastion comes with it. The Linux worker needs no interactive path (agent
@@ -33,7 +33,7 @@ default). If you want Bastion SSH into the Linux VM *without* the Windows VM, se
 
 ### Dependencies on the Linux VM
 
-`infra/modules/resources/cloud-init-linux-vm.yaml` installs everything at first boot:
+`infra/stages/40-runner/resources/cloud-init-linux-vm.yaml` installs everything at first boot:
 `pwsh`, `azure-cli` (so `az acr build` covers container builds without a Docker daemon),
 `python3`/`pip`/`venv` (the `microsoft/ai-agent-evals` action pip-installs into a venv),
 plus `git`, `jq` and `yq`. That cloud-init file is the **only** shell script in the repo
@@ -83,11 +83,11 @@ VM managed identity --(IMDS)--> KV token --> read PAT (data plane, private endpo
    --> config.sh --unattended + svc.sh install   (persistent, non-ephemeral)
 ```
 
-Bootstrap: `infra/modules/resources/bootstrap-github-runner.sh`, run on the VM as a
-managed **Run Command** by `infra/modules/resources/vm-runner-extension.bicep` (config is
+Bootstrap: `infra/stages/40-runner/resources/bootstrap-github-runner.sh`, run on the VM as a
+managed **Run Command** by `infra/stages/40-runner/resources/vm-runner-extension.bicep` (config is
 injected as an `export` preamble; the PAT is never in the template). It blocks on
 `cloud-init status --wait`, so it can never race the dependency install. The VM MI is
-granted **Key Vault Secrets User** by `infra/modules/rbac/vm-keyvault-secrets-role.bicep`,
+granted **Key Vault Secrets User** by `infra/stages/40-runner/rbac/vm-keyvault-secrets-role.bicep`,
 and the Run Command is sequenced **after** both that assignment and the PAT-secret write.
 
 ## One-time setup

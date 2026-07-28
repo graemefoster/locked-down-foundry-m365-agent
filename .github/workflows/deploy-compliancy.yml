@@ -111,7 +111,7 @@ jobs:
           az deployment group create `
             --resource-group $env:RESOURCE_GROUP `
             --name "mcp-compliance-$(Get-Date -Format 'yyyyMMddHHmmss')" `
-            --template-file infra/modules/model-gateway/apim-mcp-compliance-all.bicep `
+            --template-file infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep `
             --parameters `
               apimName=$env:APIM_NAME `
               mcpAudience=$env:MCP_AUDIENCE `

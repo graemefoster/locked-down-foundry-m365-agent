@@ -29,7 +29,7 @@ param modelGatewayPeSubnetId string
 param hubVnetId string
 
 // Provider AI Foundry (the "real" model provider) — minimal, locked-down.
-module providerFoundry '../../modules/model-gateway/provider-foundry.bicep' = {
+module providerFoundry './model-gateway/provider-foundry.bicep' = {
   name: 'provider-foundry-${uniqueSuffix}-deployment'
   params: {
     accountName: providerAccountName
@@ -44,7 +44,7 @@ module providerFoundry '../../modules/model-gateway/provider-foundry.bicep' = {
 }
 
 // APIM Standard v2 in the gateway spoke. ALWAYS deployed (shared gateway).
-module apim '../../modules/model-gateway/apim.bicep' = {
+module apim './model-gateway/apim.bicep' = {
   name: 'model-gateway-apim-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -59,7 +59,7 @@ module apim '../../modules/model-gateway/apim.bicep' = {
 // APIM inbound private endpoint + privatelink.azure-api.net DNS. ALWAYS deployed:
 // callers (model-gateway connection AND the Teams inbound YARP path) reach APIM only
 // through this PE once apim-lockdown flips publicNetworkAccess to 'Disabled'.
-module apimPrivateEndpoint '../../modules/model-gateway/apim-private-endpoint.bicep' = {
+module apimPrivateEndpoint './model-gateway/apim-private-endpoint.bicep' = {
   name: 'apim-pe-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -72,7 +72,7 @@ module apimPrivateEndpoint '../../modules/model-gateway/apim-private-endpoint.bi
 }
 
 // Provider Foundry private endpoint + DNS in the gateway spoke (model gateway only).
-module modelGatewayPrivateEndpoints '../../modules/model-gateway/model-gateway-private-endpoints.bicep' = {
+module modelGatewayPrivateEndpoints './model-gateway/model-gateway-private-endpoints.bicep' = {
   name: 'model-gateway-pe-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -83,7 +83,7 @@ module modelGatewayPrivateEndpoints '../../modules/model-gateway/model-gateway-p
 }
 
 // Grant APIM MI Cognitive Services User on the provider Foundry (backend MI auth).
-module apimProviderRoleAssignment '../../modules/model-gateway/apim-provider-role-assignment.bicep' = {
+module apimProviderRoleAssignment './model-gateway/apim-provider-role-assignment.bicep' = {
   name: 'model-gateway-apim-rbac-${uniqueSuffix}-deployment'
   params: {
     providerAccountName: providerFoundry.outputs.accountName

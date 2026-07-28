@@ -7,17 +7,19 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 
 | Path | Purpose |
 |---|---|
-| `infra/main.bicep` | Deployment orchestrator. All resources are declared/wired here. |
+| `infra/main.bicep` | Thin deployment orchestrator — declares params + addressing vars and calls the sequential stages under `infra/stages/`. |
 | `infra/main.parameters.json` | **azd** parameter source. Maps each Bicep param to an env var with an inline default (`${VAR=default}`). |
-| `infra/modules/{network,foundry,resources,encryption,rbac,model-gateway}/` | Categorized Bicep modules. |
+| `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
 | `azure.yaml` | Wires `infra/` + the `predeploy` and `predown` hooks. |
 | `hooks/predeploy.ps1` | azd **predeploy** hook — seeds Foundry agents. |
 | `hooks/predown.ps1` | azd **predown** hook — deletes capability hosts before teardown. |
 | `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. |
 | `scripts/seed-agents.ps1` | Runs **on the private Linux VM** (via `hooks/vm-run-command.ps1`) to create agents. |
 
-`hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration,
-not IaC) and do **not** reference Bicep file paths, so moving modules never breaks them.
+`hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
+Most don't reference Bicep file paths; the exception is `hooks/apply-mcp-compliance.ps1`, which
+deploys `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` by path — keep
+that path in sync if the module moves.
 
 ## Deployment lifecycle
 
@@ -104,7 +106,7 @@ second seeded agent routed through it. See `apim-model-gateway.md`. Networking d
 `scripts/list-agent-appids.ps1` (RESOLVE mode) maps each agent name to its Entra
 `ServiceIdentity` SP AppId via the **control plane** (`az ad sp list` on display name
 `<account>-<project>-<agent>-AgentIdentity`, newest `createdDateTime` wins on duplicates), then
-`infra/modules/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. This runs
+`infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. This runs
 automatically on `azd up` (`hooks/postdeploy.ps1` → `hooks/apply-mcp-compliance.ps1`,
 non-fatal + loud) and on-demand via `.github/workflows/deploy-compliancy.yml`.
 

@@ -55,7 +55,7 @@ param githubRunnerLabels string
 // path for automation. Deploying it separately means you CAN still opt into Bastion SSH
 // on the Linux VM without paying for the Windows VM.
 
-module linuxVmModule '../../modules/resources/vm-linux.bicep' = {
+module linuxVmModule './resources/vm-linux.bicep' = {
   name: 'linux-vm-deployment-${uniqueSuffix}'
   params: {
     location: location
@@ -67,7 +67,7 @@ module linuxVmModule '../../modules/resources/vm-linux.bicep' = {
   }
 }
 
-module vmModule '../../modules/resources/vm.bicep' = if (deployWindowsVm) {
+module vmModule './resources/vm.bicep' = if (deployWindowsVm) {
   name: 'vm-deployment-${uniqueSuffix}'
   params: {
     location: location
@@ -79,7 +79,7 @@ module vmModule '../../modules/resources/vm.bicep' = if (deployWindowsVm) {
   }
 }
 
-module bastionModule '../../modules/resources/bastion.bicep' = if (deployBastion) {
+module bastionModule './resources/bastion.bicep' = if (deployBastion) {
   name: 'bastion-deployment-${uniqueSuffix}'
   params: {
     location: location
@@ -95,7 +95,7 @@ module bastionModule '../../modules/resources/bastion.bicep' = if (deployBastion
 // and intentionally has no such access). The Linux VM's system-assigned identity needs
 // Foundry User on the project so the on-VM script can acquire a token and call the
 // Agents API — that RBAC is provisioned here.
-module vmFoundryRole '../../modules/rbac/vm-foundry-role.bicep' = {
+module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
   name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
     accountName: aiAccountName
@@ -113,7 +113,7 @@ module vmFoundryRole '../../modules/rbac/vm-foundry-role.bicep' = {
 // runs the bootstrap is sequenced AFTER that role assignment. See docs/github-runner.md.
 var installGithubRunner = !empty(githubRunnerRepoUrl)
 
-module vmKeyVaultSecretsRole '../../modules/rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
+module vmKeyVaultSecretsRole './rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {
   name: 'vm-kv-secrets-role-${uniqueSuffix}'
   params: {
     keyVaultName: keyVaultName
@@ -125,7 +125,7 @@ module vmKeyVaultSecretsRole '../../modules/rbac/vm-keyvault-secrets-role.bicep'
 // VM MI) can do control-plane work for representative end-to-end deployments — e.g.
 // create the Azure Bot Service in the gated Teams / M365 publish workflow. Opt-in
 // (runner only) and scoped to the resource group to bound the blast radius.
-module vmContributorRole '../../modules/rbac/vm-contributor-role.bicep' = if (installGithubRunner) {
+module vmContributorRole './rbac/vm-contributor-role.bicep' = if (installGithubRunner) {
   name: 'vm-contributor-role-${uniqueSuffix}'
   params: {
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
@@ -137,7 +137,7 @@ module vmContributorRole '../../modules/rbac/vm-contributor-role.bicep' = if (in
 // data-plane action neither Contributor (management-plane) nor Foundry User (Agents API)
 // covers — without it the judge calls fail with 401 PermissionDenied. See the module header
 // for the full rationale. Opt-in (runner only) and scoped to the account.
-module vmOpenAiUserRole '../../modules/rbac/vm-openai-user-role.bicep' = if (installGithubRunner) {
+module vmOpenAiUserRole './rbac/vm-openai-user-role.bicep' = if (installGithubRunner) {
   name: 'vm-openai-user-role-${uniqueSuffix}'
   params: {
     accountName: aiAccountName
@@ -148,7 +148,7 @@ module vmOpenAiUserRole '../../modules/rbac/vm-openai-user-role.bicep' = if (ins
 // Write the PAT into Key Vault via ARM (control plane) — only when a value is
 // supplied. Skipped (leaving any existing secret intact) when GITHUB_RUNNER_PAT
 // is empty, so the secret can be seeded once and the env var cleared afterward.
-module runnerPatSecret '../../modules/resources/runner-pat-secret.bicep' = if (installGithubRunner && !empty(githubRunnerPat)) {
+module runnerPatSecret './resources/runner-pat-secret.bicep' = if (installGithubRunner && !empty(githubRunnerPat)) {
   name: 'runner-pat-secret-${uniqueSuffix}'
   params: {
     keyVaultName: keyVaultName
@@ -157,7 +157,7 @@ module runnerPatSecret '../../modules/resources/runner-pat-secret.bicep' = if (i
   }
 }
 
-module vmRunnerExtension '../../modules/resources/vm-runner-extension.bicep' = if (installGithubRunner) {
+module vmRunnerExtension './resources/vm-runner-extension.bicep' = if (installGithubRunner) {
   name: 'vm-runner-extension-${uniqueSuffix}'
   params: {
     vmName: linuxVmModule.outputs.vmName

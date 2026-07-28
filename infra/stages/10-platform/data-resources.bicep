@@ -24,7 +24,7 @@ param apimGatewayUrl string
 param logAnalyticsId string
 param appServiceDelegatedSubnetId string
 
-module keyVault '../../modules/resources/keyvault.bicep' = {
+module keyVault './resources/keyvault.bicep' = {
   name: 'keyvault-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: keyVaultName
@@ -34,7 +34,7 @@ module keyVault '../../modules/resources/keyvault.bicep' = {
 }
 
 // Create agent dependent resources (Storage, CosmosDB, AI Search, App Service)
-module aiDependencies '../../modules/resources/standard-dependent-resources.bicep' = {
+module aiDependencies './resources/standard-dependent-resources.bicep' = {
   name: 'dependencies-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -54,7 +54,7 @@ module aiDependencies '../../modules/resources/standard-dependent-resources.bice
   }
 }
 
-module acr '../../modules/resources/acr.bicep' = {
+module acr './resources/acr.bicep' = {
   name: 'acr-${uniqueSuffix}-deployment'
   params: {
     location: location

@@ -21,7 +21,7 @@ param apimName string
 param serverFqdns object
 
 @description('Path (relative to this module) to the MCP servers config. Override to point at an alternate config file.')
-param mcpConfig object = loadJsonContent('../../../mcp/mcp.json')
+param mcpConfig object = loadJsonContent('../../../../mcp/mcp.json')
 
 // One APIM MCP API + backend per configured server. Backend path is /<name> by
 // convention unless the entry supplies an explicit `backendPath`.

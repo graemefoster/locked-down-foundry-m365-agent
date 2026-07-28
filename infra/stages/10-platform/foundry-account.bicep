@@ -29,7 +29,7 @@ param appInsightsId string
 param restrictOutboundNetworkAccess bool
 param allowedFqdnList array
 
-module aiAccount '../../modules/foundry/ai-account-identity.bicep' = {
+module aiAccount './foundry/ai-account-identity.bicep' = {
   name: 'ai-${accountName}-${uniqueSuffix}-deployment'
   params: {
     // workspace organization

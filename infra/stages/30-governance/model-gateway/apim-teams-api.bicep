@@ -26,7 +26,7 @@
       unchanged — Foundry validates the token on your behalf and authorizes the
       end user. We do NOT swap in a managed-identity token.
 
-  Modelled on modules/model-gateway/apim-api-policy.bicep (inert @@TOKEN@@
+  Modelled on stages/30-governance/model-gateway/apim-api-policy.bicep (inert @@TOKEN@@
   placeholders + replace(), because Bicep does not interpolate ${...} inside
   triple-quoted strings).
 */

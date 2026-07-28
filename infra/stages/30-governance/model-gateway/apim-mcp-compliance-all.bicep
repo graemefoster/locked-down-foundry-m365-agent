@@ -25,7 +25,7 @@ param mcpAudience string
 param tenantId string = subscription().tenantId
 
 @description('Path (relative to this module) to the MCP servers config that decides WHICH servers exist. Used to build the deny-all default when no resolved mcpPolicy is supplied.')
-param mcpConfig object = loadJsonContent('../../../mcp/mcp.json')
+param mcpConfig object = loadJsonContent('../../../../mcp/mcp.json')
 
 @description('RESOLVED (AppId-enriched) MCP rate-limit policy. Omit (default {}) to apply DENY-ALL for every server in mcpConfig -- the correct posture at provision time, before agents are seeded. The deploy-compliancy workflow supplies the resolved policy after agents exist. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }.')
 param mcpPolicy object = {}
