@@ -10,7 +10,8 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `infra/main.bicep` | Thin deployment orchestrator — declares params + addressing vars and calls the sequential stages under `infra/stages/`. |
 | `infra/main.parameters.json` | **azd** parameter source. Maps each Bicep param to an env var with an inline default (`${VAR=default}`). |
 | `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
-| `azure.yaml` | Wires `infra/` + the `preprovision` and `predown` hooks. **azd runs nothing after provision** — no predeploy/postdeploy. |
+| `azure.yaml` | Wires `infra/` + the `preprovision`, `postprovision` and `predown` hooks. The only post-provision automation is the host-side `postprovision` repo-variable sync — no predeploy/postdeploy, no agent deploys. |
+| `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the in-VNet GitHub runner (on the VM) + deletes capability hosts before teardown. |
 | `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. Now used only by `predown` (runner deregistration). |
 | `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
@@ -45,7 +46,9 @@ azd down
   requires it (use lowercase `true`/`false`).
 - `vmAdminPassword` has **no** default and is **omitted** from `main.parameters.json`, so azd
   **prompts for it interactively** — it is never stored in the repo.
-- **azd runs NOTHING after provision** — seeding/compliance/publish are workflow-only (below).
+- **azd deploys no agents** — its only post-provision step is the `postprovision` hook, which
+  syncs repo variables (`gh variable set`) so the workflows just work. Seeding/compliance/publish
+  are workflow-only (below).
 - **Known transient failure:** provisioning can fail the first time with
   `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`. This is an RBAC
   **role-assignment propagation delay** (the Key Vault Crypto role granted to the AI Services /
@@ -108,10 +111,13 @@ azd down
   Filter `Where-Object { $_ -is [string] }` before parsing (see `hooks/predown.ps1`).
 - **Foundry Agents API** returns agents under `.data` (OpenAI schema), **not** `.value`.
 - **Adding a new env var for a workflow/hook:** add a matching `output NAME ...` in
-  `infra/main.bicep` (azd surfaces outputs as env vars verbatim; they are already UPPER_SNAKE),
-  then read it in the workflow (as a repo variable) or the predown hook.
-- **`azure.yaml` has no `services:` and no predeploy/postdeploy hooks** — azd only provisions.
-  `predown` runs on any `azd down`. All post-provision work is the in-VNet runner workflows.
+  `infra/main.bicep` (azd surfaces outputs as env vars verbatim; they are already UPPER_SNAKE).
+  If a workflow reads it as `vars.NAME`, also add it to the `$variableMap` in
+  `hooks/postprovision.ps1` so the postprovision sync pushes it to repo variables. Hooks (predown)
+  read outputs straight from the env.
+- **`azure.yaml` has no `services:` and no predeploy/postdeploy hooks.** azd provisions and then
+  runs one host-side `postprovision` step (repo-variable sync only). `predown` runs on any
+  `azd down`. All agent/compliance/publish work is the in-VNet runner workflows.
 
 ## Model gateway
 The model gateway is always deployed: an APIM-fronted provider Foundry and a
@@ -126,7 +132,7 @@ second seeded agent routed through it. See `apim-model-gateway.md`. Networking d
 `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. At
 provision, `main.bicep` applies a deny-all policy; the real (resolved) policy is then applied
 **only** by `.github/workflows/deploy-compliancy.yml` (run it after agents are seeded, and again
-whenever you edit the JSON). azd runs nothing after provision, so a fresh `azd up` leaves MCP
+whenever you edit the JSON). azd deploys no agents post-provision, so a fresh `azd up` leaves MCP
 deny-all until that workflow runs.
 
 > **⚠️ NOTE (per @graemefoster, 2026-07-27): the azd/postdeploy compliance flow has now been

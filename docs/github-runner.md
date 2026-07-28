@@ -101,21 +101,27 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
 3. **Repo Settings → Actions → General:** require approval for **all outside
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
-4. **Set the deploy-workflow repo variables** (repo Settings → Secrets and variables →
-   Actions → *Variables*) so the per-agent `deploy-*-agent.yml` workflows know the endpoint /
-   models — these mirror the azd outputs of the target environment:
+4. **Set the deploy-workflow repo variables.** The `postprovision` hook does this for you: after
+   `azd provision` succeeds it runs `hooks/postprovision.ps1`, which pushes the relevant azd
+   outputs into repo Settings → Secrets and variables → Actions → *Variables* via `gh variable set`
+   (so the per-agent `deploy-*-agent.yml` and `deploy-compliancy.yml` workflows "just work"). It
+   needs the GitHub CLI authenticated (`gh auth login`) with permission to write repo variables.
+   Re-run it any time with `azd hooks run postprovision`.
 
-   | Variable | Value | Source |
-   |---|---|---|
-   | `AZURE_AI_PROJECT_ENDPOINT` | e.g. `https://<aiservices>.services.ai.azure.com/api/projects/<project>` | `azd env get-value AZURE_AI_PROJECT_ENDPOINT` |
-   | `AZURE_AI_MODEL_DEPLOYMENT_NAME` | e.g. `gpt-5.4` | `azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME` |
+   It syncs the same-named outputs (`AZURE_RESOURCE_GROUP`, `AZURE_AI_ACCOUNT_NAME`,
+   `AZURE_AI_PROJECT_NAME`, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`,
+   `MCP_COMPLIANCE_APIM_NAME`, `MCP_COMPLIANCE_AUDIENCE`, `TEAMS_*`) plus one rename —
+   `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`. `TEAMS_PUBLISH_SCOPE` has no output (it is an operator
+   choice), so set it manually if you use Teams publishing.
+
+   To set any variable by hand instead (e.g. from a different environment), mirror the azd output:
 
    ```bash
    gh variable set AZURE_AI_PROJECT_ENDPOINT --body "$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)"
-   gh variable set AZURE_AI_MODEL_DEPLOYMENT_NAME --body "$(azd env get-value AZURE_AI_MODEL_DEPLOYMENT_NAME)"
+   gh variable set MCP_SERVER_URL --body "$(azd env get-value MCP_GATEWAY_URL)"
    ```
 
-   You can also override either per-run via the workflow's dispatch inputs; the inputs take
+   You can also override any variable per-run via the workflow's dispatch inputs; the inputs take
    precedence over the variables.
 
 ## Enable it

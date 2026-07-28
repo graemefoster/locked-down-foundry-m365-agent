@@ -89,7 +89,7 @@ All infrastructure lives under [`infra/`](../infra) and is wired through
 [`azure.yaml`](./azure.yaml).
 
 ```bash
-azd up          # provision infrastructure ONLY (azd runs nothing after provision)
+azd up          # provision infrastructure ONLY (azd deploys no agents post-provision)
 # or, equivalently:
 azd provision
 ```
@@ -109,9 +109,11 @@ never stored in the repo.
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
-> **Note:** `azd` **only provisions infrastructure** — it runs nothing after provision. Agent
-> seeding, MCP compliance and Teams / M365 publishing all run from the in-VNet self-hosted GitHub
-> Actions runner (see below).
+> **Note:** `azd` **only provisions infrastructure** — it deploys no agents. Its sole
+> post-provision step is the `postprovision` hook, which pushes the azd outputs into the repo's
+> GitHub Actions variables (`gh variable set`) so the deploy workflows work without hand-copying
+> values. Agent seeding, MCP compliance and Teams / M365 publishing all run from the in-VNet
+> self-hosted GitHub Actions runner (see below).
 
 > **Note — CMK / Key Vault propagation:** provisioning may occasionally fail the first time
 > with `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`

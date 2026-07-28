@@ -53,10 +53,12 @@ assign RBAC (Azure AI Account Owner + Role Based Access Administrator or Owner),
 azd up
 ```
 
-azd **only provisions** — it runs nothing after provision. Agent seeding, MCP
-compliance and Teams / M365 publishing all run from the **in-VNet self-hosted GitHub
-Actions runner** (which reaches the private Foundry endpoint directly), so enable the
-runner (step below) and then:
+azd **only provisions the infrastructure** — it deploys no agents. The one thing it does after
+provisioning is a lightweight host-side `postprovision` hook that copies the azd outputs into the
+repo's GitHub Actions variables (via `gh variable set`) so the workflows below "just work". Agent
+seeding, MCP compliance and Teams / M365 publishing all run from the **in-VNet self-hosted GitHub
+Actions runner** (which reaches the private Foundry endpoint directly), so enable the runner (step
+below) and then:
 
 ```bash
 # 2. Deploy agents from inside the VNet (requires the self-hosted runner).
@@ -89,7 +91,8 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 - **In-VNet self-hosted GitHub Actions runner** *(off by default)* — installs a runner on
   the in-VNet **Linux** worker VM so complex deployments run *inside the VNet*, reaching
   the private Foundry endpoint directly. It is now **required** for post-provision steps
-  (agent seeding, MCP compliance, Teams publishing), since azd runs nothing after provision.
+  (agent seeding, MCP compliance, Teams publishing), since azd itself deploys no agents (its
+  only post-provision step is syncing repo variables).
   `azd up`'s preprovision hook prompts for the repo URL (or set `GITHUB_RUNNER_REPO_URL` directly).
   **[docs/github-runner.md](./docs/github-runner.md)**.
 - **Optional Windows dev VM** *(off by default)* — the RDP-in-and-run-Edge box for
