@@ -1,31 +1,23 @@
 /*
 Stage 10 — Platform (orchestrator)
 
-The Foundry platform on top of the stage 00 substrate. Composes the slices —
-  foundry-account.bicep        → AI Services account + model deployment
-  data-resources.bicep         → Key Vault, dependent resources (Storage/Cosmos/
-                                 Search/App Service), container registry
-  private-endpoints.bicep      → private endpoints + privatelink DNS
+The data substrate + shared gateway on top of the stage 00 network/observability
+foundation. Composes the slices —
+  data-resources.bicep         → Key Vault (CMK holder), dependent resources
+                                 (Storage/Cosmos/Search/App Service), container registry
+  private-endpoints.bicep      → data-resource private endpoints + privatelink DNS
   model-gateway-platform.bicep → provider Foundry, APIM, APIM/provider PEs, APIM
                                  provider RBAC
-  project.bicep                → AI project + workspace-id GUID
-  rbac.bicep                   → data-plane RBAC + Agents capability host
-  encryption.bicep             → CMK RBAC + account/storage CMK re-PUT
+  rbac/keyvault-storage-search-role-assignments.bicep → Storage/Search KV Crypto grants
+  encryption/storage-encryption.bicep → Storage CMK re-PUT
 
-Consumes main params/vars + stage 00 outputs; re-exposes the names/ids/urls the
-still-in-main modules (VM RBAC, runner, Teams/M365 + APIM policy children) read.
+The Foundry account lives in stage 13 (13-foundry) and the AI project in stage 15
+(15-foundry-project), each carrying its own private endpoint, RBAC and CMK encryption.
+This stage re-exposes the names/ids the account/project stages + stage 30/40 read.
 */
 
 param location string
 param uniqueSuffix string
-
-// Foundry account + model.
-param accountName string
-param modelName string
-param modelFormat string
-param modelVersion string
-param modelSkuName string
-param modelCapacity int
 
 // Dependent resource + naming.
 param appServicePlanName string
@@ -37,13 +29,7 @@ param acrName string
 param appInsightsName string
 param apimGatewayUrl string
 
-// Project.
-param projectName string
-param projectDescription string
-param displayName string
-param projectCapHost string
-
-// Storage SKU (computed in main; stage 00 needs it too).
+// Storage SKU (computed in main; stage 00 needs it too; used by the storage CMK re-PUT).
 param storageSkuName string
 
 // Model gateway.
@@ -56,7 +42,6 @@ param gatewayModelSkuName string
 param gatewayModelCapacity int
 
 // From stage 00 (observability + networking).
-param agentSubnetId string
 param logAnalyticsId string
 param appInsightsConnectionString string
 param appInsightsId string
@@ -67,43 +52,12 @@ param foundryPeSubnetName string
 param modelGatewayApimSubnetId string
 param modelGatewayPeSubnetId string
 
-// Private DNS zone ids (created early in stage 00 foundation).
-param aiServicesDnsZoneId string
-param openAiDnsZoneId string
-param cognitiveServicesDnsZoneId string
+// Private DNS zone ids for the data-resource PEs (created early in stage 00 foundation).
 param aiSearchDnsZoneId string
 param storageDnsZoneId string
 param cosmosDBDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
-
-// Foundry account egress posture — shared by BOTH the identity (create) and encryption
-// (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
-// so both declarations must agree on these network properties or they silently drift (the
-// encryption module deploys last and wins). Define once here and pass to both slices.
-var foundryRestrictOutboundNetworkAccess = false
-var foundryAllowedFqdnList = []
-
-module foundryAccount 'foundry-account.bicep' = {
-  name: 'stage10-foundry-account-${uniqueSuffix}'
-  params: {
-    location: location
-    uniqueSuffix: uniqueSuffix
-    accountName: accountName
-    modelName: modelName
-    modelFormat: modelFormat
-    modelVersion: modelVersion
-    modelSkuName: modelSkuName
-    modelCapacity: modelCapacity
-    appServicePlanName: appServicePlanName
-    agentSubnetId: agentSubnetId
-    logAnalyticsId: logAnalyticsId
-    appInsightsConnectionString: appInsightsConnectionString
-    appInsightsId: appInsightsId
-    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
-    allowedFqdnList: foundryAllowedFqdnList
-  }
-}
 
 module dataResources 'data-resources.bicep' = {
   name: 'stage10-data-resources-${uniqueSuffix}'
@@ -127,7 +81,6 @@ module privateEndpoints 'private-endpoints.bicep' = {
   name: 'stage10-private-endpoints-${uniqueSuffix}'
   params: {
     uniqueSuffix: uniqueSuffix
-    aiAccountName: foundryAccount.outputs.accountName
     aiSearchName: dataResources.outputs.aiSearchName
     storageName: dataResources.outputs.azureStorageName
     cosmosDBName: dataResources.outputs.cosmosDBName
@@ -135,9 +88,6 @@ module privateEndpoints 'private-endpoints.bicep' = {
     keyVaultName: dataResources.outputs.keyVaultName
     foundrySpokeVnetName: foundrySpokeVnetName
     foundryPeSubnetName: foundryPeSubnetName
-    aiServicesDnsZoneId: aiServicesDnsZoneId
-    openAiDnsZoneId: openAiDnsZoneId
-    cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
     aiSearchDnsZoneId: aiSearchDnsZoneId
     storageDnsZoneId: storageDnsZoneId
     cosmosDBDnsZoneId: cosmosDBDnsZoneId
@@ -170,90 +120,55 @@ module modelGateway 'model-gateway-platform.bicep' = {
   ]
 }
 
-module project 'project.bicep' = {
-  name: 'stage10-project-${uniqueSuffix}'
+// ==================== Storage CMK ====================
+// Grant the Storage + Search service identities the Key Vault Crypto Service Encryption
+// User role, THEN re-PUT the Storage account with customer-managed-key encryption (the KV
+// data-plane role must be effective first). The account CMK re-PUT lives in stage 13.
+module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignments.bicep' = {
+  name: 'keyvault-storage-search-rbac-${uniqueSuffix}-deployment'
   params: {
-    location: location
-    uniqueSuffix: uniqueSuffix
-    projectName: projectName
-    projectDescription: projectDescription
-    displayName: displayName
-    accountName: foundryAccount.outputs.accountName
-    aiSearchName: dataResources.outputs.aiSearchName
-    aiSearchServiceResourceGroupName: dataResources.outputs.aiSearchServiceResourceGroupName
-    aiSearchServiceSubscriptionId: dataResources.outputs.aiSearchServiceSubscriptionId
-    cosmosDBName: dataResources.outputs.cosmosDBName
-    cosmosDBSubscriptionId: dataResources.outputs.cosmosDBSubscriptionId
-    cosmosDBResourceGroupName: dataResources.outputs.cosmosDBResourceGroupName
-    azureStorageName: dataResources.outputs.azureStorageName
-    azureStorageSubscriptionId: dataResources.outputs.azureStorageSubscriptionId
-    azureStorageResourceGroupName: dataResources.outputs.azureStorageResourceGroupName
-    logAnalyticsId: logAnalyticsId
-  }
-  dependsOn: [
-    privateEndpoints
-  ]
-}
-
-module rbac 'rbac.bicep' = {
-  name: 'stage10-rbac-${uniqueSuffix}'
-  params: {
-    uniqueSuffix: uniqueSuffix
-    projectCapHost: projectCapHost
-    azureStorageName: dataResources.outputs.azureStorageName
-    aiSearchName: dataResources.outputs.aiSearchName
-    cosmosDBName: dataResources.outputs.cosmosDBName
-    acrName: dataResources.outputs.acrName
-    appInsightsName: appInsightsName
-    accountName: foundryAccount.outputs.accountName
-    accountPrincipalId: foundryAccount.outputs.accountPrincipalId
-    projectName: project.outputs.projectName
-    projectPrincipalId: project.outputs.projectPrincipalId
-    projectWorkspaceIdGuid: project.outputs.projectWorkspaceIdGuid
-    cosmosDBConnection: project.outputs.cosmosDBConnection
-    azureStorageConnection: project.outputs.azureStorageConnection
-    aiSearchConnection: project.outputs.aiSearchConnection
-  }
-  dependsOn: [
-    privateEndpoints
-  ]
-}
-
-module encryption 'encryption.bicep' = {
-  name: 'stage10-encryption-${uniqueSuffix}'
-  params: {
-    location: location
-    uniqueSuffix: uniqueSuffix
     keyVaultName: dataResources.outputs.keyVaultName
-    keyVaultUri: dataResources.outputs.keyVaultUri
-    keyName: dataResources.outputs.keyName
-    keyUriWithVersion: dataResources.outputs.keyUriWithVersion
-    accountName: foundryAccount.outputs.accountName
-    accountPrincipalId: foundryAccount.outputs.accountPrincipalId
-    azureStorageName: dataResources.outputs.azureStorageName
     storagePrincipalId: dataResources.outputs.storagePrincipalId
     aiSearchPrincipalId: dataResources.outputs.aiSearchPrincipalId
-    projectPrincipalId: project.outputs.projectPrincipalId
-    agentSubnetId: agentSubnetId
-    restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
-    allowedFqdnList: foundryAllowedFqdnList
-    storageSkuName: storageSkuName
   }
 }
 
-// ==================== OUTPUTS (consumed by still-in-main modules + stage 30/40) ====================
+module storageEncryption 'encryption/storage-encryption.bicep' = {
+  name: 'storage-encryption-${uniqueSuffix}-deployment'
+  params: {
+    storageName: dataResources.outputs.azureStorageName
+    location: location
+    keyVaultUri: dataResources.outputs.keyVaultUri
+    keyVaultKeyName: dataResources.outputs.keyName
+    skuName: storageSkuName
+  }
+  dependsOn: [
+    keyVaultStorageSearchRoleAssignments
+  ]
+}
 
-// Foundry account + Key Vault
-output aiAccountName string = foundryAccount.outputs.accountName
+// ==================== OUTPUTS (consumed by stages 13/15/20/30/40 + still-in-main modules) ====================
+
+// Key Vault (CMK) — consumed by the account (stage 13) + project (stage 15) CMK grants/re-PUTs.
 output keyVaultName string = dataResources.outputs.keyVaultName
+output keyVaultUri string = dataResources.outputs.keyVaultUri
+output keyName string = dataResources.outputs.keyName
+output keyUriWithVersion string = dataResources.outputs.keyUriWithVersion
 
-// Dependent resources (App Service)
+// Dependent-resource identity/location — consumed by the project (stage 15).
+output acrName string = dataResources.outputs.acrName
+output azureStorageName string = dataResources.outputs.azureStorageName
+output azureStorageSubscriptionId string = dataResources.outputs.azureStorageSubscriptionId
+output azureStorageResourceGroupName string = dataResources.outputs.azureStorageResourceGroupName
+output aiSearchName string = dataResources.outputs.aiSearchName
+output aiSearchServiceResourceGroupName string = dataResources.outputs.aiSearchServiceResourceGroupName
+output aiSearchServiceSubscriptionId string = dataResources.outputs.aiSearchServiceSubscriptionId
+output cosmosDBName string = dataResources.outputs.cosmosDBName
+output cosmosDBSubscriptionId string = dataResources.outputs.cosmosDBSubscriptionId
+output cosmosDBResourceGroupName string = dataResources.outputs.cosmosDBResourceGroupName
+
+// Dependent resources (App Service / YARP)
 output yarpWebAppFqdn string = dataResources.outputs.yarpWebAppFqdn
-
-// Project
-output projectName string = project.outputs.projectName
-output projectId string = project.outputs.projectId
-output projectEndpoint string = project.outputs.projectEndpoint
 
 // Model gateway
 output providerAccountId string = modelGateway.outputs.providerAccountId

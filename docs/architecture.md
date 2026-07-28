@@ -149,14 +149,18 @@ Private endpoints ensure secure, internal-only connectivity. Private endpoints a
 
 ```text
 infra/
-├── main.bicep                  # Thin orchestrator: declares params + calls the 5 stages, emits azd outputs
+├── main.bicep                  # Thin orchestrator: declares params + calls the stages, emits azd outputs
 ├── main.parameters.json        # azd parameter file (${VAR=default} env bindings)
-└── stages/                     # Sequential deployment stages (deps point downward: 00 ← 10 ← 20 ← 30 ← 40)
+└── stages/                     # Sequential deployment stages (deps point downward: 00 ← 10 ← 13 ← 15 ← 20 ← 30 ← 40)
     ├── 00-foundation/          # Networking (hub + spokes, subnets, peering, DNS resolver,
     │                           #   firewall, flow logs) + observability
-    ├── 10-platform/            # Foundry account/project, Key Vault, ACR, dependent resources
-    │                           #   (Cosmos/Storage/Search), App Service + YARP, APIM/provider
-    │                           #   Foundry, CMK encryption, data-plane RBAC, private endpoints
+    ├── 10-platform/            # Key Vault, ACR, dependent resources (Cosmos/Storage/Search),
+    │                           #   App Service + YARP, APIM/provider Foundry (model gateway),
+    │                           #   data-resource private endpoints, Storage CMK encryption
+    ├── 13-foundry/             # Foundry (AI Services) account + model + its private endpoint,
+    │                           #   Key Vault / App Insights RBAC, and account CMK encryption
+    ├── 15-foundry-project/     # AI project + BYO connections, project data-plane RBAC,
+    │                           #   Key Vault RBAC, and the Agents capability host
     ├── 20-workload-mcp/        # MCP web app, app registration, builtin-auth, APIM MCP servers
     ├── 30-governance/          # Project MCP connections, APIM policies/compliance/lockdown,
     │                           #   RAI guardrail, Teams API, firewall rules

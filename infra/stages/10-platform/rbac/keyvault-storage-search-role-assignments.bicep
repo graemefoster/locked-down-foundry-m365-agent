@@ -1,19 +1,17 @@
-// Assigns Key Vault crypto roles to service identities for CMK
+// Assigns the Key Vault Crypto Service Encryption User role to the Storage and AI Search
+// service identities for CMK. That role only permits wrapKey/unwrapKey, which is sufficient
+// for Storage and Search. Split out of the shared keyvault-role-assignments module so the
+// data resources' CMK grants live with the data substrate (stage 10); the account and project
+// Crypto User grants live with the account (stage 13) and project (stage 15).
 
 @description('Name of the Key Vault')
 param keyVaultName string
-
-@description('Principal ID of the AI Services account (SystemAssigned)')
-param aiServicesPrincipalId string
 
 @description('Principal ID of the Storage Account (SystemAssigned) - empty if BYO resource')
 param storagePrincipalId string
 
 @description('Principal ID of the AI Search service (SystemAssigned) - empty if BYO resource')
 param aiSearchPrincipalId string
-
-@description('Additional principal IDs to assign Key Vault Crypto User role (for service-managed identities used during CMK operations)')
-param aiServicesProjectPrincipalId string
 
 resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
   name: keyVaultName
@@ -24,35 +22,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
 resource kvCryptoServiceEncryptionUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
   name: 'e147488a-f6f5-4113-8e2d-b22465e65bf6'
   scope: resourceGroup()
-}
-
-// Key Vault Crypto User: 12338af0-0e69-4776-bea7-57ae8d297424
-// Includes sign/verify in addition to wrap/unwrap - required by AI Services
-resource kvCryptoUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existing = {
-  name: '12338af0-0e69-4776-bea7-57ae8d297424'
-  scope: resourceGroup()
-}
-
-// AI Services - needs Crypto User (sign action required)
-resource aiServicesRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: keyVault
-  name: guid(aiServicesPrincipalId, kvCryptoUserRole.id, keyVault.id)
-  properties: {
-    principalId: aiServicesPrincipalId
-    roleDefinitionId: kvCryptoUserRole.id
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// AI Services - needs Crypto User (sign action required)
-resource aiServicesProjectRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  scope: keyVault
-  name: guid(aiServicesProjectPrincipalId, kvCryptoUserRole.id, keyVault.id)
-  properties: {
-    principalId: aiServicesProjectPrincipalId
-    roleDefinitionId: kvCryptoUserRole.id
-    principalType: 'ServicePrincipal'
-  }
 }
 
 // Storage Account (skipped if BYO resource with empty principal ID)

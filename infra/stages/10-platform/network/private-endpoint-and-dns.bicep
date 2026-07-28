@@ -1,16 +1,16 @@
 /*
-Private Endpoint and DNS Configuration Module (Hub-Spoke)
+Private Endpoint and DNS Configuration Module (Hub-Spoke) — data resources.
 ------------------------------------------
 Hub-spoke architecture:
 - Private DNS zones linked to the Hub VNet (for DNS Resolver)
-- Foundry service PEs (AI, Search, Storage, Cosmos) in Foundry Spoke PE subnet
-- App Service PEs in App Service Spoke PE subnet
+- Data-resource PEs (Search, Storage, Cosmos, ACR, Key Vault) in Foundry Spoke PE subnet
 - DNS zones also linked to respective spoke VNets for local resolution
+
+The Foundry (AI Services) account PE lives with the account in stage 13
+(network/ai-account-private-endpoint.bicep), not here.
 */
 
 // Resource names and identifiers
-@description('Name of the AI Foundry account')
-param aiAccountName string
 @description('Name of the AI Search service')
 param aiSearchName string
 @description('Name of the storage account')
@@ -28,9 +28,6 @@ param acrName string
 param keyVaultName string
 
 // Private DNS zone ids (created early in stage 00 and threaded in).
-param aiServicesDnsZoneId string
-param openAiDnsZoneId string
-param cognitiveServicesDnsZoneId string
 param aiSearchDnsZoneId string
 param storageDnsZoneId string
 param cosmosDBDnsZoneId string
@@ -38,11 +35,6 @@ param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
 // ---- Resource references ----
-resource aiAccount 'Microsoft.CognitiveServices/accounts@2023-05-01' existing = {
-  name: aiAccountName
-  scope: resourceGroup()
-}
-
 resource aiSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
   name: aiSearchName
   scope: resourceGroup()
@@ -77,24 +69,7 @@ resource foundryPeSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' 
   name: foundryPeSubnetName
 }
 
-/* -------------------------------------------- Foundry PEs (in Foundry Spoke) -------------------------------------------- */
-
-resource aiAccountPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
-  name: '${aiAccountName}-private-endpoint'
-  location: resourceGroup().location
-  properties: {
-    subnet: { id: foundryPeSubnet.id }
-    privateLinkServiceConnections: [
-      {
-        name: '${aiAccountName}-private-link-service-connection'
-        properties: {
-          privateLinkServiceId: aiAccount.id
-          groupIds: ['account']
-        }
-      }
-    ]
-  }
-}
+/* -------------------------------------------- Data-resource PEs (in Foundry Spoke) -------------------------------------------- */
 
 resource aiSearchPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
   name: '${aiSearchName}-private-endpoint'
@@ -184,17 +159,6 @@ resource acrPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
 /* -------------------------------------------- App Service PEs (in App Service Spoke) -------------------------------------------- */
 
 // ---- DNS Zone Groups ----
-resource aiServicesDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
-  parent: aiAccountPrivateEndpoint
-  name: '${aiAccountName}-dns-group'
-  properties: {
-    privateDnsZoneConfigs: [
-      { name: '${aiAccountName}-dns-aiserv-config', properties: { privateDnsZoneId: aiServicesDnsZoneId } }
-      { name: '${aiAccountName}-dns-openai-config', properties: { privateDnsZoneId: openAiDnsZoneId } }
-      { name: '${aiAccountName}-dns-cogserv-config', properties: { privateDnsZoneId: cognitiveServicesDnsZoneId } }
-    ]
-  }
-}
 resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: aiSearchPrivateEndpoint
   name: '${aiSearchName}-dns-group'

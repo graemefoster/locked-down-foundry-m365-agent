@@ -260,11 +260,10 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
 }
 
 // ==================== STAGE 10 — PLATFORM ====================
-// The Foundry platform on the stage 00 substrate: the AI Services account + model,
-// Key Vault (CMK) + dependent resources (Storage/Cosmos/Search/App Service) + ACR,
-// private endpoints & DNS, the model gateway (provider Foundry + APIM + the MCP
-// gateway wiring), the AI project, data-plane RBAC + capability host, and the CMK
-// re-PUT of the account/storage.
+// The data substrate + shared gateway on the stage 00 foundation: Key Vault (CMK) +
+// dependent resources (Storage/Cosmos/Search/App Service) + ACR, their private endpoints
+// & DNS, the model gateway (provider Foundry + APIM + the MCP gateway wiring), the
+// Storage CMK re-PUT. The Foundry account (stage 13) + AI project (stage 15) sit on top.
 
 // Storage SKU — no-ZRS regions fall back to GRS. Computed in main because stage 00
 // (flow-logs storage) consumes it too; also threaded into stage 10 (storage CMK re-PUT).
@@ -276,12 +275,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
   params: {
     location: location
     uniqueSuffix: uniqueSuffix
-    accountName: accountName
-    modelName: modelName
-    modelFormat: modelFormat
-    modelVersion: modelVersion
-    modelSkuName: modelSkuName
-    modelCapacity: modelCapacity
     appServicePlanName: appServicePlanName
     keyVaultName: keyVaultName
     azureStorageName: azureStorageName
@@ -290,10 +283,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     acrName: acrName
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
-    projectName: projectName
-    projectDescription: projectDescription
-    displayName: displayName
-    projectCapHost: projectCapHost
     storageSkuName: storageSkuName
     providerAccountName: providerAccountName
     apimName: apimName
@@ -302,7 +291,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     gatewayModelVersion: gatewayModelVersion
     gatewayModelSkuName: gatewayModelSkuName
     gatewayModelCapacity: gatewayModelCapacity
-    agentSubnetId: stage00.outputs.agentSubnetId
     logAnalyticsId: stage00.outputs.logAnalyticsId
     appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
     appInsightsId: stage00.outputs.appInsightsId
@@ -312,14 +300,74 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     foundryPeSubnetName: stage00.outputs.foundryPeSubnetName
     modelGatewayApimSubnetId: stage00.outputs.modelGatewayApimSubnetId
     modelGatewayPeSubnetId: stage00.outputs.modelGatewayPeSubnetId
-    aiServicesDnsZoneId: stage00.outputs.aiServicesDnsZoneId
-    openAiDnsZoneId: stage00.outputs.openAiDnsZoneId
-    cognitiveServicesDnsZoneId: stage00.outputs.cognitiveServicesDnsZoneId
     aiSearchDnsZoneId: stage00.outputs.aiSearchDnsZoneId
     storageDnsZoneId: stage00.outputs.storageDnsZoneId
     cosmosDBDnsZoneId: stage00.outputs.cosmosDBDnsZoneId
     acrDnsZoneId: stage00.outputs.acrDnsZoneId
     keyVaultDnsZoneId: stage00.outputs.keyVaultDnsZoneId
+  }
+}
+
+// ==================== STAGE 13 — FOUNDRY ACCOUNT ====================
+// The centrepiece: the Foundry (AI Services) account + model, and EVERYTHING that stands it
+// up and protects it — its private endpoint + DNS, its Key Vault Crypto / App Insights RBAC,
+// and the CMK re-PUT of the account. Needs the Key Vault + DNS zones + data substrate (10).
+module stage13 'stages/13-foundry/13-foundry.bicep' = {
+  name: 'stage13-foundry-${uniqueSuffix}'
+  params: {
+    location: location
+    uniqueSuffix: uniqueSuffix
+    accountName: accountName
+    modelName: modelName
+    modelFormat: modelFormat
+    modelVersion: modelVersion
+    modelSkuName: modelSkuName
+    modelCapacity: modelCapacity
+    appServicePlanName: appServicePlanName
+    appInsightsName: appInsightsName
+    agentSubnetId: stage00.outputs.agentSubnetId
+    logAnalyticsId: stage00.outputs.logAnalyticsId
+    appInsightsConnectionString: stage00.outputs.appInsightsConnectionString
+    appInsightsId: stage00.outputs.appInsightsId
+    foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
+    foundryPeSubnetName: stage00.outputs.foundryPeSubnetName
+    aiServicesDnsZoneId: stage00.outputs.aiServicesDnsZoneId
+    openAiDnsZoneId: stage00.outputs.openAiDnsZoneId
+    cognitiveServicesDnsZoneId: stage00.outputs.cognitiveServicesDnsZoneId
+    keyVaultName: stage10.outputs.keyVaultName
+    keyVaultUri: stage10.outputs.keyVaultUri
+    keyName: stage10.outputs.keyName
+    keyUriWithVersion: stage10.outputs.keyUriWithVersion
+  }
+}
+
+// ==================== STAGE 15 — FOUNDRY PROJECT ====================
+// The AI project (sub-resource of the account) + all of its data-plane RBAC, its Key Vault
+// Crypto grant, and the Agents capability host. Needs the account (13) + data substrate +
+// private endpoints (10).
+module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
+  name: 'stage15-foundry-project-${uniqueSuffix}'
+  params: {
+    location: location
+    uniqueSuffix: uniqueSuffix
+    projectName: projectName
+    projectDescription: projectDescription
+    displayName: displayName
+    projectCapHost: projectCapHost
+    accountName: stage13.outputs.aiAccountName
+    aiSearchName: stage10.outputs.aiSearchName
+    aiSearchServiceResourceGroupName: stage10.outputs.aiSearchServiceResourceGroupName
+    aiSearchServiceSubscriptionId: stage10.outputs.aiSearchServiceSubscriptionId
+    cosmosDBName: stage10.outputs.cosmosDBName
+    cosmosDBSubscriptionId: stage10.outputs.cosmosDBSubscriptionId
+    cosmosDBResourceGroupName: stage10.outputs.cosmosDBResourceGroupName
+    azureStorageName: stage10.outputs.azureStorageName
+    azureStorageSubscriptionId: stage10.outputs.azureStorageSubscriptionId
+    azureStorageResourceGroupName: stage10.outputs.azureStorageResourceGroupName
+    acrName: stage10.outputs.acrName
+    appInsightsName: appInsightsName
+    keyVaultName: stage10.outputs.keyVaultName
+    logAnalyticsId: stage00.outputs.logAnalyticsId
   }
 }
 
@@ -357,11 +405,11 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
   params: {
     location: location
     uniqueSuffix: uniqueSuffix
-    aiAccountName: stage10.outputs.aiAccountName
-    projectName: stage10.outputs.projectName
+    aiAccountName: stage13.outputs.aiAccountName
+    projectName: stage15.outputs.projectName
     apimName: stage10.outputs.apimName
     providerAccountId: stage10.outputs.providerAccountId
-    projectId: stage10.outputs.projectId
+    projectId: stage15.outputs.projectId
     gatewayUrl: stage10.outputs.gatewayUrl
     servers: stage20.outputs.servers
     mcpAudience: stage20.outputs.mcpAudience
@@ -387,6 +435,8 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
   dependsOn: [
     stage00
     stage10
+    stage13
+    stage15
     stage20
   ]
 }
@@ -403,8 +453,8 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
     uniqueSuffix: uniqueSuffix
     foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
     vmSubnetName: stage00.outputs.vmSubnetName
-    aiAccountName: stage10.outputs.aiAccountName
-    projectName: stage10.outputs.projectName
+    aiAccountName: stage13.outputs.aiAccountName
+    projectName: stage15.outputs.projectName
     keyVaultName: stage10.outputs.keyVaultName
     vmAdminPassword: vmAdminPassword
     vmAdminUsername: vmAdminUsername
@@ -418,6 +468,8 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
   dependsOn: [
     stage00
     stage10
+    stage13
+    stage15
   ]
 }
 
@@ -432,13 +484,13 @@ output SEED_AGENTS_VM_NAME string = stage40.outputs.vmName
 
 
 @description('Foundry project endpoint the seeded agents are created against.')
-output AZURE_AI_PROJECT_ENDPOINT string = stage10.outputs.projectEndpoint
+output AZURE_AI_PROJECT_ENDPOINT string = stage15.outputs.projectEndpoint
 
 @description('Foundry (Cognitive Services) account name. Used by the predown hook to delete capability hosts before teardown.')
-output AZURE_AI_ACCOUNT_NAME string = stage10.outputs.aiAccountName
+output AZURE_AI_ACCOUNT_NAME string = stage13.outputs.aiAccountName
 
 @description('Foundry project name. Used by the predown hook to delete capability hosts before teardown.')
-output AZURE_AI_PROJECT_NAME string = stage10.outputs.projectName
+output AZURE_AI_PROJECT_NAME string = stage15.outputs.projectName
 
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
