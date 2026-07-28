@@ -38,8 +38,8 @@
     # Resolve name-only policy -> resolved policy file:
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
 
-  All parameters are [string] (comma-separated for -AgentName) so the script can be shipped to
-  the private VM by hooks/vm-run-command.ps1, which invokes `pwsh -File` with string args only.
+  All parameters are [string] (comma-separated for -AgentName) so the script stays simple to
+  invoke from the deploy-compliancy workflow on the in-VNet self-hosted runner (plain CLI args).
 #>
 [CmdletBinding()]
 param(
@@ -62,8 +62,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# All params are [string] so this script is invokable via hooks/vm-run-command.ps1 (which runs
-# it on the private VM through `pwsh -File`, passing only string values). Normalise here:
+# All params are [string] (the deploy-compliancy workflow passes plain CLI args on the in-VNet
+# runner), so normalise the string inputs here:
 $resolveMode   = -not [string]::IsNullOrWhiteSpace($ResolvePolicyPath)
 # Resolve mode needs EVERY live agent to join against, so the name filter is not applied there.
 $agentFilter   = $resolveMode ? @() : @($AgentName -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })

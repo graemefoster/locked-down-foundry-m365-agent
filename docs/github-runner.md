@@ -161,13 +161,14 @@ runner service already exists).
 
 `azd down`'s **predown hook** (`hooks/predown.ps1`) automatically deregisters the runner
 before the VM is deleted, so it doesn't linger as a permanently **offline** runner in the
-repo. Because the PAT lives in Key Vault behind a private endpoint, the work runs **on the
-VM** (`scripts/deregister-runner.ps1`, shipped via the `vm-run-command.ps1` shim): it reads
-the PAT with the VM managed identity, mints a GitHub **remove-token**, then runs
-`svc.sh uninstall` + `config.sh remove`.
+repo. It runs **host-side** with the GitHub CLI (`gh`) using your own credentials — no PAT,
+no Key Vault and no VM round-trip. The runner name is deterministic (`<vmName>-vnet`, because
+the bootstrap names it `<hostname>-vnet` and the VM's `computerName` is the VM name), so the
+hook simply looks it up via `gh api .../actions/runners` and deletes it by id. This works
+even when the VM's egress is locked down or the VM is already unhealthy.
 
 This phase is **best-effort** and never fails the teardown — it only runs when
 `GITHUB_RUNNER_REPO_URL` is set, and a lingering offline runner is harmless (GitHub prunes
 it, or remove it manually under *Settings → Actions → Runners*). It relies on the
-`GITHUB_RUNNER_REPO_URL`, `KEY_VAULT_NAME`, `GITHUB_RUNNER_PAT_SECRET_NAME` and
-`GITHUB_RUNNER_USER` Bicep outputs; run `azd env refresh` if they're missing.
+`GITHUB_RUNNER_REPO_URL` and `GITHUB_ACTIONS_RUNNER_VM_NAME` Bicep outputs (run
+`azd env refresh` if they're missing) plus a host-side `gh` login with **admin** on the repo.

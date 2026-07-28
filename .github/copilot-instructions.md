@@ -12,8 +12,7 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
 | `azure.yaml` | Wires `infra/` + the `preprovision`, `postprovision` and `predown` hooks. The only post-provision automation is the host-side `postprovision` repo-variable sync — no predeploy/postdeploy, no agent deploys. |
 | `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
-| `hooks/predown.ps1` | azd **predown** hook — deregisters the in-VNet GitHub runner (on the VM) + deletes capability hosts before teardown. |
-| `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. Now used only by `predown` (runner deregistration). |
+| `hooks/predown.ps1` | azd **predown** hook — deregisters the GitHub runner **host-side via `gh`** (delete by name `<vmName>-vnet`) + deletes capability hosts before teardown. |
 | `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
 | `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
 
@@ -80,11 +79,13 @@ azd down
 ### 3. Predown hook — runner deregistration + capability-host cleanup (`hooks/predown.ps1`)
 - Runs on the azd host **before** `azd down` deletes anything. Two best-effort phases.
 - **Phase 0 (runner):** if a self-hosted runner was installed, deregisters it BEFORE the VM is
-  deleted (else it lingers as "offline"). The PAT lives in Key Vault behind a private endpoint,
-  so the actual work runs **on the VM** via `Invoke-VmPwshScript` (`hooks/vm-run-command.ps1` →
-  `scripts/deregister-runner.ps1`) — the only remaining use of the vm-run-command shim. Needs
-  `GITHUB_ACTIONS_RUNNER_VM_NAME`, `GITHUB_RUNNER_REPO_URL`, `KEY_VAULT_NAME`,
-  `GITHUB_RUNNER_PAT_SECRET_NAME`. Never fails teardown.
+  deleted (else it lingers as "offline"). Runs **host-side** with the GitHub CLI (`gh`) using the
+  caller's own credentials — no PAT, no Key Vault, no VM round-trip. The runner name is
+  deterministic (`<vmName>-vnet`: the bootstrap names it `<hostname>-vnet` and the VM's
+  `computerName` IS the VM name), so it deletes by name via `gh api .../actions/runners`. Needs
+  `GITHUB_RUNNER_REPO_URL`, `GITHUB_ACTIONS_RUNNER_VM_NAME`, and a host `gh` login with repo
+  admin. Never fails teardown. (No on-VM script — the old `deregister-runner.ps1` +
+  `vm-run-command.ps1` shim were removed; there is now no host→VM path at all.)
 - **Phase 1/2 (capability hosts):** a Foundry account/project with an **Agents capability host**
   cannot be deleted cleanly while the capability host exists, so the hook deletes it first, in
   strict order: **project-scope capability hosts, THEN account-scope** (`az resource delete`

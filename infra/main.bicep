@@ -549,11 +549,11 @@ output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
 @description('GitHub repo URL the self-hosted runner registered against. Empty when the runner was not installed; gates the predown hook deregistration phase.')
 output GITHUB_RUNNER_REPO_URL string = githubRunnerRepoUrl
 
-@description('Key Vault (DNS) name holding the runner PAT. The predown hook reads it on the VM (private data plane) to mint a runner remove-token before teardown.')
+@description('Key Vault (DNS) name holding the runner PAT. The VM bootstrap reads it over the private data plane to mint a runner registration token at provision time.')
 output KEY_VAULT_NAME string = keyVaultName
 
 @description('Name of the Key Vault secret holding the runner PAT.')
 output GITHUB_RUNNER_PAT_SECRET_NAME string = githubRunnerPatSecretName
 
-@description('Local account the runner service runs as (the VM admin user). The predown hook runs `config.sh remove` as this user.')
+@description('Local account the runner service runs as (the VM admin user), set by the VM bootstrap.')
 output GITHUB_RUNNER_USER string = vmAdminUsername

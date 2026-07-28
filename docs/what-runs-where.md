@@ -26,8 +26,7 @@ These are azd lifecycle hooks. They run where you run `azd`, using your CLI cred
 |---|---|---|---|---|
 | `preprovision.ps1` | before `azd provision` | azd host | none (writes azd env) | Interactive first-run prompts (`DEPLOY_WINDOWS_VM`, `GITHUB_RUNNER_REPO_URL`); idempotent, no-ops in CI. |
 | `postprovision.ps1` | after `azd provision` | azd host | `gh` auth | Pushes the Bicep outputs the workflows consume into GitHub Actions **repo variables** via `gh variable set` (so the deploy workflows just work). Best-effort. |
-| `predown.ps1` | before `azd down` | azd host | `az` (yours) | **Phase 0:** deregister the self-hosted runner (runs `deregister-runner.ps1` **on the VM** via the shim). **Phase 1/2:** delete Foundry capability hosts (ARM control plane) so the account/project can be torn down. |
-| `vm-run-command.ps1` | *(not a hook — a shared shim)* | azd host → VM | `az vm run-command` | Dot-sourced by `predown.ps1`. Ships a `.ps1` to the **Linux** VM via `RunShellScript` (quoted heredoc, no shell expansion) and runs it under `pwsh` with named params. The **only** remaining host→VM orchestration path. |
+| `predown.ps1` | before `azd down` | azd host | `az` (yours) + `gh` | **Phase 0:** deregister the self-hosted runner **host-side** via `gh api` (delete by name `<vmName>-vnet`) — no PAT, no VM round-trip. **Phase 1/2:** delete Foundry capability hosts (ARM control plane) so the account/project can be torn down. |
 
 `bot-service.bicep` also lives in `hooks/` (deployed by the Teams-publish path); it is IaC, not a
 hook script.
@@ -36,9 +35,8 @@ hook script.
 
 ## `scripts/` — run on the **in-VNet VM** (self-hosted runner), invoked by GitHub workflows
 
-Everything under `scripts/` runs on the VM because it needs the private Foundry endpoint (or, for
-teardown, the Key-Vault-protected PAT). They authenticate as the **VM managed identity via IMDS**
-— never `az login`.
+Everything under `scripts/` runs on the VM because it needs the private Foundry endpoint. They
+authenticate as the **VM managed identity via IMDS** — never `az login`.
 
 ### Agent create / publish (reusable `deploy-agent.yml`)
 
@@ -69,17 +67,17 @@ delegated **user** token (device-code sign-in) and forwards it for that step onl
 
 ### Teardown
 
-| File | Invoked by | Runs on | Identity | What it does |
-|---|---|---|---|---|
-| `deregister-runner.ps1` | `predown.ps1` (via `vm-run-command.ps1`) | VM | VM MI (IMDS) → Key Vault | Reads the runner PAT from Key Vault (private endpoint), mints a REMOVE token, and deregisters the self-hosted runner before the VM is deleted. Best-effort. |
+Runner deregistration at `azd down` now runs **host-side** in `hooks/predown.ps1` (Phase 0) via
+`gh api` — see the hooks table above. Nothing under `scripts/` is involved in teardown anymore.
 
 ---
 
 ## One-glance rules of thumb
 
 - **Private Foundry data plane?** → runs on the **VM** as the VM managed identity (IMDS).
-- **ARM / Graph / `gh` control plane only?** → can run on the **azd host** as your CLI login.
-- **azd host → VM** only ever happens through `hooks/vm-run-command.ps1` (used solely by
-  `predown`). azd does **no** agent deploys — that is 100% the in-VNet runner workflows.
+- **ARM / Graph / `gh` control plane only?** → can run on the **azd host** as your CLI login
+  (e.g. `postprovision` repo-variable sync and `predown` Phase 0 runner deregistration).
+- **azd no longer orchestrates the VM at all** — there is no host→VM path; agent deploys are
+  100% the in-VNet runner workflows, and teardown deregistration is host-side `gh`.
 - **`foundry-agent-common.ps1`** (agents) and **`publish-teams.ps1`** (Teams) are the two "single
   source of truth" scripts; the runner-side scripts orchestrate, they don't reimplement.
