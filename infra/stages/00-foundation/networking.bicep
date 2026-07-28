@@ -147,7 +147,7 @@ module hubToAppServicePeering './network/vnet-peering.bicep' = {
 // Step 7: model-gateway spoke VNet (always deployed; pure network — moved up from its
 // former late position). APIM (which lives in this spoke) is shared by the model gateway
 // AND the Teams/M365 publish inbound path.
-module modelGatewaySpokeVnet './model-gateway/model-gateway-spoke-vnet.bicep' = {
+module modelGatewaySpokeVnet './network/model-gateway-spoke-vnet.bicep' = {
   name: 'model-gateway-spoke-${uniqueSuffix}-deployment'
   params: {
     location: location
