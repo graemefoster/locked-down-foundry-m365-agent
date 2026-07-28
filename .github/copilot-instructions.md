@@ -18,6 +18,8 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
+For a per-file map of what triggers each one, where it runs (azd host vs in-VNet VM) and which
+identity it uses, see `docs/what-runs-where.md`.
 Most don't reference Bicep file paths; the exception is the in-VNet MCP-compliance workflow
 (`.github/workflows/deploy-compliancy.yml`), which deploys
 `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` by path — keep

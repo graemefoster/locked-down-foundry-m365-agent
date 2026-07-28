@@ -112,6 +112,7 @@ and troubleshooting: **[docs/deployment.md](./docs/deployment.md)**.
 | [docs/model-gateway.md](./docs/model-gateway.md) · [apim-model-gateway.md](./apim-model-gateway.md) | Optional APIM model gateway overview + full walkthrough. |
 | [docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md) | RAI content-filter guardrail (Azure Policy, Audit): strict baseline, why it can't block, the non-compliant demo, compliance checks. |
 | [docs/github-runner.md](./docs/github-runner.md) | Optional in-VNet self-hosted GitHub Actions runner: security model, auth, setup. |
+| [docs/what-runs-where.md](./docs/what-runs-where.md) | Orientation map of every `hooks/` and `scripts/` file: what triggers it, where it runs (azd host vs in-VNet VM), and which identity it uses. |
 | [BACKLOG.md](./BACKLOG.md) | Project backlog: aim, goals, and epics for evolving this reference implementation. |
 
 ## References
