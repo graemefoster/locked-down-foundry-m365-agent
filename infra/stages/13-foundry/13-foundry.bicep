@@ -4,7 +4,7 @@ Stage 13 — Foundry account (orchestrator)
 The Foundry (AI Services) account is the centrepiece of the whole platform, so it
 gets its own stage carrying EVERYTHING that stands the account up and protects it:
 
-  foundry/ai-account-identity.bicep            → the account + model deployment + SMI
+  foundry/ai-services-account.bicep            → the account + model deployment + SMI
                                                  + VNet injection + diagnostics
   network/ai-account-private-endpoint.bicep    → the account private endpoint + DNS
   rbac/keyvault-account-role-assignment.bicep  → account SMI → Key Vault Crypto User (CMK)
@@ -54,7 +54,7 @@ param keyUriWithVersion string
 var foundryRestrictOutboundNetworkAccess = false
 var foundryAllowedFqdnList = []
 
-module aiAccount './foundry/ai-account-identity.bicep' = {
+module aiAccount './foundry/ai-services-account.bicep' = {
   name: 'ai-${accountName}-${uniqueSuffix}-deployment'
   params: {
     accountName: accountName

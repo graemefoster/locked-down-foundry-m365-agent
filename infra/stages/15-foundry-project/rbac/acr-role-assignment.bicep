@@ -1,4 +1,6 @@
-// Assigns ACR repository read access to the AI project managed identity
+// Grants the project managed identity read access to the Azure Container Registry: Container
+// Registry Repository Reader (pull image manifests/layers) plus Reader (registry metadata).
+// Foundry pulls the agent runtime / custom tool images from here.
 
 @description('Azure Container Registry resource name')
 param acrName string

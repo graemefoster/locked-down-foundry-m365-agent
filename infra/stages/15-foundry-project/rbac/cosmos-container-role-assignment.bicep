@@ -1,9 +1,12 @@
-// Assigns the necessary roles to the AI project
+// Grants the project managed identity the Cosmos DB built-in Data Contributor role
+// (00000000-...-002), data-plane scoped to the '<workspaceId>-thread-message-store' container
+// that the Agents capability host provisions in the 'enterprise_memory' database. Applied
+// AFTER the capability host, because the container doesn't exist until the host creates it.
 
-@description('Name of the AI Search resource')
+@description('Name of the Cosmos DB account')
 param cosmosAccountName string
 
-@description('Project name')
+@description('Principal ID of the AI project managed identity')
 param projectPrincipalId string
 
 param projectWorkspaceId string

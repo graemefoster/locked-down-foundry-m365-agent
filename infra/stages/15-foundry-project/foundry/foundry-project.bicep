@@ -1,3 +1,18 @@
+/*
+Foundry project — a sub-resource of the AI Services account (Microsoft.CognitiveServices/
+accounts/projects). Despite living under foundry/, this creates the WHOLE project, not just
+an identity:
+  - the project resource + its own system-assigned managed identity (the project data-plane
+    identity that agents run as)
+  - the BYO ("bring your own") connections wiring the project to the dependent resources it
+    stores agent state in: Azure Storage (files), CosmosDB (threads/messages), AI Search
+    (vector store)
+  - project diagnostic settings -> Log Analytics
+
+The project can't actually USE those connections until the data-plane RBAC + the Agents
+capability host are in place — see the rest of stage 15.
+*/
+
 param accountName string
 param location string
 param projectName string

@@ -1,4 +1,6 @@
-// Assigns the necessary roles to the AI project
+// Grants the project managed identity the two AI Search roles it needs to build and query
+// its vector store: Search Index Data Contributor (read/write index documents) and Search
+// Service Contributor (create/manage indexes). Both are scoped to the AI Search service.
 
 @description('Name of the AI Search resource')
 param aiSearchName string

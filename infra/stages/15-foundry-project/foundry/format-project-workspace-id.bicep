@@ -1,3 +1,12 @@
+/*
+Reformat the project workspace id into a canonical dashed GUID.
+
+Foundry returns the project's internal workspace id as a 32-char hex string with no dashes.
+Several downstream role assignments need it as a real GUID: the blob container names Foundry
+provisions are prefixed with this workspace id, so the container-scope Storage/Cosmos role
+assignments (rbac/storage-container + cosmos-container) build their scope/condition strings
+from it. This module just inserts the 8-4-4-4-12 dashes and returns the result.
+*/
 
 param projectWorkspaceId string
 

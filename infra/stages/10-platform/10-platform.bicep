@@ -8,7 +8,7 @@ foundation. Composes the slices —
   private-endpoints.bicep      → data-resource private endpoints + privatelink DNS
   model-gateway-platform.bicep → provider Foundry, APIM, APIM/provider PEs, APIM
                                  provider RBAC
-  rbac/keyvault-storage-search-role-assignments.bicep → Storage/Search KV Crypto grants
+  rbac/keyvault-storage-search-role-assignment.bicep → Storage/Search KV Crypto grants
   encryption/storage-encryption.bicep → Storage CMK re-PUT
 
 The Foundry account lives in stage 13 (13-foundry) and the AI project in stage 15
@@ -124,7 +124,7 @@ module modelGateway 'model-gateway-platform.bicep' = {
 // Grant the Storage + Search service identities the Key Vault Crypto Service Encryption
 // User role, THEN re-PUT the Storage account with customer-managed-key encryption (the KV
 // data-plane role must be effective first). The account CMK re-PUT lives in stage 13.
-module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignments.bicep' = {
+module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignment.bicep' = {
   name: 'keyvault-storage-search-rbac-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: dataResources.outputs.keyVaultName

@@ -1,3 +1,18 @@
+/*
+Foundry (Azure AI Services) account — the core resource of the whole platform.
+
+Despite living under foundry/, this creates the ENTIRE account, not just an identity:
+  - the Microsoft.CognitiveServices/accounts resource ('AIServices' kind) that IS Foundry
+  - a model deployment on it (the default chat model)
+  - a system-assigned managed identity (the account's data-plane identity)
+  - VNet injection into the agent subnet (so the account runs inside the private network)
+  - diagnostic settings -> Log Analytics / App Insights
+
+The CMK re-PUT of this account lives in encryption/ai-account-encryption.bicep; both must
+agree on the egress posture, so restrictOutboundNetworkAccess / allowedFqdnList are threaded
+in from the stage orchestrator rather than defaulted here.
+*/
+
 param accountName string
 param location string
 param modelName string

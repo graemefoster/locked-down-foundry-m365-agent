@@ -4,7 +4,7 @@ Stage 15 — Foundry project (orchestrator)
 The AI project (sub-resource of the Foundry account) and EVERYTHING that makes it
 work end-to-end, co-located so the project's trust model reads as one unit:
 
-  foundry/ai-project-identity.bicep         → the project + SMI + BYO connections
+  foundry/foundry-project.bicep             → the project + SMI + BYO connections
                                               (Storage / CosmosDB / AI Search)
   foundry/format-project-workspace-id.bicep → workspace-id GUID for container-scope RBAC
   rbac/*.bicep                              → the project-identity data-plane role
@@ -65,7 +65,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = 
 /*
   Creates a new project (sub-resource of the AI Services account) + BYO connections.
 */
-module aiProject './foundry/ai-project-identity.bicep' = {
+module aiProject './foundry/foundry-project.bicep' = {
   name: 'ai-${projectName}-${uniqueSuffix}-deployment'
   params: {
     projectName: projectName
@@ -108,7 +108,7 @@ module formatProjectWorkspaceId './foundry/format-project-workspace-id.bicep' = 
 /*
   Assigns the project SMI the storage blob data contributor role on the storage account
 */
-module storageAccountRoleAssignment './rbac/azure-storage-account-role-assignment.bicep' = {
+module storageAccountRoleAssignment './rbac/storage-account-role-assignment.bicep' = {
   name: 'storage-ra-${uniqueSuffix}-deployment'
   params: {
     azureStorageName: azureStorageName
@@ -154,7 +154,7 @@ module foundryProjectRoleAssignment './rbac/foundry-project-role-assignment.bice
 }
 
 // The Cosmos DB Operator role must be assigned before the caphost is created
-module cosmosAccountRoleAssignments './rbac/cosmosdb-account-role-assignment.bicep' = {
+module cosmosAccountRoleAssignments './rbac/cosmos-account-role-assignment.bicep' = {
   name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosDBName: cosmosDBName
@@ -166,7 +166,7 @@ module cosmosAccountRoleAssignments './rbac/cosmosdb-account-role-assignment.bic
 }
 
 // This role can be assigned before or after the caphost is created
-module aiSearchRoleAssignments './rbac/ai-search-role-assignments.bicep' = {
+module aiSearchRoleAssignments './rbac/ai-search-role-assignment.bicep' = {
   name: 'ai-search-ra-${uniqueSuffix}-deployment'
   params: {
     aiSearchName: aiSearchName
@@ -211,7 +211,7 @@ module addProjectCapabilityHost './foundry/add-project-capability-host.bicep' = 
 }
 
 // The Storage Blob Data Owner role must be assigned after the caphost is created
-module storageContainersRoleAssignment './rbac/blob-storage-container-role-assignments.bicep' = {
+module storageContainersRoleAssignment './rbac/storage-container-role-assignment.bicep' = {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
   params: {
     aiProjectPrincipalId: aiProject.outputs.projectPrincipalId
@@ -224,7 +224,7 @@ module storageContainersRoleAssignment './rbac/blob-storage-container-role-assig
 }
 
 // The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
-module cosmosContainerRoleAssignments './rbac/cosmos-container-role-assignments.bicep' = {
+module cosmosContainerRoleAssignments './rbac/cosmos-container-role-assignment.bicep' = {
   name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosAccountName: cosmosDBName

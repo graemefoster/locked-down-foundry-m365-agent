@@ -1,4 +1,7 @@
-// Assigns Foundry User role to the project managed identity on the Foundry project
+// Grants the project managed identity the Azure AI User ("Foundry User") role — once on the
+// project itself and once on the parent account. This is a self-grant: the project's own MI
+// needs Foundry User to call the project's data plane (list/run agents, threads, evaluations).
+// The account-scope grant was added because continuous evaluations required it (see note below).
 
 @description('Name of the AI Services account')
 param accountName string

@@ -1,3 +1,9 @@
+// Grants the project managed identity Storage Blob Data Owner, but CONDITION-SCOPED to only
+// the agent containers (names starting with the project workspace id and ending '-azureml-agent').
+// Applied AFTER the Agents capability host is created, because those containers don't exist until
+// the host provisions them. The broad account-scope Contributor grant (needed before the host)
+// lives in storage-account-role-assignment.bicep.
+
 @description('Name of the storage account')
 param storageName string
 

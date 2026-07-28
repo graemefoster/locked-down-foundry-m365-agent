@@ -1,5 +1,8 @@
-// Assigns Role Cosmos DB Operator to the Project Principal ID
-@description('Name of the AI Search resource')
+// Grants the project managed identity Cosmos DB Operator at the Cosmos ACCOUNT scope. This
+// control-plane role is required BEFORE the Agents capability host is created (the host wires
+// the project to the Cosmos-backed thread store). The data-plane, container-scoped grant is
+// applied after the host (see cosmos-container-role-assignment.bicep).
+@description('Name of the Cosmos DB account')
 param cosmosDBName string
 
 @description('Principal ID of the AI project')
