@@ -23,7 +23,6 @@ param modelCapacity int
 param agentSubnetId string
 param networkInjection string = 'true'
 param logAnalyticsWorkspaceId string
-param mcpServerName string
 
 @description('Restrict outbound network access to the allowedFqdnList. Shared with the CMK encryption module so both declarations of the account agree (a CognitiveServices update is a full PUT).')
 param restrictOutboundNetworkAccess bool

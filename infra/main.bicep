@@ -323,7 +323,6 @@ module stage13 'stages/13-foundry/13-foundry.bicep' = {
     modelVersion: modelVersion
     modelSkuName: modelSkuName
     modelCapacity: modelCapacity
-    appServicePlanName: appServicePlanName
     appInsightsName: appInsightsName
     agentSubnetId: stage00.outputs.agentSubnetId
     logAnalyticsId: stage00.outputs.logAnalyticsId

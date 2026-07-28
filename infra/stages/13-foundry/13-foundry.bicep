@@ -26,9 +26,6 @@ param modelVersion string
 param modelSkuName string
 param modelCapacity int
 
-// Used to derive the MCP server FQDN allow-listed on the account.
-param appServicePlanName string
-
 // From stage 00 (observability + networking).
 param agentSubnetId string
 param logAnalyticsId string
@@ -68,7 +65,6 @@ module aiAccount './foundry/ai-services-account.bicep' = {
     logAnalyticsWorkspaceId: logAnalyticsId
     appInsightsConnectionString: appInsightsConnectionString
     appInsightsResourceId: appInsightsId
-    mcpServerName: 'mcp-${appServicePlanName}.azurewebsites.net'
     restrictOutboundNetworkAccess: foundryRestrictOutboundNetworkAccess
     allowedFqdnList: foundryAllowedFqdnList
   }
