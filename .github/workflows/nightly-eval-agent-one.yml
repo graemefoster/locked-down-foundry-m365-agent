@@ -43,14 +43,6 @@ on:
     - cron: "0 16 * * *"
   workflow_dispatch:
     inputs:
-      foundryProjectEndpoint:
-        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
-        required: false
-        default: ""
-      deploymentName:
-        description: "Model deployment used for evaluation (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
-        required: false
-        default: ""
       agentIds:
         description: "Agent id(s) to evaluate as name:version, comma-separated. Default: latest version only (single-agent). Pass two ids to force a comparison (unsupported in Private BYO workspaces — see header)."
         required: false
@@ -63,10 +55,6 @@ on:
         description: "Path to the eval data file"
         required: false
         default: "agents/test-agent-one/eval-data.json"
-      apiVersion:
-        description: "Agents REST API version (used only to resolve the latest agent version)"
-        required: false
-        default: "2025-11-15-preview"
 
 permissions:
   contents: read
@@ -92,32 +80,29 @@ jobs:
         id: cfg
         shell: pwsh
         env:
-          INPUT_ENDPOINT:   ${{ inputs.foundryProjectEndpoint }}
           VAR_ENDPOINT:     ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
-          INPUT_DEPLOYMENT: ${{ inputs.deploymentName }}
           VAR_DEPLOYMENT:   ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
           INPUT_AGENT_IDS:  ${{ inputs.agentIds }}
           INPUT_BASELINE:   ${{ inputs.baselineAgentId }}
           INPUT_DATA_PATH:  ${{ inputs.dataPath }}
-          API_VERSION:      ${{ inputs.apiVersion }}
         run: |
           $ErrorActionPreference = 'Stop'
 
-          $endpoint = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_ENDPOINT)) { $env:INPUT_ENDPOINT } else { $env:VAR_ENDPOINT }
+          $endpoint = $env:VAR_ENDPOINT
           if ([string]::IsNullOrWhiteSpace($endpoint)) {
-            throw "Set repo variable AZURE_AI_PROJECT_ENDPOINT, or pass foundryProjectEndpoint as a dispatch input."
+            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
           }
           $endpoint = $endpoint.TrimEnd('/')
 
-          $deployment = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DEPLOYMENT)) { $env:INPUT_DEPLOYMENT } else { $env:VAR_DEPLOYMENT }
+          $deployment = $env:VAR_DEPLOYMENT
           if ([string]::IsNullOrWhiteSpace($deployment)) {
-            throw "Set repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME, or pass deploymentName as a dispatch input."
+            throw "Repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME is not set (the postprovision hook syncs it; or run 'azd env refresh')."
           }
 
           $dataPath = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DATA_PATH)) { $env:INPUT_DATA_PATH } else { 'agents/test-agent-one/eval-data.json' }
           if (-not (Test-Path -LiteralPath $dataPath)) { throw "Eval data file not found: $dataPath" }
 
-          $apiVersion = if (-not [string]::IsNullOrWhiteSpace($env:API_VERSION)) { $env:API_VERSION } else { '2025-11-15-preview' }
+          $apiVersion = '2025-11-15-preview'
 
           $agentIds = $env:INPUT_AGENT_IDS
           $baseline = $env:INPUT_BASELINE

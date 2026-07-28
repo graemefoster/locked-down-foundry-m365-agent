@@ -17,7 +17,7 @@ name: Deploy Foundry agent (reusable)
 # in-VNet runner is the correct and simplest path.
 #
 # Environment-agnostic MCP: if the manifest has an MCP tool, its per-environment MCP server_url is
-# INJECTED into the definition below from the caller's input / repo variable. The model is set
+# INJECTED into the definition below from the MCP_SERVER_URL repo variable. The model is set
 # directly in agents/<name>/agent.yaml.
 # ---------------------------------------------------------------------------
 on:
@@ -27,21 +27,6 @@ on:
         description: "Path to the agent manifest (agents/<name>/agent.yaml)."
         type: string
         required: true
-      mcp-server-url:
-        description: "MCP server URL to inject (only used if the manifest has an MCP tool; blank = repo var MCP_SERVER_URL)."
-        type: string
-        required: false
-        default: ""
-      foundry-endpoint:
-        description: "Foundry project endpoint (blank = repo var AZURE_AI_PROJECT_ENDPOINT)."
-        type: string
-        required: false
-        default: ""
-      api-version:
-        description: "Agents REST API version."
-        type: string
-        required: false
-        default: "2025-11-15-preview"
       publish-to-teams:
         description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
         type: boolean
@@ -67,7 +52,6 @@ jobs:
       - name: Convert agent.yaml -> agent.json + inject MCP URL (yq)
         env:
           MANIFEST: ${{ inputs.manifest-path }}
-          INPUT_MCP_URL: ${{ inputs.mcp-server-url }}
           VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
         run: |
           if ! command -v yq >/dev/null 2>&1; then
@@ -87,13 +71,12 @@ jobs:
           # Inject the per-environment MCP server_url into every MCP tool (schema requires one of
           # server_url/connector_id/tunnel_id). Only applies to manifests that declare an MCP tool.
           if grep -q '"type": "mcp"' agent.json; then
-            MCP_URL="${INPUT_MCP_URL:-$VAR_MCP_URL}"
-            if [ -z "$MCP_URL" ]; then
-              echo "::error::The manifest has an MCP tool but no MCP server URL was provided. Set repo variable MCP_SERVER_URL (from 'azd env get-value MCP_GATEWAY_URL') or pass the mcp-server-url input."
+            if [ -z "$VAR_MCP_URL" ]; then
+              echo "::error::The manifest has an MCP tool but repo variable MCP_SERVER_URL is not set (from 'azd env get-value MCP_GATEWAY_URL' — the postprovision hook syncs it)."
               exit 1
             fi
-            MCP_URL="$MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
-            echo "Injected MCP server_url: $MCP_URL"
+            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
+            echo "Injected MCP server_url: $VAR_MCP_URL"
           fi
           echo "Prepared agent '$name':"
           cat agent.json
@@ -102,12 +85,11 @@ jobs:
         id: cfg
         shell: pwsh
         env:
-          INPUT_ENDPOINT: ${{ inputs.foundry-endpoint }}
           VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
-          $endpoint = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_ENDPOINT)) { $env:INPUT_ENDPOINT } else { $env:VAR_ENDPOINT }
+          $endpoint = $env:VAR_ENDPOINT
           if ([string]::IsNullOrWhiteSpace($endpoint)) {
-            throw "Set repo variable AZURE_AI_PROJECT_ENDPOINT, or pass foundry-endpoint as an input."
+            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
           }
           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
@@ -117,7 +99,6 @@ jobs:
         with:
           agent-json: agent.json
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
-          api-version: ${{ inputs.api-version }}
 
       - name: Publish agent version
         uses: ./.github/actions/publish-agent
@@ -125,7 +106,6 @@ jobs:
           agent-name: ${{ steps.create.outputs.agent-name }}
           agent-version: ${{ steps.create.outputs.agent-version }}
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
-          api-version: ${{ inputs.api-version }}
 
   # --- publish to Teams / M365 (MANUAL APPROVAL) -------------------------------
   # Gated by the `vnet-deploy` environment: add a REQUIRED REVIEWER (+ branch=main) to that

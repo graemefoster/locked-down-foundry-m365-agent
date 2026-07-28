@@ -29,29 +29,11 @@ name: Deploy compliancy (MCP rate limits)
 # Prerequisites (from `azd env get-values` / Bicep outputs, set as repo variables — the
 # postprovision hook syncs these automatically):
 #   AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE,
-#   AZURE_AI_PROJECT_ENDPOINT. Run `azd env refresh` if any are missing. Each can be overridden
-#   per-run via the dispatch inputs below. Which servers get a policy is driven by mcp/mcp.json
-#   (no input needed).
+#   AZURE_AI_PROJECT_ENDPOINT. Run `azd env refresh` if any are missing. Which servers get a
+#   policy is driven by mcp/mcp.json (no input needed).
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
-    inputs:
-      resourceGroup:
-        description: "Resource group (defaults to repo variable AZURE_RESOURCE_GROUP)"
-        required: false
-        default: ""
-      apimName:
-        description: "APIM instance name (defaults to repo variable MCP_COMPLIANCE_APIM_NAME)"
-        required: false
-        default: ""
-      mcpAudience:
-        description: "MCP app registration audience (defaults to repo variable MCP_COMPLIANCE_AUDIENCE)"
-        required: false
-        default: ""
-      foundryEndpoint:
-        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -73,16 +55,16 @@ jobs:
       - name: Resolve agent names to AppIds and apply MCP rate-limit policies
         shell: pwsh
         env:
-          RESOURCE_GROUP: ${{ inputs.resourceGroup != '' && inputs.resourceGroup || vars.AZURE_RESOURCE_GROUP }}
-          APIM_NAME:      ${{ inputs.apimName != '' && inputs.apimName || vars.MCP_COMPLIANCE_APIM_NAME }}
-          MCP_AUDIENCE:   ${{ inputs.mcpAudience != '' && inputs.mcpAudience || vars.MCP_COMPLIANCE_AUDIENCE }}
-          FOUNDRY_ENDPOINT: ${{ inputs.foundryEndpoint != '' && inputs.foundryEndpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:        ${{ vars.MCP_COMPLIANCE_APIM_NAME }}
+          MCP_AUDIENCE:     ${{ vars.MCP_COMPLIANCE_AUDIENCE }}
+          FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
               [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE) -or
               [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (from 'azd env get-values'), or pass them as dispatch inputs."
+            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {

@@ -2,15 +2,10 @@ name: Deploy gateway-model-agent (VNet self-hosted)
 
 # Thin caller for the gateway demo agent (agents/gateway-model-agent/agent.yaml), served through
 # the enterprise model gateway (APIM). All the work lives in the reusable
-# .github/workflows/deploy-agent.yml — this file only targets ONE agent and supplies its
-# per-environment gateway model reference. Not published to Teams.
+# .github/workflows/deploy-agent.yml — this file only targets ONE agent. The endpoint + gateway
+# model come from repo variables / the manifest. Not published to Teams.
 on:
   workflow_dispatch:
-    inputs:
-      foundryProjectEndpoint:
-        description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -20,4 +15,3 @@ jobs:
     uses: ./.github/workflows/deploy-agent.yml
     with:
       manifest-path: agents/gateway-model-agent/agent.yaml
-      foundry-endpoint: ${{ inputs.foundryProjectEndpoint }}
