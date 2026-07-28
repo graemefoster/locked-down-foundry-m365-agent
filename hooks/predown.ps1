@@ -113,6 +113,12 @@ catch {
   Write-Warning "[predown] Runner deregistration failed ($($_.Exception.Message)). Continuing with teardown - the runner may show as offline until GitHub prunes it."
 }
 
+# =========================================================================================
+# Phases 1/2 setup: resolve the subscription + validate the Foundry inputs before touching
+# any capability host. Everything below is control-plane ARM (no VM); each gate is a
+# best-effort exit that lets azd proceed when there is nothing (or not enough info) to clean.
+# =========================================================================================
+
 # Subscription can also be discovered from the current az CLI account.
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
   $subFromCli = az account show --query id --output tsv 2>$null
