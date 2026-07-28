@@ -122,10 +122,13 @@ azd down
   runs one host-side `postprovision` step (repo-variable sync only). `predown` runs on any
   `azd down`. All agent/compliance/publish work is the in-VNet runner workflows.
 
-## Model gateway
-The model gateway is always deployed: an APIM-fronted provider Foundry and a
-second seeded agent routed through it. See `apim-model-gateway.md`. Networking deep-dive:
-`NETWORKING.md`.
+## AI gateway (a.k.a. model gateway in Bicep)
+The shared private APIM instance is always deployed. Bicep still names it `model-gateway`
+(modules, the `model-gateway` connection, the `10.3.0.0/16` spoke), but the docs frame it as the
+broader **AI gateway**: it fronts models (APIM-fronted provider Foundry + a second seeded agent
+routed through it), MCP servers, and the Teams/M365 inbound auth checks. See `docs/ai-gateway.md`
+(full design + MCP governance) and `docs/governance.md` (governance overview). Networking
+deep-dive: `NETWORKING.md`.
 
 ## MCP compliance (agent → APIM allowlist)
 `mcp/mcp-policy.json` is the **name-only** source of truth (deny-by-default). At apply time,

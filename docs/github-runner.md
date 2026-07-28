@@ -1,5 +1,10 @@
 # Self-hosted GitHub Actions runner (in-VNet)
 
+> **Level 2 — Automate agent deployment.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. This runner is what lets
+> CI/CD reach the **private** Foundry endpoint; see [deployment.md](./deployment.md) for the
+> agent-deploy flow it enables.
+
 An **opt-in** self-hosted Actions runner on the in-VNet **Linux worker VM** so complex,
 representative deployments can run *inside the VNet* — reaching the **private** Foundry
 endpoint directly — instead of being marshalled through `az vm run-command`.

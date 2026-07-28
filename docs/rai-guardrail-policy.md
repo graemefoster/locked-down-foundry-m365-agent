@@ -1,6 +1,7 @@
 # RAI Guardrail Policy (Azure Policy · Audit)
 
-> Part of the [network-secured Foundry agent](../README.md) accelerator. Governs the
+> **Level 1 — Lock down the network.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. Governs the
 > **content-filter / Responsible AI (RAI)** configuration of model deployments.
 
 This capability assigns a **built-in Azure Policy initiative** that audits every

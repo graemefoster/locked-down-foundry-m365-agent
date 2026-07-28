@@ -1,5 +1,9 @@
 # Deployment guide
 
+> **Level 2 — Automate agent deployment.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. The in-VNet runner that
+> makes private-endpoint agent deployment possible: [github-runner.md](./github-runner.md).
+
 How to deploy, seed agents, and operate the network-secured Foundry agent environment. See the [README](../README.md) for the quick start and [architecture.md](./architecture.md) for the resource/design deep dive.
 
 ## Prerequisites
@@ -86,7 +90,7 @@ self-contained.
 
 [Azure Developer CLI](https://aka.ms/azd) (`azd`) is the only supported deployment path.
 All infrastructure lives under [`infra/`](../infra) and is wired through
-[`azure.yaml`](./azure.yaml).
+[`azure.yaml`](../azure.yaml).
 
 ```bash
 azd up          # provision infrastructure ONLY (azd deploys no agents post-provision)

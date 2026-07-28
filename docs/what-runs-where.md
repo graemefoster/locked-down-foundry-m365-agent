@@ -1,5 +1,8 @@
 # What runs where — `hooks/` and `scripts/` orientation
 
+> **Cross-cutting** (supports Levels 2 & 3). Part of the
+> [locked-down Foundry agent](../README.md) reference implementation.
+
 A newcomer's map of every PowerShell file in this repo: **what triggers it, where it runs, what
 identity it uses, and what it does.** The golden rule of this locked-down design:
 

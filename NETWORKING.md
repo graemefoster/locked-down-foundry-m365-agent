@@ -1,5 +1,9 @@
 # Foundry Standard Agent — Network Lockdown Reference
 
+> **Level 1 — Lock down the network.** Part of the
+> [locked-down Foundry agent](./README.md) reference implementation.
+> Resource deep dive: [docs/architecture.md](./docs/architecture.md).
+
 > The definitive, rule-by-rule reference for the network posture in this sample
 > (`99-private-network-standard-agent-firewall`). Every NSG rule and every
 > firewall rule is documented here with its purpose and its source-of-truth
@@ -277,6 +281,10 @@ control-plane surfaces plus the single A365 hostname.
 ---
 
 ## Optional: Model Gateway spoke (APIM + provider Foundry)
+
+> **Naming:** the Bicep/spoke is called *model-gateway*, but conceptually this APIM is the
+> shared **AI gateway** (models + MCP + M365 auth). See [docs/ai-gateway.md](./docs/ai-gateway.md).
+> The rule and resource names below keep the `model-gateway` prefix.
 
 Always deployed. It adds a
 third spoke that fronts a "real" model provider Foundry behind Azure API

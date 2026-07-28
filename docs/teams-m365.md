@@ -1,6 +1,8 @@
 # Publish an agent to Teams / M365 Copilot
 
-> Part of the [network-secured Foundry agent](../README.md) accelerator. Networking deep-dive: [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
+> **Level 3 — Publish to Teams / M365.** Part of the
+> [locked-down Foundry agent](../README.md) reference implementation. Networking deep-dive:
+> [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
 
 The Teams / M365 publish path is **always deployed**. Each agent that wants a Teams presence is
 published by **its own deploy workflow** (`deploy-teams-agent.yml`, `deploy-test-agent-one.yml`,
