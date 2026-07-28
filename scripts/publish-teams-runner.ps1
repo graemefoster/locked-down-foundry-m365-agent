@@ -16,6 +16,15 @@
   For the single named agent it: (1) reads the agent identity, (2) creates that agent's Azure
   Bot Service, (3) enables the activity protocol + publishes to Microsoft 365.
 
+  FLOW AT A GLANCE (the 4 steps span BOTH files — this is the confusing bit for a newcomer):
+    Step 1  GetIdentity  publish-teams.ps1 -Mode GetIdentity   read principal_id (bot App ID)
+    Step 2  Create bot   THIS file (az deployment group create) Azure Bot Service via ARM
+    Step 3  Activity     publish-teams.ps1 -Mode Publish        PATCH agent: enable `activity`
+    Step 4  Publish M365 publish-teams.ps1 -Mode Publish        POST the M365 publish API
+  So this runner is the ORCHESTRATOR: it owns Step 2 and calls publish-teams.ps1 twice (once
+  per mode) for the Foundry data-plane steps around it. publish-teams.ps1 is the single source
+  of truth for those REST calls.
+
   TOKEN NOTE: the Microsoft 365 publish step performs an on-behalf-of style submission
   "on your behalf" to the M365 catalog and rejects an app-only / managed-identity token
   with a bare HTTP 502. The publish-teams composite action therefore acquires a delegated
