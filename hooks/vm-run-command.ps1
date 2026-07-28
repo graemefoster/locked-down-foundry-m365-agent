@@ -1,7 +1,9 @@
 <#
   Shared helper: run a PowerShell script ON the in-VNet Linux VM.
   ---------------------------------------------------------------
-  Dot-sourced by hooks/predeploy.ps1 and hooks/postdeploy.ps1.
+  Dot-sourced by hooks/predown.ps1 (the only remaining azd hook that reaches the VM — it
+  deregisters the self-hosted GitHub runner before teardown, since the runner PAT lives in
+  Key Vault behind a private endpoint and only the VM can read it).
 
   Why a shim instead of calling `az vm run-command invoke` directly:
     The in-VNet worker VM is now LINUX (see infra/stages/40-runner/resources/vm-linux.bicep),
@@ -23,7 +25,7 @@
 
   Parameter values must be STRINGS. `pwsh -File` only ever passes string arguments, so a
   [switch] parameter on the target script could not be satisfied by `-Name 'true'`. Every
-  script invoked this way (scripts/seed-agents.ps1, scripts/publish-teams-runner.ps1)
+  script invoked this way (scripts/deregister-runner.ps1)
   declares [string] parameters for exactly that reason; the guard below keeps it that way.
 #>
 

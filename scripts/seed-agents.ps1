@@ -1,10 +1,10 @@
 <#
   Seed Foundry Agents (runs ON the private VM)
   --------------------------------------------
-  Executed on the locked-down Linux worker VM (inside the private VNet) by the azd `predeploy`
-  hook (hooks/predeploy.ps1), which ships this file over `RunShellScript` and runs it under
-  pwsh via the hooks/vm-run-command.ps1 shim. The VM is the only host that can reach the
-  Foundry private endpoint, so the seeding logic must run here.
+  Executed on the locked-down Linux worker VM (inside the private VNet) by the in-VNet
+  self-hosted GitHub Actions runner (.github/workflows/deploy-vnet.yml), running natively on
+  the VM. The VM is the only host that can reach the Foundry private endpoint, so the seeding
+  logic must run here. (azd itself no longer seeds agents — it only provisions.)
 
   It acquires a managed-identity token via IMDS and calls the Agents REST API. Re-running is
   safe: a new agent is created if missing; an existing agent gets a fresh version each run

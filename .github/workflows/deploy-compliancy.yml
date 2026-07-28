@@ -12,9 +12,9 @@ name: Deploy compliancy (MCP rate limits)
 #   scripts/list-agent-appids.ps1 -ResolvePolicyPath to join each name to its live AgentIdentity
 #   AppId via Microsoft Graph (az ad sp list on the SP '<account>-<project>-<name>-AgentIdentity')
 #   — dropping any name with no matching identity — then passes the resolved (AppId-enriched)
-#   policy to the Bicep wrapper as the `mcpPolicy` parameter. `azd up` now does the SAME thing in
-#   hooks/postdeploy.ps1 once agents are seeded; this workflow is the fast on-demand re-apply after
-#   you edit the JSON (no full `azd up` needed).
+#   policy to the Bicep wrapper as the `mcpPolicy` parameter. This workflow is now the ONLY way
+#   MCP compliance is applied — azd runs nothing after provision, so run this after `azd up`
+#   (once the agents are seeded by deploy-vnet.yml) and again whenever you edit the JSON.
 #
 # Runner:
 #   Resolution is now a CONTROL-PLANE call (Graph), and applying the APIM policy is an ARM

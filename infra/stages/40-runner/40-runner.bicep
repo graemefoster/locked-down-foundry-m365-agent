@@ -89,10 +89,11 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
 
 // ==================== SEED AGENTS: VM RBAC ====================
 
-// Agent seeding runs from the azd `predeploy` hook (hooks/predeploy.ps1), which uses
-// `az vm run-command` to execute scripts/seed-agents.ps1 on the private LINUX VM (the
-// only host that can reach the Foundry private endpoint — the Windows dev VM is optional
-// and intentionally has no such access). The Linux VM's system-assigned identity needs
+// Agent seeding runs from the in-VNet self-hosted GitHub Actions runner
+// (.github/workflows/deploy-vnet.yml), which executes scripts/seed-agents.ps1 natively on the
+// private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows dev
+// VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
+// needs
 // Foundry User on the project so the on-VM script can acquire a token and call the
 // Agents API — that RBAC is provisioned here.
 module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
@@ -174,5 +175,5 @@ module vmRunnerExtension './resources/vm-runner-extension.bicep' = if (installGi
   ]
 }
 
-@description('Name of the private Linux VM the seed-agents hook runs its script on.')
+@description('Name of the private Linux VM that hosts the in-VNet self-hosted GitHub Actions runner.')
 output vmName string = linuxVmModule.outputs.vmName

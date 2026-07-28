@@ -16,7 +16,7 @@
     deleted cleanly while the capability host still exists - `azd down` will hang or fail on the
     account. We enumerate the capability hosts on the project (and account, to catch any
     auto-created one) and delete each. This is a control-plane (ARM) operation, so - unlike the
-    private data-plane Agents API used by predeploy - it does NOT need the in-VNet VM.
+    runner deregistration in Phase 0 - it does NOT need the in-VNet VM.
 
   Best-effort by design: if a phase's inputs can't be resolved (or Foundry / the runner were
   never provisioned), it warns and lets azd proceed. Runner deregistration NEVER fails teardown
@@ -26,7 +26,7 @@
   Required env vars (surfaced by azd from the Bicep outputs; run `azd env refresh` if missing):
       Capability hosts: AZURE_SUBSCRIPTION_ID, AZURE_RESOURCE_GROUP, AZURE_AI_ACCOUNT_NAME,
                         AZURE_AI_PROJECT_NAME
-      Runner (Phase 0): AZURE_RESOURCE_GROUP, SEED_AGENTS_VM_NAME, GITHUB_RUNNER_REPO_URL,
+      Runner (Phase 0): AZURE_RESOURCE_GROUP, GITHUB_ACTIONS_RUNNER_VM_NAME, GITHUB_RUNNER_REPO_URL,
                         KEY_VAULT_NAME, GITHUB_RUNNER_PAT_SECRET_NAME, GITHUB_RUNNER_USER
 
   Caller RBAC: permission to delete capability hosts
@@ -57,7 +57,7 @@ $projectName    = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME'
 # when Foundry was never provisioned (the Foundry gates below can exit early). Never fails the
 # teardown: a lingering offline runner is harmless and GitHub prunes it eventually.
 function Remove-GithubRunner {
-  $vmName        = Get-OptionalEnv 'SEED_AGENTS_VM_NAME'
+  $vmName        = Get-OptionalEnv 'GITHUB_ACTIONS_RUNNER_VM_NAME'
   $repoUrl       = Get-OptionalEnv 'GITHUB_RUNNER_REPO_URL'
   $keyVaultName  = Get-OptionalEnv 'KEY_VAULT_NAME'
   $patSecretName = Get-OptionalEnv 'GITHUB_RUNNER_PAT_SECRET_NAME'
@@ -69,7 +69,7 @@ function Remove-GithubRunner {
   }
   if ([string]::IsNullOrWhiteSpace($resourceGroup) -or [string]::IsNullOrWhiteSpace($vmName) `
       -or [string]::IsNullOrWhiteSpace($keyVaultName) -or [string]::IsNullOrWhiteSpace($patSecretName)) {
-    Write-Warning "[predown] Runner deregistration needs AZURE_RESOURCE_GROUP, SEED_AGENTS_VM_NAME, KEY_VAULT_NAME and GITHUB_RUNNER_PAT_SECRET_NAME (run 'azd env refresh'). Skipping - the runner may linger as offline."
+    Write-Warning "[predown] Runner deregistration needs AZURE_RESOURCE_GROUP, GITHUB_ACTIONS_RUNNER_VM_NAME, KEY_VAULT_NAME and GITHUB_RUNNER_PAT_SECRET_NAME (run 'azd env refresh'). Skipping - the runner may linger as offline."
     return
   }
 

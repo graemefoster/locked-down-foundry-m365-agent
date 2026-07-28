@@ -165,70 +165,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Verify Azure CLI is available
-        shell: pwsh
-        run: |
-          # az is installed by cloud-init on the Linux worker VM.
-          if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-            throw "Azure CLI not found on the VM. Re-run 'azd provision' so cloud-init installs it."
-          }
-          az version
-
-      # The Microsoft 365 publish step does an on-behalf-of submission and rejects an app-only /
-      # managed-identity token (HTTP 502). Acquire a DELEGATED USER token interactively via the
-      # device-code flow: the step prints a code + URL and blocks until you complete sign-in.
-      # Nothing secret is logged (the device code alone is useless; the token is masked).
-      - name: Acquire a delegated user token (device code)
-        shell: pwsh
-        env:
-          TENANT_ID: ${{ vars.TEAMS_TENANT_ID }}
-        run: |
-          Write-Host '>>> A device-code sign-in is required for the Microsoft 365 publish step.'
-          Write-Host '>>> Open the URL below and enter the code, then this job will continue.'
-          az login --use-device-code --tenant $env:TENANT_ID --output none
-          if ($LASTEXITCODE -ne 0) { throw 'Device-code sign-in failed.' }
-          $userToken = az account get-access-token --resource https://ai.azure.com --query accessToken -o tsv
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($userToken)) {
-            throw 'Failed to acquire a user access token after device-code sign-in.'
-          }
-          Write-Host "::add-mask::$userToken"
-          "PUBLISH_USER_TOKEN=$userToken" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host 'Delegated user token acquired for the publish step.'
-
-      - name: Sign in with the VM managed identity
-        shell: pwsh
-        # Restore the MI as the active az context so bot-service ARM creation and the Foundry
-        # read run as the VM managed identity (which holds the required RBAC).
-        run: az login --identity --output none
-
+      # Shared with deploy-vnet.yml via the publish-teams composite action. Targets the agent
+      # this run just deployed (deploy.outputs.agent-name).
       - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
-        shell: pwsh
-        env:
-          FOUNDRY_ENDPOINT: ${{ needs.deploy.outputs.endpoint }}
-          AGENT_NAMES:      ${{ needs.deploy.outputs.agent-name }}
-          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
-          YARP_FQDN:        ${{ vars.TEAMS_YARP_FQDN }}
-          TENANT_ID:        ${{ vars.TEAMS_TENANT_ID }}
-          BOT_NAME:         ${{ vars.TEAMS_BOT_NAME }}
-          NAME_PREFIX:      ${{ vars.TEAMS_NAME_PREFIX }}
-          LOG_ANALYTICS_ID: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
-          PUBLISH_SCOPE:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
-        run: |
-          foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAMES','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
-            if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
-              throw "Publish requires '$v'. Set repo variables AZURE_RESOURCE_GROUP, TEAMS_YARP_FQDN, TEAMS_TENANT_ID and TEAMS_BOT_NAME (from 'azd env get-values')."
-            }
-          }
-          $scope = if ([string]::IsNullOrWhiteSpace($env:PUBLISH_SCOPE)) { 'Shared' } else { $env:PUBLISH_SCOPE }
-          ./scripts/publish-teams-runner.ps1 `
-            -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
-            -ResourceGroup            $env:RESOURCE_GROUP `
-            -AgentNames               $env:AGENT_NAMES `
-            -YarpFqdn                 $env:YARP_FQDN `
-            -TenantId                 $env:TENANT_ID `
-            -BotName                  $env:BOT_NAME `
-            -NamePrefix               $env:NAME_PREFIX `
-            -LogAnalyticsWorkspaceId  $env:LOG_ANALYTICS_ID `
-            -PublishScope             $scope `
-            -PublishAccessToken       $env:PUBLISH_USER_TOKEN
+        uses: ./.github/actions/publish-teams
+        with:
+          foundry-endpoint: ${{ needs.deploy.outputs.endpoint }}
+          agent-names:      ${{ needs.deploy.outputs.agent-name }}
+          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
 

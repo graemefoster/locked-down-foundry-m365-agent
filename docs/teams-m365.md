@@ -85,45 +85,47 @@ activityProtocol endpoint.
 > [M365 endpoints service](https://learn.microsoft.com/en-us/microsoft-365/enterprise/urls-and-ip-address-ranges)
 > (service area `Skype`), as this template does.
 
-### Hook-driven publish
+### Workflow-driven publish
 
 Steps 2–4 need values that only exist **after** the agents are seeded (each agent
 identity `principal_id` = that bot's Microsoft App ID), so publishing is driven by the
-azd **postdeploy** hook ([`hooks/postdeploy.ps1`](../hooks/postdeploy.ps1)) rather than
-Bicep. The hook **loops over `TEAMS_PUBLISH_AGENT_NAMES`**, publishing each agent with
-its own bot. **Strict boundary:** the private VM only ever calls Foundry REST APIs; every
-ARM / Bicep / APIM control-plane action runs host-side, outside the VNet.
+in-VNet self-hosted GitHub Actions workflows
+([`deploy-vnet.yml`](../.github/workflows/deploy-vnet.yml) and
+[`deploy-test-agent-one.yml`](../.github/workflows/deploy-test-agent-one.yml), via the
+[`publish-teams`](../.github/actions/publish-teams/action.yml) composite action →
+[`scripts/publish-teams-runner.ps1`](../scripts/publish-teams-runner.ps1)) rather than
+Bicep or azd. The runner loops over the requested agent names, publishing each with its
+own bot. Because the runner **is** the in-VNet VM, everything — including the Bot Service
+ARM deployment — runs there as the VM's managed identity (Contributor on the resource
+group); there is no host-side orchestration and no `az vm run-command`.
 
 Per agent:
 
-1. **Get identity** *(on the VM — Foundry REST)* — runs
-   [`scripts/publish-teams.ps1`](../scripts/publish-teams.ps1) on the private VM (via
-   `az vm run-command`) to read `instance_identity.principal_id`.
-2. **Create the Azure Bot Service registration** *(host-side)* — `az deployment group create` of
+1. **Get identity** *(Foundry REST)* — runs
+   [`scripts/publish-teams.ps1`](../scripts/publish-teams.ps1) to read
+   `instance_identity.principal_id`.
+2. **Create the Azure Bot Service registration** *(ARM, as the VM MI)* — `az deployment group create` of
    [`hooks/bot-service.bicep`](../hooks/bot-service.bicep) (azurebot, PNA disabled,
    single-tenant, **Teams channel**; name `<TEAMS_BOT_NAME>-<agentName>`, messaging
    endpoint = YARP public FQDN + `/teams/<agentName>`). This is registration/config only —
    it points the Teams channel at YARP; it does not receive traffic itself.
-4. **Publish** *(on the VM — Foundry REST)* — the VM script enables the `activity`
+4. **Publish** *(Foundry REST)* — the runner enables the `activity`
    protocol + `BotServiceRbac` scheme (keeping `responses` + `Entra`), then calls the
    Microsoft 365 publish API.
 
-Then **once**, after every bot exists:
-
-3. **Set the APIM `validate-jwt` audience allowlist** *(host-side)* to the SET of all
-   published bot App IDs (best-effort; issuer validation + IP restriction stay active if
-   it fails).
+The APIM `validate-jwt` audience allowlist (formerly a host-side "Phase B" step) is **not**
+performed by the workflow path — it focuses on the publish flow itself; issuer validation +
+IP restriction remain active.
 
 > **Publish needs a delegated *user* token (OBO), not the VM managed identity.**
 > Foundry's `microsoft365/publish` API performs an on-behalf-of exchange with the
 > caller's token to submit to the M365 catalog, so an app-only / MSI token fails
-> server-side with a bare `502`. The hook acquires a **host-side user token**
-> (`az account get-access-token --resource https://ai.azure.com`) and passes it to the
-> publish call only; the earlier PATCH steps still run under the VM MSI. This preserves
-> the boundary — the VM never handles ARM/control-plane, only Foundry REST.
+> server-side with a bare `502`. The `publish-teams` composite action acquires a
+> **delegated user token via device-code sign-in** and passes it to the publish call
+> only; the earlier read + PATCH steps run under the VM MSI.
 
-The hook is idempotent — re-running skips an already-published `appVersion`. Bump
-`TEAMS_APP_VERSION` (via `azd env set`) to roll out user-facing metadata changes.
+The path is idempotent — re-running skips an already-published `appVersion`. Bump
+`TEAMS_APP_VERSION` (repo variable / action input) to roll out user-facing metadata changes.
 
 Key parameters:
 

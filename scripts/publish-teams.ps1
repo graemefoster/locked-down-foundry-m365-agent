@@ -1,13 +1,13 @@
 <#
   Publish a seeded Foundry agent to Teams / M365 (runs ON the private VM)
   ----------------------------------------------------------------------
-  Executed on the locked-down VM (inside the private VNet) by the azd `postdeploy`
-  hook (hooks/postdeploy.ps1) via `az vm run-command`, because Steps 1/3/4 call the
-  PRIVATE Foundry endpoint that only the VM can reach.
+  Executed on the locked-down VM (inside the private VNet) by the in-VNet Teams-publish
+  workflow path (scripts/publish-teams-runner.ps1, driven by the publish-teams composite
+  action), because Steps 1/3/4 call the PRIVATE Foundry endpoint that only the VM can reach.
 
   Ref: https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot-virtual-network
 
-  Two modes (the hook needs the agent identity BEFORE it can create the bot):
+  Two modes (the caller needs the agent identity BEFORE it can create the bot):
 
     -Mode GetIdentity : Step 1 — GET the agent, print instance_identity.principal_id /
                         client_id as parseable markers for the host hook.
@@ -40,9 +40,9 @@ param(
   [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl = 'https://www.microsoft.com/legal/terms-of-use',
 
   # REQUIRED delegated USER bearer token for the https://ai.azure.com audience, acquired
-  # host-side by the postdeploy hook (`az account get-access-token`). This script only ever
-  # runs as part of publishing an agent, and the Microsoft 365 publish step (Step 4) performs
-  # an on-behalf-of (OBO) exchange with the caller's token to submit the app to the M365
+  # by the caller (the publish-teams composite action, via device-code sign-in). This script
+  # only ever runs as part of publishing an agent, and the Microsoft 365 publish step (Step 4)
+  # performs an on-behalf-of (OBO) exchange with the caller's token to submit the app to the M365
   # catalog. An app-only / managed-identity token has no user context and fails server-side
   # with a bare HTTP 502, so a USER token is mandatory (the read + PATCH steps accept it too).
   [Parameter(Mandatory = $true)] [string]$AccessToken

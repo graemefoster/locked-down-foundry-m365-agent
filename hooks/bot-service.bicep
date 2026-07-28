@@ -1,13 +1,12 @@
 /*
   Azure Bot Service for a Teams / M365-published Foundry agent
   ------------------------------------------------------------
-  Deployed HOST-SIDE by the azd postdeploy hook (hooks/postdeploy.ps1) via
-  `az deployment group create`. It lives in hooks/ (beside that hook), NOT in
-  scripts/ — scripts/ is reserved for code executed ON the private VM, which may
-  only call Foundry REST APIs. This Bicep is control-plane work and runs from the
-  azd host, outside the VNet. It is not wired into infra/main.bicep because its
-  `msaAppId` (the agent identity principal_id) only exists AFTER agent seeding, so
-  the value is discovered live by the hook.
+  Deployed by the in-VNet Teams-publish path (scripts/publish-teams-runner.ps1) via
+  `az deployment group create`, running on the VM as its managed identity (Contributor
+  on the resource group). It lives in hooks/ for historical reasons; it is control-plane
+  (ARM) work and is NOT wired into infra/main.bicep because its `msaAppId` (the agent
+  identity principal_id) only exists AFTER agent seeding, so the value is discovered live
+  by the publish path.
 
   See: https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot-virtual-network (Step 2)
 

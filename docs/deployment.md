@@ -89,8 +89,8 @@ All infrastructure lives under [`infra/`](../infra) and is wired through
 [`azure.yaml`](./azure.yaml).
 
 ```bash
-azd up          # provision infrastructure (+ predeploy hook once a service is defined)
-# or, to provision only:
+azd up          # provision infrastructure ONLY (azd runs nothing after provision)
+# or, equivalently:
 azd provision
 ```
 
@@ -109,8 +109,9 @@ never stored in the repo.
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
-> **Note:** `azd provision` creates all infrastructure but **does not seed agents**. Seed
-> them separately (see below).
+> **Note:** `azd` **only provisions infrastructure** — it runs nothing after provision. Agent
+> seeding, MCP compliance and Teams / M365 publishing all run from the in-VNet self-hosted GitHub
+> Actions runner (see below).
 
 > **Note — CMK / Key Vault propagation:** provisioning may occasionally fail the first time
 > with `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`
@@ -127,46 +128,33 @@ never stored in the repo.
 
 The Foundry endpoint is private, so agents are created by running
 [`scripts/seed-agents.ps1`](../scripts/seed-agents.ps1) **on the locked-down VM** (the only
-host inside the VNet that can reach the private endpoint). This is wired as an
-[Azure Developer CLI](https://aka.ms/azd) **`predeploy` hook**
-([`hooks/predeploy.ps1`](../hooks/predeploy.ps1)), which uses `az vm run-command` to execute
-the script on the VM.
+host inside the VNet that can reach the private endpoint). azd no longer does this — seeding
+runs on the **in-VNet self-hosted GitHub Actions runner**, which executes the script natively
+on the VM as its managed identity. So you must have the runner enabled
+(see [docs/github-runner.md](./github-runner.md)).
 
-Once infrastructure is provisioned (so the Bicep outputs are in the azd environment):
+Once infrastructure is provisioned and the runner is installed:
 
 ```bash
-# Iterate on agents without re-provisioning:
-azd hooks run predeploy
-
-# Or, as part of a full deploy (runs the predeploy hook first):
-azd deploy
+# Seed (or re-seed) the agents from inside the VNet:
+gh workflow run deploy-vnet.yml
 ```
 
 To change which agents are created, edit the `$agentsToCreate` array in
-`scripts/seed-agents.ps1`. The script is **idempotent** — agents that already exist (matched
-by name) are skipped, so re-running is safe.
+`scripts/seed-agents.ps1`. The script is **idempotent** — an existing agent (matched by name)
+gets a fresh version rather than a duplicate, so re-running is safe.
 
 **Requirements:**
-- `az` CLI and PowerShell (`pwsh`) on the machine running the hook.
-- The caller needs permission to invoke VM run-commands
-  (`Microsoft.Compute/virtualMachines/runCommands/*`, e.g. **Virtual Machine Contributor**
-  on the VM/resource group). The VM's own managed identity already holds **Foundry User** on
-  the project (granted by the template) so the on-VM script can call the Agents API.
-- `azd deploy` only triggers the hook once a service is defined in `azure.yaml`;
-  `azd hooks run predeploy` works regardless and is the quickest way to (re)seed.
+- The in-VNet self-hosted runner must be installed (`GITHUB_RUNNER_REPO_URL` set before
+  provisioning). The runner VM's managed identity already holds **Foundry User** on the project
+  (granted by the template), so `seed-agents.ps1` can call the Agents API via IMDS — no
+  `az login` needed.
+- `deploy-vnet.yml` is `workflow_dispatch`-only, guarded by a repository check and the
+  `vnet-deploy` environment (add a required reviewer for an approval gate).
 
-To (re)seed agents manually — for example outside the hook or from another host inside the
-VNet — run the seeding script yourself. The seed target is the **Linux** worker VM, so use
-`RunShellScript` and invoke `pwsh` explicitly (which is exactly what the
-`hooks/vm-run-command.ps1` shim does on the hooks' behalf):
-
-```bash
-az vm run-command invoke --command-id RunShellScript --name <linux-vm-name> -g <rg> \
-  --scripts "pwsh -NoProfile -File /tmp/seed-agents.ps1 -FoundryProjectEndpoint '<endpoint>' -ModelDeploymentName '<model>'"
-```
-
-(copy `scripts/seed-agents.ps1` to `/tmp` on the VM first — or just run
-`azd hooks run predeploy`, which handles the copy for you).
+If you need to (re)seed from another host inside the VNet, run `scripts/seed-agents.ps1`
+directly on that host under `pwsh`, passing `-FoundryProjectEndpoint` and
+`-ModelDeploymentName`.
 
 ## Maintenance
 

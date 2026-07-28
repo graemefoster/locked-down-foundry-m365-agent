@@ -3,9 +3,9 @@
   ----------------------------------------------------------
   This VM is ALWAYS deployed and owns both in-VNet jobs:
 
-    1. `az vm run-command` target for agent seeding (hooks/predeploy.ps1 ->
-       scripts/seed-agents.ps1). It is the only host that can reach the PRIVATE
-       Foundry endpoint.
+    1. In-VNet self-hosted GitHub Actions runner host for agent seeding / Teams publishing /
+       MCP compliance (.github/workflows/*.yml -> scripts/seed-agents.ps1 etc.). It is the only
+       host that can reach the PRIVATE Foundry endpoint.
     2. Self-hosted GitHub Actions runner host (see vm-runner-extension.bicep).
 
   Why Linux and not the Windows dev VM (vm.bicep):

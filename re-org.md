@@ -45,8 +45,8 @@ These are the design decisions — everything else follows from them.
   resource *and* its encryption/RBAC/PE together, so there is never a "where is
   the grant for this?" hunt.
 - **Rule 2 — IaC and imperative are different universes.** Agent *creation* is
-  **not** a Bicep stage. It is seeded post-deploy by `hooks/predeploy.ps1` →
-  `scripts/seed-agents.ps1` (and torn down by `predown`). The stages are IaC only;
+  **not** a Bicep stage. It is seeded post-provision by the in-VNet runner workflow
+  (`deploy-vnet.yml` → `scripts/seed-agents.ps1`, and torn down by `predown`). The stages are IaC only;
   the layering should **celebrate** that boundary (stage 40 is the in-VNet bridge
   to it), not hide agents inside a Bicep "agents layer".
 
@@ -115,10 +115,10 @@ This VM exists **only** to let the imperative stage reach private Foundry.
 - **Co-located (Rule 1):** runner RBAC (→Foundry/OpenAI/Key Vault secrets/VM
   contributor), runner PAT secret, and the **runner extension LAST** (bootstraps
   the GitHub runner). All `if (installGithubRunner)`.
-- **Exposes:** vm name (→ `SEED_AGENTS_VM_NAME`), runner facts.
+- **Exposes:** vm name (→ `GITHUB_ACTIONS_RUNNER_VM_NAME`), runner facts.
 
 ### L4 — Imperative (NOT Bicep)
-Agent seeding (`predeploy` → `seed-agents.ps1`) and capability-host teardown
+Agent seeding (in-VNet runner workflow → `seed-agents.ps1`) and capability-host teardown
 (`predown`). Already outside Bicep — no change; stage 40 is its in-VNet bridge.
 
 ## 4. Current module → target stage map
@@ -217,7 +217,7 @@ leaf modules.
 - **(b) All 27 outputs stay on `main.bicep`** verbatim (names/types identical —
   they are surfaced to azd → hooks as env vars). Re-home only the *expressions* to
   read from stage outputs. Hook-consumed: `AZURE_RESOURCE_GROUP`,
-  `SEED_AGENTS_VM_NAME`, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`,
+  `GITHUB_ACTIONS_RUNNER_VM_NAME`, `AZURE_AI_PROJECT_ENDPOINT`, `AZURE_AI_MODEL_DEPLOYMENT_NAME`,
   `SEED_ENABLE_SECOND_AGENT`, `SEED_SECOND_AGENT_MODEL`, `AZURE_AI_ACCOUNT_NAME`,
   `AZURE_AI_PROJECT_NAME`, `MCP_COMPLIANCE_*`, `TEAMS_*`, `MCP_GATEWAY_URL`,
   `RAI_GUARDRAIL_ASSIGNMENT_NAME`, `NONCOMPLIANT_DEMO_DEPLOYMENT_NAME`,

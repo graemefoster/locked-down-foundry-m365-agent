@@ -86,7 +86,7 @@ param gatewayCallerAppId string = ''
 // The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
 // to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
 // the Bot Channel Adapter ranges). The Azure Bot Service + Step 3/4 publish are performed by
-// the postdeploy hook (scripts/publish-teams.ps1).
+// the in-VNet Teams-publish workflow path (scripts/publish-teams-runner.ps1 -> publish-teams.ps1).
 @description('Names of the seeded agents to publish to Teams / M365. Each gets its own Azure Bot Service whose messaging endpoint is https://<yarp>/teams/<agentName>; the single path-routed APIM Teams API rewrites to each agent activityProtocol endpoint. Defaults to all three seeded agents.')
 param teamsPublishAgentNames array = [
   'hello-world-agent'
@@ -442,8 +442,8 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
 
 
 // ==================== STAGE 40 — RUNNER ====================
-// In-VNet compute: the always-on Linux worker VM (seed-agents run-command target + self-hosted
-// runner host), optional Windows dev VM / Bastion, the Linux VM's seeding RBAC, and the opt-in
+// In-VNet compute: the always-on Linux worker VM (self-hosted GitHub Actions runner host),
+// optional Windows dev VM / Bastion, the Linux VM's Foundry/seeding RBAC, and the opt-in
 // self-hosted GitHub runner (RBAC + PAT secret + runner extension LAST). Depends on 00/10.
 module stage40 'stages/40-runner/40-runner.bicep' = {
   name: 'stage40-runner-${uniqueSuffix}'
@@ -473,13 +473,18 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
 }
 
 
-// ==================== OUTPUTS (consumed by the azd predeploy hook) ====================
+// ==================== OUTPUTS ====================
+// Surfaced by azd as env vars (and typically mirrored to repo variables). Consumed by the
+// in-VNet self-hosted workflows (.github/workflows/deploy-vnet.yml, deploy-test-agent-one.yml,
+// deploy-compliancy.yml) which do the seeding / compliance / Teams publishing, and by the azd
+// predown hook (capability-host cleanup + runner deregistration). azd itself runs nothing after
+// provision.
 
 @description('Resource group the deployment targets.')
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
 
-@description('Name of the private Linux VM the seed-agents hook runs its script on.')
-output SEED_AGENTS_VM_NAME string = stage40.outputs.vmName
+@description('Name of the private Linux VM that hosts the in-VNet self-hosted GitHub Actions runner (also the predown hook\'s runner-deregistration target).')
+output GITHUB_ACTIONS_RUNNER_VM_NAME string = stage40.outputs.vmName
 
 
 @description('Foundry project endpoint the seeded agents are created against.')
@@ -506,18 +511,18 @@ output SEED_ENABLE_SECOND_AGENT bool = true
 @description('Model reference for the second (model-gateway) agent.')
 output SEED_SECOND_AGENT_MODEL string = stage30.outputs.agentModelReference
 
-// ---- Teams / M365 publish (consumed by the postdeploy hook) ----
+// ---- Teams / M365 publish (consumed by the in-VNet Teams-publish workflow path) ----
 
-@description('Whether the Teams / M365 publish path was deployed (gates the postdeploy hook). Always true.')
+@description('Whether the Teams / M365 publish path was deployed. Always true.')
 output SEED_ENABLE_TEAMS_PUBLISH bool = true
 
-@description('Comma-separated names of the seeded agents to publish to Teams / M365 (the postdeploy hook creates one bot per agent, endpoint /teams/<agentName>).')
+@description('Comma-separated names of the seeded agents to publish to Teams / M365 (the publish path creates one bot per agent, endpoint /teams/<agentName>).')
 output TEAMS_PUBLISH_AGENT_NAMES string = join(teamsPublishAgentNames, ',')
 
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
 output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn
 
-@description('APIM instance name (hook pins the Teams API validate-jwt audience live once the bot App ID is known).')
+@description('APIM instance name (the Teams-publish path pins the Teams API validate-jwt audience live once the bot App ID is known).')
 output TEAMS_APIM_NAME string = apimName
 
 @description('Name of the APIM Teams inbound API (== its path).')
@@ -526,13 +531,13 @@ output TEAMS_APIM_API_NAME string = stage30.outputs.teamsApiName
 @description('Entra tenant the single-tenant bot registration lives in.')
 output TEAMS_TENANT_ID string = tenant().tenantId
 
-@description('Suggested Azure Bot Service resource name the postdeploy hook creates (stable per environment).')
+@description('Suggested Azure Bot Service resource name the Teams-publish path creates (stable per environment).')
 output TEAMS_BOT_NAME string = 'bot-${uniqueSuffix}'
 
 @description('Environment unique suffix, prefixed onto each published agent display name so entries are unambiguous per deployment in a shared tenant catalog (e.g. "<suffix>-teams-agent").')
 output TEAMS_NAME_PREFIX string = uniqueSuffix
 
-@description('Log Analytics workspace resource ID — the postdeploy hook passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
+@description('Log Analytics workspace resource ID — the Teams-publish path passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')

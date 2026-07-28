@@ -2,10 +2,11 @@
   Publish seeded Foundry agents to Teams / M365 — FROM THE IN-VNET RUNNER
   -----------------------------------------------------------------------
   Runs ON the locked-down VM, executed by the self-hosted GitHub Actions runner
-  (.github/workflows/deploy-vnet.yml). It is the in-VNet equivalent of the azd
-  `postdeploy` hook (hooks/postdeploy.ps1) Phases A + C: instead of orchestrating
-  from the azd host and reaching the VM via `az vm run-command`, everything runs
-  locally on the VM as the VM's system-assigned managed identity.
+  (.github/workflows/deploy-vnet.yml and deploy-test-agent-one.yml, via the
+  .github/actions/publish-teams composite action). This is now the ONLY Teams / M365
+  publish path — azd runs nothing after provision. Everything runs locally on the VM
+  as the VM's system-assigned managed identity, except the Microsoft 365 publish call
+  (see the token note below).
 
   Because the runner IS the VM (a trusted, gated Posture A worker), it can:
     * call the PRIVATE Foundry endpoint directly (IMDS / az MI token), and
@@ -16,18 +17,16 @@
   Per agent it: (1) reads the agent identity, (2) creates that agent's Azure Bot
   Service, (3) enables the activity protocol + publishes to Microsoft 365.
 
-  TOKEN NOTE (the open question this path exercises): the Microsoft 365 publish
-  step performs an on-behalf-of style submission "on your behalf" to the M365
-  catalog. The host-side hook uses a delegated USER token because an app-only /
-  managed-identity token was observed to fail there with a bare HTTP 502. This
-  runner path deliberately uses the VM's MANAGED-IDENTITY token so we can confirm,
-  in the exact place it matters, whether app-only publish is actually rejected. If
-  Step 4 fails with 502 while the read + bot creation succeed, that is the evidence
-  that publish requires a delegated user token.
+  TOKEN NOTE: the Microsoft 365 publish step performs an on-behalf-of style submission
+  "on your behalf" to the M365 catalog and rejects an app-only / managed-identity token
+  with a bare HTTP 502. The publish-teams composite action therefore acquires a delegated
+  USER token (device-code sign-in) and forwards it via -PublishAccessToken, which is used
+  ONLY for the publish call. When no user token is supplied this script falls back to the
+  VM MI token (the app-only path, expected to 502 at Step 4) so the behaviour can be
+  confirmed in place.
 
-  The APIM validate-jwt audience pin (postdeploy Phase B) is intentionally NOT done
-  here — it is a best-effort control-plane step that remains available host-side via
-  `azd hooks run postdeploy`. This script focuses on the publish flow itself.
+  NOTE: the APIM validate-jwt audience pin (formerly the postdeploy hook's Phase B) is NOT
+  performed by this path — it focuses on the publish flow itself.
 
   PowerShell 7 (pwsh) — cloud-init installs it on the Linux worker VM.
 #>

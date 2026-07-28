@@ -117,8 +117,8 @@ Modified core:
 - `infra/main.bicep` — always-deployed model-gateway modules; firewall rule; hub↔spoke
   peering. Key vars: `providerBackendBaseUrl` (`.../openai`), `modelGatewayConnectionName`
   (`'model-gateway'`), `effectiveGatewayApiKey` (deterministic guid, never empty).
-- `scripts/seed-agents.ps1` — on-VM agent seeding (run via `azd hooks run predeploy` →
-  `hooks/predeploy.ps1` → `az vm run-command`); 2nd agent uses `model-gateway/<model>`.
+- `scripts/seed-agents.ps1` — on-VM agent seeding (run via the in-VNet runner workflow
+  `gh workflow run deploy-vnet.yml`); 2nd agent uses `model-gateway/<model>`.
 - `infra/main.parameters.json` — gateway params as azd env
   defaults (`${VAR=default}`); `vmAdminPassword` is omitted so azd prompts for it.
 
@@ -218,8 +218,8 @@ response with no auth error → confirms discovery + v1 inference through APIM e
 2. **`scripts/seed-agents.ps1` — remaining hardening** (idempotency `.data` bug now fixed):
    - No retry/backoff on the first `GET /agents`; a cold deploy hits a capability-host/RBAC
      propagation race (~1 min) returning transient `400` and failing the whole seed.
-     **Fix: retry loop.** The seed now runs from the azd `predeploy` hook, so re-running
-     `azd hooks run predeploy` is the redeploy path (no `forceUpdateTag` needed).
+     **Fix: retry loop.** The seed now runs from the in-VNet runner workflow, so re-running
+     `gh workflow run deploy-vnet.yml` is the redeploy path (no `forceUpdateTag` needed).
 3. **Collapse the 3 `xms_mirid` casings** to the one the live token actually emits (after a real call confirms it).
 4. **App Insights `requests` empty over 2h** — likely just because failed discovery meant no
    Foundry-origin traffic reached APIM; re-check once real traffic flows. Rule out a separate
