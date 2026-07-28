@@ -12,10 +12,6 @@ on:
         description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
         required: false
         default: ""
-      model:
-        description: "Gateway model reference '<apim-connection-name>/<exposed-model-name>' (defaults to repo variable SEED_SECOND_AGENT_MODEL)"
-        required: false
-        default: ""
       publishToTeams:
         description: "After deploy, publish this agent to Teams / M365 (requires manual approval)"
         type: boolean
@@ -30,6 +26,5 @@ jobs:
     uses: ./.github/workflows/deploy-agent.yml
     with:
       manifest-path: agents/teams-agent/agent.yaml
-      model: ${{ inputs.model != '' && inputs.model || vars.SEED_SECOND_AGENT_MODEL }}
       foundry-endpoint: ${{ inputs.foundryProjectEndpoint }}
       publish-to-teams: ${{ inputs.publishToTeams }}

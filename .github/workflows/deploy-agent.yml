@@ -16,10 +16,9 @@ name: Deploy Foundry agent (reusable)
 # locked-down setup cannot reach the private endpoint. Calling the Agents REST API from the
 # in-VNet runner is the correct and simplest path.
 #
-# Environment-agnostic manifests: the concrete per-environment model (and, if the manifest has
-# an MCP tool, the MCP server_url) are INJECTED into the definition below from the caller's
-# inputs / repo variables, so agents/<name>/agent.yaml stays promotable across environments
-# unchanged.
+# Environment-agnostic MCP: if the manifest has an MCP tool, its per-environment MCP server_url is
+# INJECTED into the definition below from the caller's input / repo variable. The model is set
+# directly in agents/<name>/agent.yaml.
 # ---------------------------------------------------------------------------
 on:
   workflow_call:
@@ -28,11 +27,6 @@ on:
         description: "Path to the agent manifest (agents/<name>/agent.yaml)."
         type: string
         required: true
-      model:
-        description: "Model to inject into definition.model (blank = keep the manifest value)."
-        type: string
-        required: false
-        default: ""
       mcp-server-url:
         description: "MCP server URL to inject (only used if the manifest has an MCP tool; blank = repo var MCP_SERVER_URL)."
         type: string
@@ -70,10 +64,9 @@ jobs:
 
       # yq is installed by cloud-init on the in-VNet Linux runner
       # (infra/stages/40-runner/resources/cloud-init-linux-vm.yaml).
-      - name: Convert agent.yaml -> agent.json + inject model / MCP URL (yq)
+      - name: Convert agent.yaml -> agent.json + inject MCP URL (yq)
         env:
           MANIFEST: ${{ inputs.manifest-path }}
-          INPUT_MODEL: ${{ inputs.model }}
           INPUT_MCP_URL: ${{ inputs.mcp-server-url }}
           VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
         run: |
@@ -90,12 +83,6 @@ jobs:
           if [ -z "$name" ] || [ "$name" = "null" ]; then
             echo "::error::Manifest '$MANIFEST' has no 'name'."
             exit 1
-          fi
-          # Inject the per-environment model (e.g. the gateway "<connection>/<model>" reference)
-          # so the manifest stays env-agnostic.
-          if [ -n "$INPUT_MODEL" ]; then
-            MODEL="$INPUT_MODEL" yq -i -o=json '.definition.model = strenv(MODEL)' agent.json
-            echo "Injected model: $INPUT_MODEL"
           fi
           # Inject the per-environment MCP server_url into every MCP tool (schema requires one of
           # server_url/connector_id/tunnel_id). Only applies to manifests that declare an MCP tool.

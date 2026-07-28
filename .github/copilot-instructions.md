@@ -14,7 +14,7 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the in-VNet GitHub runner (on the VM) + deletes capability hosts before teardown. |
 | `hooks/vm-run-command.ps1` | Shared shim — copies a `.ps1` to the **Linux** VM via `RunShellScript` and runs it under `pwsh` with named params. Now used only by `predown` (runner deregistration). |
 | `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
-| `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; env-specific model / MCP URL are injected at deploy time. |
+| `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
 Most don't reference Bicep file paths; the exception is the in-VNet MCP-compliance workflow
@@ -60,7 +60,7 @@ azd down
 - **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
   caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
   `.github/workflows/deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
-  injects the per-env model (and MCP `server_url` if present), then runs the `create-agent` and
+  injects the MCP `server_url` if present, then runs the `create-agent` and
   `publish-agent` composite actions; an optional gated `publish-teams` job publishes that single
   agent. `deploy-compliancy.yml` applies MCP compliance. All are `workflow_dispatch`-only,
   repository-guarded; the Teams-publish / compliance steps are gated by the `vnet-deploy`

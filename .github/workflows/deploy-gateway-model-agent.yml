@@ -11,10 +11,6 @@ on:
         description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
         required: false
         default: ""
-      model:
-        description: "Gateway model reference '<apim-connection-name>/<exposed-model-name>' (defaults to repo variable SEED_SECOND_AGENT_MODEL)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -24,5 +20,4 @@ jobs:
     uses: ./.github/workflows/deploy-agent.yml
     with:
       manifest-path: agents/gateway-model-agent/agent.yaml
-      model: ${{ inputs.model != '' && inputs.model || vars.SEED_SECOND_AGENT_MODEL }}
       foundry-endpoint: ${{ inputs.foundryProjectEndpoint }}

@@ -135,8 +135,8 @@ managed identity. So you must have the runner enabled
 **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
 caller workflow (`deploy-<name>-agent.yml`) that calls the reusable
 [`deploy-agent.yml`](../.github/workflows/deploy-agent.yml). The reusable workflow converts the
-manifest with `yq`, injects the per-environment model (and MCP `server_url` if the manifest has an
-MCP tool), then creates/updates the agent version and publishes it. Once infrastructure is
+manifest with `yq`, injects the MCP `server_url` if the manifest has an
+MCP tool, then creates/updates the agent version and publishes it. Once infrastructure is
 provisioned and the runner is installed:
 
 ```bash

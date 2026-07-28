@@ -118,8 +118,8 @@ Modified core:
   peering. Key vars: `providerBackendBaseUrl` (`.../openai`), `modelGatewayConnectionName`
   (`'model-gateway'`), `effectiveGatewayApiKey` (deterministic guid, never empty).
 - `agents/gateway-model-agent/agent.yaml` + `deploy-gateway-model-agent.yml` — the 2nd agent,
-  deployed via the in-VNet runner (`gh workflow run deploy-gateway-model-agent.yml`); its model is
-  the injected `model-gateway/<model>` reference.
+  deployed via the in-VNet runner (`gh workflow run deploy-gateway-model-agent.yml`); its manifest
+  sets `model: model-gateway/<model>`.
 - `infra/main.parameters.json` — gateway params as azd env
   defaults (`${VAR=default}`); `vmAdminPassword` is omitted so azd prompts for it.
 

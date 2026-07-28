@@ -10,10 +10,6 @@ on:
         description: "Foundry project endpoint (defaults to repo variable AZURE_AI_PROJECT_ENDPOINT)"
         required: false
         default: ""
-      model:
-        description: "Model deployment name (defaults to repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME)"
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -23,5 +19,4 @@ jobs:
     uses: ./.github/workflows/deploy-agent.yml
     with:
       manifest-path: agents/hello-world-agent/agent.yaml
-      model: ${{ inputs.model != '' && inputs.model || vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
       foundry-endpoint: ${{ inputs.foundryProjectEndpoint }}
