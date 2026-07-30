@@ -104,6 +104,18 @@ var callerAgentVar = '((string)context.Variables[&quot;callerAgent&quot;])'
 // ternary below always has a claim to match and can never dereference a missing property).
 func sanitize(v string) string => replace(replace(replace(replace(replace(toLower(v), '&', ''), '<', ''), '>', ''), '"', ''), '\\', '')
 
+// token-quota-period is a PascalCase APIM enum (Hourly/Daily/Weekly/Monthly/Yearly). sanitize()'s
+// toLower() would emit an invalid value (e.g. 'daily' -> APIM ValidationError), so map any input
+// casing back to the canonical value here. Sourcing the attribute from this fixed map (not raw
+// input) also keeps it injection-safe. The workflow pre-validates membership, so the key exists.
+var quotaPeriodCasing = {
+  hourly: 'Hourly'
+  daily: 'Daily'
+  weekly: 'Weekly'
+  monthly: 'Monthly'
+  yearly: 'Yearly'
+}
+
 var normalizedAgents = map(agents, a => {
   agentRef: sanitize(string(a.agentRef))
   isWildcard: string(a.agentRef) == '*'
@@ -113,7 +125,7 @@ var normalizedAgents = map(agents, a => {
     hasEmail: contains(p, 'email')
     hasAppId: contains(p, 'appId')
     tpm: string(int(p.?tokensPerMinute ?? 0))
-    quota: contains(p, 'tokenQuota') ? ' token-quota="${string(int(p.tokenQuota))}" token-quota-period="${sanitize(string(p.?tokenQuotaPeriod ?? 'Daily'))}"' : ''
+    quota: contains(p, 'tokenQuota') ? ' token-quota="${string(int(p.tokenQuota))}" token-quota-period="${quotaPeriodCasing[toLower(string(p.?tokenQuotaPeriod ?? 'Daily'))]}"' : ''
   })
 })
 
