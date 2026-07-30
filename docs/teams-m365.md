@@ -100,6 +100,13 @@ runner **is** the in-VNet VM, everything — including the Bot Service ARM deplo
 as the VM's managed identity (Contributor on the resource group); there is no host-side
 orchestration and no `az vm run-command`.
 
+> **`exposeToM365` gates the publish.** The `publish-teams` job only runs when the caller passes
+> `publishToTeams: true` **and** the agent's [`agent-network.json`](./governance.md#per-agent-network-manifest-agent-networkjson)
+> sets `exposeToM365: true`. That flag is the authoritative exposure gate: it is also what tells
+> [`deploy-agent-network.yml`](../.github/workflows/deploy-agent-network.yml) to open the matching
+> `/teams/<name>` route on the YARP edge. Publishing an agent whose edge route isn't wired would
+> create a bot whose messaging endpoint 404s at the proxy, so the two are kept in lockstep.
+
 Per agent:
 
 1. **Get identity** *(Foundry REST)* — runs

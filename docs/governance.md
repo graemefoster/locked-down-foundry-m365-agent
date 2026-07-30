@@ -58,6 +58,31 @@ Governance here is reviewable in PRs, not clicked into a portal:
 > you edit the JSON. See [what-runs-where.md](./what-runs-where.md) and
 > [ai-gateway.md § MCP](./ai-gateway.md#9-mcp-servers--per-agent-rate-limiting-config-as-data).
 
+## Per-agent network manifest (`agent-network.json`)
+
+Each agent folder carries an **`agents/<name>/agent-network.json`** manifest that declares, as
+reviewable data, how that agent joins the network flows. It has three parts:
+
+| Key | Meaning | Wired by |
+|-----|---------|----------|
+| `exposeToM365` (bool) | Publish this agent to Teams/M365 **and** open a `/teams/<name>` edge route on the YARP proxy. | `deploy-agent.yml` (gates the `publish-teams` job) + `deploy-agent-network.yml` (adds the YARP route). |
+| `exposeFoundryApi` (bool) | Open the shared `/<foundry>/<project>/…` edge route so web/OBO callers can reach this agent's `/responses` via the APIM Foundry API. | `deploy-agent-network.yml` (adds the single shared `foundry-api` YARP route if **any** agent opts in). |
+| `tokenLimits` (optional) | Per-caller LLM token allowlist (email / appId / both-OBO → tokens-per-minute + optional quota), applied as the APIM `llm-token-limit` + `llm-emit-token-metric` policy. Deny-by-default: a caller not listed gets **403**. | `deploy-agent-network.yml` (aggregates every manifest → one policy). |
+
+**Edge is deny-by-default.** The YARP proxy image ships one baked catch-all route; the workflow
+**neuters it** (repoints it to a non-routable sentinel path) and adds only the explicit
+`/teams/<name>` and shared `/<foundry>/<project>/…` routes for opted-in agents. Anything not
+wired **404s at the proxy** before it ever reaches APIM. Stale routes (an agent removed, or a
+flag flipped off) are pruned on every apply.
+
+> **Apply order (same as MCP).** A fresh `azd up` leaves the token-limit policy deny-all and the
+> edge with no agent routes. After you seed agents, run
+> [`.github/workflows/deploy-agent-network.yml`](../.github/workflows/deploy-agent-network.yml)
+> (`workflow_dispatch`, self-hosted VNet runner, `vnet-deploy` environment) to aggregate every
+> `agent-network.json` and apply both the token-limit policy and the YARP edge routes. Re-run it
+> whenever you edit a manifest. (The manifests are kept trackable past `.gitignore`'s `*.json`
+> rule via a `!agents/**/agent-network.json` negation.)
+
 ## Roadmap
 
 Governance is an area still under active development — RPM/token quotas per consumer, usage

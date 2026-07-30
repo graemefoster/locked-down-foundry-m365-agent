@@ -1,0 +1,9 @@
+{
+  "//": "Network-integration manifest for teams-agent. Describes how this agent is wired into",
+  "//flows": "the enterprise network flows. Aggregated by the deploy-agent-network workflow.",
+  "//exposeToM365": "true: published to Microsoft Teams / M365. YARP wires an explicit /teams/teams-agent edge route (edge deny-by-default: only wired agent paths reach APIM) and the Teams publish job runs. Removing this flag or the manifest would 404 the bot at YARP.",
+  "//exposeFoundryApi": "false: NOT reachable through the governed Foundry Responses API path.",
+  "//tokenLimits": "Omitted: the Teams (activityProtocol) path is governed by the Bot Framework validate-jwt policy on the APIM Teams API, not by the Responses token-limit policy.",
+  "exposeToM365": true,
+  "exposeFoundryApi": false
+}

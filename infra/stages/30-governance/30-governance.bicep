@@ -61,6 +61,10 @@ param modelFormat string
 param modelVersion string
 param modelSkuName string
 
+// ---- Foundry agent token governance ----
+@description('Optional audience the caller Entra token must carry for the foundry-agents API (empty = validate tenant + signature only).')
+param agentCallerAudience string = ''
+
 // One Foundry project connection per governed MCP server. Split out of project creation: these
 // connections are not used by the Agents capability host, so they run here (in stage 30, after
 // stage 10, hence after the capability host) rather than at project-create time.
@@ -150,6 +154,32 @@ module apimTeamsApi './model-gateway/apim-teams-api.bicep' = {
   }
 }
 
+// APIM Foundry agent /responses inbound API (structure) + token-governance policy. The API is
+// created once here; the deny-by-default token-limit + llm-emit-token-metric policy is applied
+// with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
+// agents/<name>/agent-network.json by the deploy-agent-network workflow. Always deployed.
+module apimFoundryAgentsApi './model-gateway/apim-foundry-agents-api.bicep' = {
+  name: 'foundry-agents-apim-api-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apimName
+    foundryAccountName: aiAccountName
+    projectName: projectName
+  }
+}
+
+module apimFoundryAgentLimits './model-gateway/apim-foundry-agent-limits.bicep' = {
+  name: 'foundry-agent-limits-${uniqueSuffix}-deployment'
+  params: {
+    apimName: apimName
+    apiName: apimFoundryAgentsApi.outputs.apiName
+    foundryAccountName: aiAccountName
+    tenantId: tenant().tenantId
+    callerAudience: agentCallerAudience
+    // agentLimits omitted -> DENY-ALL until the deploy-agent-network workflow supplies the
+    // aggregated agents/<name>/agent-network.json allowlist.
+  }
+}
+
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
 // private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
 // and after the API/policy children so it never races their creation.
@@ -164,6 +194,7 @@ module apimLockdown './model-gateway/apim-lockdown.bicep' = {
     apimApiPolicy
     apimTeamsApi
     apimMcpComplianceAll
+    apimFoundryAgentLimits
   ]
 }
 
@@ -200,3 +231,9 @@ output teamsApiName string = apimTeamsApi.outputs.apiName
 
 @description('Number of MCP servers governed by the applied compliance policies.')
 output governedServerCount int = apimMcpComplianceAll.outputs.governedServerCount
+
+@description('APIM API name for the governed Foundry agent /responses endpoint (deploy-agent-network attaches the policy to this).')
+output foundryAgentsApiName string = apimFoundryAgentsApi.outputs.apiName
+
+@description('Public path of the governed Foundry agent /responses API (<account>/<project>).')
+output foundryAgentsApiPath string = apimFoundryAgentsApi.outputs.apiPath

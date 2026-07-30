@@ -82,6 +82,9 @@ param gatewayModelCapacity int = 30
 @description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
 param gatewayCallerAppId string = ''
 
+@description('Optional audience the caller Entra token must carry for the governed foundry-agents /responses API (e.g. api://<clientId>). Empty = validate tenant + signature only.')
+param agentCallerAudience string = ''
+
 // ==================== TEAMS / M365 PUBLISH ====================
 // The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
 // to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
@@ -429,6 +432,7 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelFormat: modelFormat
     modelVersion: modelVersion
     modelSkuName: modelSkuName
+    agentCallerAudience: agentCallerAudience
   }
   dependsOn: [
     stage00
@@ -519,6 +523,9 @@ output SEED_ENABLE_TEAMS_PUBLISH bool = true
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
 output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn
 
+@description('Name of the YARP proxy web app — the deploy-agent-network workflow patches its ReverseProxy__Routes__* appSettings to wire the per-agent edge routes (deny-by-default).')
+output TEAMS_YARP_WEBAPP_NAME string = stage10.outputs.yarpWebAppName
+
 @description('APIM instance name (the Teams-publish path pins the Teams API validate-jwt audience live once the bot App ID is known).')
 output TEAMS_APIM_NAME string = apimName
 
@@ -547,6 +554,18 @@ output MCP_COMPLIANCE_APIM_NAME string = apimName
 output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
 output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
+
+// --- Foundry agent token governance (deploy-agent-network workflow) ----------------
+@description('APIM instance name — used by the deploy-agent-network workflow to re-apply the Foundry agent token-limit policy on demand.')
+output FOUNDRY_AGENTS_APIM_NAME string = apimName
+@description('APIM API resource name the deploy-agent-network workflow attaches the aggregated token-limit policy to.')
+output FOUNDRY_AGENTS_API_NAME string = stage30.outputs.foundryAgentsApiName
+@description('Primary Foundry account name — the deploy-agent-network workflow derives the backend entity ID from it.')
+output FOUNDRY_AGENTS_ACCOUNT_NAME string = stage13.outputs.aiAccountName
+@description('Optional caller audience the foundry-agents API validates (empty = tenant + signature only).')
+output FOUNDRY_AGENTS_AUDIENCE string = agentCallerAudience
+@description('Public path of the governed Foundry agent /responses API (<account>/<project>).')
+output FOUNDRY_AGENTS_API_PATH string = stage30.outputs.foundryAgentsApiPath
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 

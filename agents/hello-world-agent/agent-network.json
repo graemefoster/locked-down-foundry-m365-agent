@@ -1,0 +1,25 @@
+{
+  "//": "Network-integration manifest for hello-world-agent. Describes how this agent is wired",
+  "//flows": "into the enterprise network flows. Aggregated by the deploy-agent-network workflow.",
+  "//exposeToM365": "false: this agent is NOT published to Microsoft Teams / M365, so YARP does NOT wire a /teams/<agentName> edge route for it and the Teams publish job is skipped.",
+  "//exposeFoundryApi": "true: reachable through the governed Foundry Responses API. YARP wires the shared /<account>/<project> edge route to the foundry-agents APIM API (token limits below apply).",
+  "//tokenLimits": "DENY-BY-DEFAULT allowlist for the governed foundry-agents Responses API. Only the callers listed here may invoke this agent; everyone else gets 403.",
+  "//obo": "The web-tier example below lists BOTH email and appId, so it only matches an OBO flow where the middle-tier app (appId) is acting on behalf of that specific user (email).",
+  "exposeToM365": false,
+  "exposeFoundryApi": true,
+  "tokenLimits": {
+    "principals": [
+      {
+        "email": "admin@contoso.net",
+        "tokensPerMinute": 10000
+      },
+      {
+        "email": "app-user@contoso.net",
+        "appId": "11111111-1111-1111-1111-111111111111",
+        "tokensPerMinute": 30000,
+        "tokenQuota": 1000000,
+        "tokenQuotaPeriod": "Daily"
+      }
+    ]
+  }
+}
