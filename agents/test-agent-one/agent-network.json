@@ -1,8 +1,0 @@
-{
-  "//": "Network-integration manifest for test-agent-one. Describes how this agent is wired into",
-  "//flows": "the enterprise network flows. Aggregated by the deploy-agent-network workflow.",
-  "//exposeToM365": "true: published to Microsoft Teams / M365 (deploy-test-agent-one.yml defaults publishToTeams=true). YARP wires an explicit /teams/test-agent-one edge route and the Teams publish job runs.",
-  "//exposeFoundryApi": "false: NOT reachable through the governed Foundry Responses API path.",
-  "exposeToM365": true,
-  "exposeFoundryApi": false
-}

@@ -85,13 +85,26 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
   name: 'yarp-${aspName}'
   location: location
   kind: 'app,linux'
+  // azd maps the 'gateway' service (azure.yaml) to this web app via this tag, then `dotnet publish`
+  // + zip-deploys apps/sample-gateway (no container image).
+  tags: {
+    'azd-service-name': 'gateway'
+  }
   properties: {
     serverFarmId: aspTest.id
     siteConfig: {
-      linuxFxVersion: 'DOCKER|docker.io/graemefoster/teams-proxy:0.3'
+      // .NET code stack (was a DOCKER image). Source lives in apps/sample-gateway (net10 YARP);
+      // azd publishes and zip-deploys it.
+      linuxFxVersion: 'DOTNETCORE|10.0'
       publicNetworkAccess: yarpPublicNetworkAccess
       ipSecurityRestrictionsDefaultAction: 'Deny'
       ipSecurityRestrictions: yarpIpRestrictions
+      // The MAIN site stays public (it is the Teams/M365 ingress), but the SCM (Kudu) site is
+      // deny-by-default so the deploy endpoint is NOT world-reachable at rest. The predeploy hook
+      // adds a temporary allow rule for the deployer IP so azd can zip-deploy, then the postdeploy
+      // hook removes it (reverting to deny-all on SCM).
+      scmIpSecurityRestrictionsUseMain: false
+      scmIpSecurityRestrictionsDefaultAction: 'Deny'
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

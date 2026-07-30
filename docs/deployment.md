@@ -93,9 +93,10 @@ All infrastructure lives under [`infra/`](../infra) and is wired through
 [`azure.yaml`](../azure.yaml).
 
 ```bash
-azd up          # provision infrastructure ONLY (azd deploys no agents post-provision)
-# or, equivalently:
-azd provision
+azd up          # provision infra, then deploy the MCP + YARP app CODE (no agents)
+# or, run the phases separately:
+azd provision   # infrastructure only
+azd deploy      # (re)deploy just the two App Service code services
 ```
 
 `azd` reads [`infra/main.parameters.json`](../infra/main.parameters.json), which maps each
@@ -113,11 +114,14 @@ never stored in the repo.
 
 > **Note:** To access your Foundry resource securely, use either a VM, VPN, or ExpressRoute.
 
-> **Note:** `azd` **only provisions infrastructure** — it deploys no agents. Its sole
-> post-provision step is the `postprovision` hook, which pushes the azd outputs into the repo's
-> GitHub Actions variables (`gh variable set`) so the deploy workflows work without hand-copying
-> values. Agent seeding, MCP compliance and Teams / M365 publishing all run from the in-VNet
-> self-hosted GitHub Actions runner (see below).
+> **Note:** `azd` provisions the infrastructure and then, in its **deploy** phase, ships the two
+> App Services as **code** (no container images): the private MCP server ([`mcp/agent-tools`](../mcp/agent-tools),
+> Node) and the public YARP Teams edge ([`apps/sample-gateway`](../apps/sample-gateway), .NET). Both
+> SCM (Kudu) sites are deny-by-default, so the `predeploy` hook opens them for your public IP,
+> azd zip-deploys, and the `postdeploy` hook re-locks them (the MCP app also flips `publicNetworkAccess`
+> back to Disabled). It still deploys **no agents** — the `postprovision` hook only pushes the azd
+> outputs into the repo's GitHub Actions variables (`gh variable set`). Agent seeding, MCP compliance
+> and Teams / M365 publishing all run from the in-VNet self-hosted GitHub Actions runner (see below).
 
 > **Note — CMK / Key Vault propagation:** provisioning may occasionally fail the first time
 > with `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`
@@ -147,10 +151,7 @@ provisioned and the runner is installed:
 
 ```bash
 # Deploy (or re-deploy) an agent from inside the VNet — run whichever you need:
-gh workflow run deploy-hello-world-agent.yml
-gh workflow run deploy-gateway-model-agent.yml
 gh workflow run deploy-teams-agent.yml       # also publishes to Teams (gated by vnet-deploy)
-gh workflow run deploy-test-agent-one.yml
 ```
 
 To add an agent, add a manifest folder under `agents/` and a thin caller workflow (copy an

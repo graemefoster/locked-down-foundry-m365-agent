@@ -114,8 +114,6 @@ runner** — so enable it ([Level 2](#level-2--automate-agent-deployment)), then
 ```bash
 # 2. Deploy agents from inside the VNet (requires the self-hosted runner).
 #    One workflow per agent — run whichever you need:
-gh workflow run deploy-hello-world-agent.yml
-gh workflow run deploy-gateway-model-agent.yml
 gh workflow run deploy-teams-agent.yml      # also publishes to Teams (gated)
 ```
 

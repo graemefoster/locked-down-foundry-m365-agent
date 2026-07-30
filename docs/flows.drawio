@@ -1,0 +1,36 @@
+<mxfile host="Electron" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/29.6.1 Chrome/142.0.7444.265 Electron/39.8.0 Safari/537.36" version="29.6.1">
+  <diagram name="Page-1" id="iy-tEcfuKkLWIR4yqLjF">
+    <mxGraphModel dx="1018" dy="689" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="gCl68Iimh5KkQlbikuHD-1" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Governance" vertex="1">
+          <mxGeometry height="60" width="30" x="40" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-2" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Agent Builder" vertex="1">
+          <mxGeometry height="60" width="30" x="40" y="270" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-3" parent="1" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" value="Agent Consumer" vertex="1">
+          <mxGeometry height="60" width="30" x="40" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-4" parent="1" style="dashed=0;outlineConnect=0;html=1;align=center;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;shape=mxgraph.weblogos.github" value="Github Actions" vertex="1">
+          <mxGeometry height="47.5" width="47.5" x="150" y="276.25" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-5" parent="1" style="image;aspect=fixed;html=1;points=[];align=center;fontSize=12;image=img/lib/azure2/app_services/API_Management_Services.svg;" value="Azure APIm" vertex="1">
+          <mxGeometry height="60" width="65" x="400" y="153.75" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-7" edge="1" parent="1" source="gCl68Iimh5KkQlbikuHD-6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;" target="gCl68Iimh5KkQlbikuHD-5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-8" connectable="0" parent="gCl68Iimh5KkQlbikuHD-7" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" value="Updates policies" vertex="1">
+          <mxGeometry relative="1" x="-0.3297" as="geometry">
+            <mxPoint x="31" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="gCl68Iimh5KkQlbikuHD-6" parent="1" style="dashed=0;outlineConnect=0;html=1;align=center;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;shape=mxgraph.weblogos.github" value="Github Actions" vertex="1">
+          <mxGeometry height="47.5" width="47.5" x="150" y="160" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

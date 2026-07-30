@@ -6,12 +6,8 @@
       "name": "mcp",
       "agents": [
         {
-          "name": "gateway-model-agent",
+          "name": "teams-agent",
           "requestsPerMinute": 60
-        },
-        {
-          "name": "cicd-deployed-agent",
-          "requestsPerMinute": 600
         }
       ]
     }

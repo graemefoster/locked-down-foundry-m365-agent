@@ -1,5 +1,5 @@
 {
-  "name": "test-agent-one-nightly",
+  "name": "teams-agent-nightly",
   "evaluators": [
     "builtin.intent_resolution",
     "builtin.task_adherence",

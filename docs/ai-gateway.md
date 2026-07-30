@@ -220,7 +220,7 @@ add an entry here **and** add its FQDN to the `mcpServerFqdns` map in `main.bice
   "renewalPeriodSeconds": 60,
   "servers": [
     { "name": "mcp", "agents": [
-      { "name": "gateway-model-agent", "appId": "<agent-app-id-guid>", "requestsPerMinute": 60 }
+      { "name": "teams-agent", "appId": "<agent-app-id-guid>", "requestsPerMinute": 60 }
     ] }
   ]
 }

@@ -7,22 +7,56 @@ infra:
   path: infra
   module: main
 
+# Two App Services are deployed as CODE (no container images): the private MCP server
+# (mcp/agent-tools, Node) and the public YARP Teams edge (apps/sample-gateway, .NET). azd builds
+# each locally and zip-deploys it. Both SCM (Kudu) sites are network-locked at rest, so the
+# predeploy hook opens them for the deployer, and the postdeploy hook closes them again.
+services:
+  mcp:
+    project: ./mcp/agent-tools
+    host: appservice
+    language: js
+    # The MCP app is bundled to a single self-contained dist/index.js (esbuild, via `npm run
+    # build`); only dist/ is zipped, so wwwroot needs no node_modules and starts with `node
+    # index.js`. See mcp-web-app.bicep appCommandLine.
+    dist: dist
+  gateway:
+    project: ./apps/sample-gateway
+    host: appservice
+    language: dotnet
+
 hooks:
   preprovision:
     shell: pwsh
     run: ./hooks/preprovision.ps1
     continueOnError: false
     interactive: true
-  # After provision, azd runs ONE narrow host-side step: postprovision pushes the Bicep outputs
-  # that the workflows consume into GitHub Actions repo variables (via `gh variable set`) so the
-  # deploy workflows "just work". That is the ONLY post-provision automation. Agent deploys, MCP
-  # compliance and Teams / M365 publishing are still done ONLY by the in-VNet self-hosted GitHub
-  # Actions workflows (the per-agent .github/workflows/deploy-*-agent.yml + reusable
-  # deploy-agent.yml, and deploy-compliancy.yml), which run natively on the private VM runner -
-  # no `az vm run-command` orchestration from the azd host.
+  # After provision, azd's postprovision step pushes the Bicep outputs the workflows consume into
+  # GitHub Actions repo variables (via `gh variable set`) so the deploy workflows "just work".
+  # azd then runs its DEPLOY phase for the two `services:` above (MCP + YARP app code), wrapped by
+  # the predeploy/postdeploy hooks. AGENT deploys, MCP compliance and Teams / M365 publishing are
+  # still done ONLY by the in-VNet self-hosted GitHub Actions workflows (the per-agent
+  # .github/workflows/deploy-*-agent.yml + reusable deploy-agent.yml, and deploy-compliancy.yml),
+  # which run natively on the private VM runner - no `az vm run-command` orchestration from the host.
   postprovision:
     shell: pwsh
     run: ./hooks/postprovision.ps1
+    continueOnError: true
+    interactive: false
+  # Before azd deploys the app code, open the (network-locked) SCM sites of the MCP + YARP web
+  # apps for the deployer's public IP so the zip-deploy can reach Kudu. Must succeed or the deploy
+  # would fail against an unreachable endpoint.
+  predeploy:
+    shell: pwsh
+    run: ./hooks/predeploy.ps1
+    continueOnError: false
+    interactive: false
+  # After azd deploys, re-lock the SCM sites (remove the temporary allow rule; re-disable public
+  # access on the private MCP app). Best-effort: a failed close must not fail an otherwise-good
+  # deploy, but it leaves the SCM window open — re-run `azd hooks run postdeploy` to close it.
+  postdeploy:
+    shell: pwsh
+    run: ./hooks/postdeploy.ps1
     continueOnError: true
     interactive: false
   predown:

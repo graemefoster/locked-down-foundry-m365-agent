@@ -236,8 +236,8 @@ jobs:
           # edge path /agents/{**remainder} that PREPENDS the governed foundry-agents API path ($p =
           # '<account>/<project>') and forwards the whole tail to APIM (cluster1). YARP applies just
           # a PathPrefix, so
-          #   /agents/hello-world-agent/endpoint/protocols/openai/responses
-          #     ->  $p/agents/hello-world-agent/endpoint/protocols/openai/responses
+          #   /agents/teams-agent/endpoint/protocols/openai/responses
+          #     ->  $p/agents/teams-agent/endpoint/protocols/openai/responses
           # APIM then reads the agent from the path, meters/throttles it, and rewrites the tail onto
           # /api/projects/<project>/agents/<name>/endpoint/protocols/... — so every protocol an agent
           # exposes is proxied through the one governed API (no per-agent, per-protocol route).

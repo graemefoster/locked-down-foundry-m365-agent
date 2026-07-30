@@ -1,9 +1,0 @@
-object: agent.version
-name: gateway-model-agent
-description: Demo prompt agent served through the enterprise model gateway (APIM).
-definition:
-  kind: prompt
-  # Gateway model reference: '<apim-connection-name>/<exposed-model-name>'. The connection name
-  # ('model-gateway') is fixed by the template (modelGatewayConnectionName).
-  model: model-gateway/gpt-5.4-mini
-  instructions: You are a helpful AI assistant served through the enterprise model gateway. Answer questions clearly and concisely.

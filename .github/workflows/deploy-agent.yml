@@ -2,8 +2,7 @@ name: Deploy Foundry agent (reusable)
 
 # ---------------------------------------------------------------------------
 # Reusable, SINGLE-AGENT deploy pipeline for a Foundry prompt agent, called by the thin
-# per-agent workflows (deploy-hello-world-agent.yml, deploy-gateway-model-agent.yml,
-# deploy-teams-agent.yml, deploy-test-agent-one.yml). One run = one agent.
+# per-agent workflows (deploy-teams-agent.yml). One run = one agent.
 #
 # Posture A gate: this runs on the in-VNet self-hosted runner (the only host that can reach the
 # PRIVATE Foundry endpoint). The callers are workflow_dispatch-only + repository-guarded so fork
