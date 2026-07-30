@@ -5,7 +5,7 @@
 > [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
 
 The Teams / M365 publish path is **always deployed**. Each agent that wants a Teams presence is
-published by **its own deploy workflow** (`deploy-teams-agent.yml`, `deploy-test-agent-one.yml`,
+published by **its own deploy workflow** (`deploy-teams-agent.yml`,
 … — set `publishToTeams: true`), one Azure Bot Service per agent. A **single, path-routed APIM
 Teams API** listens on `/teams/{agentName}` and rewrites each request to the matching agent's
 activityProtocol endpoint, so one API backs any number of agents. This publishes to

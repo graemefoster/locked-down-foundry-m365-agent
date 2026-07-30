@@ -32,8 +32,7 @@ azd up
 
 Post-provision (agent seeding, MCP compliance, Teams publish)
  └─ in-VNet self-hosted runner workflows — run natively on the private VM:
-    * one thin per-agent workflow each (deploy-hello-world-agent.yml, deploy-gateway-model-agent.yml,
-      deploy-teams-agent.yml, deploy-test-agent-one.yml) → the reusable deploy-agent.yml
+    * one thin per-agent workflow each (deploy-teams-agent.yml) → the reusable deploy-agent.yml
     * deploy-compliancy.yml (MCP compliance)
 
 azd down

@@ -5,8 +5,8 @@
   User" role on the AI Services (Foundry) account.
 
   WHY THIS IS NEEDED (separate from Foundry User):
-    The nightly evaluation workflow (.github/workflows/nightly-eval-agent-one.yml) runs the
-    microsoft/ai-agent-evals action on the in-VNet self-hosted runner, authenticating as the
+    An agent evaluation workflow (using the microsoft/ai-agent-evals action) runs on the
+    in-VNet self-hosted runner, authenticating as the
     VM MI. The AI-assisted quality evaluators (intent_resolution, task_adherence, coherence,
     fluency, relevance) use a JUDGE MODEL: they call the model deployment's inference API
     directly (POST .../openai/deployments/<name>/chat/completions). That is a Cognitive

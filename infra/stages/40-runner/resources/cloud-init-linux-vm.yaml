@@ -12,7 +12,7 @@
 #                 including `az acr build` so container builds need no Docker daemon
 #   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
 #   git, jq     - actions/checkout and general workflow plumbing
-#   yq          - agent.yaml -> agent.json in deploy-test-agent-one.yml (this is why
+#   yq          - agent.yaml -> agent.json in the reusable deploy-agent.yml (this is why
 #                 that conversion no longer needs a separate GitHub-hosted job)
 #
 # The runner bootstrap (bootstrap-github-runner.sh) blocks on `cloud-init status

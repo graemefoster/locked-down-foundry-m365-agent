@@ -34,7 +34,7 @@
   Usage (run on the in-VNet VM, or anywhere the endpoint is reachable):
     # Discovery — print every agent's AppId + a paste-ready policy array:
     ./list-agent-appids.ps1 -FoundryProjectEndpoint https://<acct>.services.ai.azure.com/api/projects/<proj>
-    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -AgentName 'hello-world-agent,teams-agent'
+    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -AgentName 'teams-agent'
     # Resolve name-only policy -> resolved policy file:
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
 
@@ -46,7 +46,7 @@ param(
   # The Foundry project endpoint to read agent identities from (data plane). Required in BOTH
   # modes; must be reachable (run on the in-VNet VM for the repo's private project).
   [Parameter(Mandatory = $false)] [string]$FoundryProjectEndpoint = '',
-  # Optional DISCOVERY filter: comma-separated agent names (e.g. 'hello-world-agent,teams-agent').
+  # Optional DISCOVERY filter: comma-separated agent names (e.g. 'teams-agent').
   # Default: all agents in the project. Ignored in resolve mode (all agents are needed to join).
   [Parameter(Mandatory = $false)] [string]$AgentName = '',
   # Default RPM written into each emitted policy entry (discovery mode only; tune per agent).

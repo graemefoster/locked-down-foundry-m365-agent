@@ -47,9 +47,9 @@ plus `git`, `jq` and `yq`. That cloud-init file is the **only** shell script in 
 — all downstream logic stays in cross-platform PowerShell.
 
 Because the in-VNet runner is now Linux, two GitHub-hosted workarounds are gone:
-`deploy-test-agent-one.yml` no longer needs a separate `ubuntu-latest` `prepare` job to
-convert `agent.yaml` → `agent.json` (plus an artifact round-trip), and
-`nightly-eval-agent-one.yml` consumes `microsoft/ai-agent-evals@v3-beta` directly instead
+the reusable `deploy-agent.yml` no longer needs a separate `ubuntu-latest` `prepare` job to
+convert `agent.yaml` → `agent.json` (plus an artifact round-trip), and eval workflows can
+consume `microsoft/ai-agent-evals@v3-beta` directly instead
 of checking the action out and invoking `action.py` by hand.
 
 ## Security model — "Posture A" (trusted-only)

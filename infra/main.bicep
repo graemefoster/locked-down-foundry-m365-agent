@@ -396,8 +396,8 @@ module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
   }
 }
 
-// URL of the sample MCP server (the first configured server) that the deploy-test-agent-one
-// workflow injects as test-agent-one's `server_url`. first() is safe: mcp/mcp.json always has >=1
+// URL of the sample MCP server (the first configured server) that the reusable deploy-agent
+// workflow injects as an agent's `server_url`. first() is safe: mcp/mcp.json always has >=1
 // server, and the sample 'mcp' server is the first entry by convention.
 var mcpSampleGatewayUrl = '${first(stage20.outputs.servers).url}/'
 
@@ -548,7 +548,7 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 @description('Log Analytics workspace resource ID — the Teams-publish path passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
-@description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The deploy-test-agent-one workflow injects this as the MCP tool `server_url` so agents/test-agent-one/agent.yaml stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
+@description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The reusable deploy-agent workflow injects this as the MCP tool `server_url` so an agent manifest with an MCP tool stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
 output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
 
 // --- MCP compliance (deploy-compliancy workflow) ---------------------------------

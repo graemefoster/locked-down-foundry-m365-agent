@@ -1,7 +1,0 @@
-object: agent.version
-name: hello-world-agent
-description: A minimal demo prompt agent (no tools).
-definition:
-  kind: prompt
-  model: gpt-5.4
-  instructions: You are a helpful AI assistant. Answer questions clearly and concisely.

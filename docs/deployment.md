@@ -147,10 +147,7 @@ provisioned and the runner is installed:
 
 ```bash
 # Deploy (or re-deploy) an agent from inside the VNet — run whichever you need:
-gh workflow run deploy-hello-world-agent.yml
-gh workflow run deploy-gateway-model-agent.yml
 gh workflow run deploy-teams-agent.yml       # also publishes to Teams (gated by vnet-deploy)
-gh workflow run deploy-test-agent-one.yml
 ```
 
 To add an agent, add a manifest folder under `agents/` and a thin caller workflow (copy an

@@ -189,8 +189,7 @@ subnet must reach the A365 observability service.
 > in the Private BYO-network posture this sample deploys. Tracked as a platform
 > missing-feature to raise with the product team.**
 
-The nightly evaluation workflow (`.github/workflows/nightly-eval-agent-one.yml`)
-uses the Microsoft **`microsoft/ai-agent-evals`** GitHub Action to score the agent
+The agent evaluation workflow (using `microsoft/ai-agent-evals`) scores the agent
 against a dataset. The action can also produce a **version-over-version comparison**
 (e.g. latest deployed agent vs. the previous version) so you can catch regressions.
 

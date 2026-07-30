@@ -36,11 +36,12 @@ Understanding the current state keeps the backlog honest. Already shipped:
 - **Locked-down infrastructure** via `azd` + Bicep: private VNet, private endpoints on every
   dependency, deny-by-default Azure Firewall, CMK encryption, RBAC, in-VNet VM. See
   [docs/architecture.md](./docs/architecture.md) and [NETWORKING.md](./NETWORKING.md).
-- **Prompt-agent CI/CD**: [`.github/workflows/deploy-test-agent-one.yml`](./.github/workflows/deploy-test-agent-one.yml)
-  parses `agents/test-agent-one/agent.yaml`, then creates/updates + publishes the agent version
+- **Prompt-agent CI/CD**: [`.github/workflows/deploy-teams-agent.yml`](./.github/workflows/deploy-teams-agent.yml)
+  (a thin caller of the reusable [`deploy-agent.yml`](./.github/workflows/deploy-agent.yml))
+  parses `agents/teams-agent/agent.yaml`, then creates/updates + publishes the agent version
   against the **private** Foundry endpoint from an in-VNet self-hosted runner.
-- **Offline evals in CI**: [`.github/workflows/nightly-eval-agent-one.yml`](./.github/workflows/nightly-eval-agent-one.yml)
-  runs `microsoft/ai-agent-evals` against `agents/test-agent-one/eval-data.json` on a schedule.
+- **Offline evals in CI**: the reusable `microsoft/ai-agent-evals` action can run against an
+  agent's `eval-data.json` (e.g. `agents/teams-agent/eval-data.json`) on a schedule.
 - **Teams / M365 publish path** and an **always-on private APIM AI gateway** (models + MCP +
   M365 auth) ([docs/teams-m365.md](./docs/teams-m365.md), [docs/ai-gateway.md](./docs/ai-gateway.md)).
 - **In-VNet self-hosted GitHub Actions runner** so pipelines can reach the private endpoint
