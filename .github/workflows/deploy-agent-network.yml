@@ -12,11 +12,13 @@ name: Deploy agent network integration (Foundry token governance + YARP edge rou
 #
 #   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
 #      appSettings so ONLY explicitly-wired agent paths reach APIM:
-#        * exposeToM365=true  -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
-#        * exposeFoundryApi=true (on ANY agent) -> ONE shared /agents/{**remainder} route that YARP
-#          prepends (PathPrefix) with the governed foundry-agents API path before forwarding to APIM.
-#          APIM reads the agent from the path and rewrites the tail onto the Foundry agent endpoint,
-#          so every protocol (openai/responses, invocations, …) an agent exposes is proxied through.
+#        * exposeToM365=true    -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
+#        * exposeFoundryApi=true -> an explicit /agents/<agentName>/{**remainder} route (one PER agent)
+#          that YARP prepends (PathPrefix) with the governed foundry-agents API path before forwarding
+#          to APIM. Because the agent name is baked into the edge path, an agent that is NOT allowlisted
+#          has no route and is 404'd at YARP — blocked EARLY, before it reaches APIM. APIM then reads
+#          the agent from the path and rewrites the tail onto the Foundry agent endpoint, so every
+#          protocol (openai/responses, invocations, …) an agent exposes is proxied through.
 #      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
 #      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
 #      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
@@ -50,7 +52,6 @@ jobs:
   apply-agent-network:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
-    environment: vnet-deploy
     steps:
       - uses: actions/checkout@v5
 
@@ -232,13 +233,15 @@ jobs:
             $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
           }
 
-          # ONE shared Foundry ingress: if ANY agent sets exposeFoundryApi=true, wire a single
-          # edge path /agents/{**remainder} that PREPENDS the governed foundry-agents API path ($p =
-          # '<account>/<project>') and forwards the whole tail to APIM (cluster1). YARP applies just
-          # a PathPrefix, so
+          # EXPLICIT per-agent Foundry ingress (deny-by-default at the edge): one route per agent
+          # that sets exposeFoundryApi=true, matching /agents/<name>/{**remainder} and PREPENDING the
+          # governed foundry-agents API path ($p = '<account>/<project>') before forwarding to APIM
+          # (cluster1). Because the agent name is baked into the Match path, an agent that is NOT
+          # allowlisted has NO route and is 404'd at YARP — blocked EARLY, before it ever reaches
+          # APIM. YARP applies just a PathPrefix, so
           #   /agents/teams-agent/endpoint/protocols/openai/responses
           #     ->  $p/agents/teams-agent/endpoint/protocols/openai/responses
-          # APIM then reads the agent from the path, meters/throttles it, and rewrites the tail onto
+          # APIM then meters/throttles the agent and rewrites the tail onto
           # /api/projects/<project>/agents/<name>/endpoint/protocols/... — so every protocol an agent
           # exposes is proxied through the one governed API (no per-agent, per-protocol route).
           if ($foundryAgents.Count -gt 0) {
@@ -246,12 +249,15 @@ jobs:
               throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
             }
             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
-            $desired['ReverseProxy__Routes__foundry_agents__ClusterId']                 = 'cluster1'
-            $desired['ReverseProxy__Routes__foundry_agents__Match__Path']               = '/agents/{**remainder}'
-            $desired['ReverseProxy__Routes__foundry_agents__Transforms__0__PathPrefix'] = $p
+            foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
+              $rid = "foundry_$($name -replace '-','_')"
+              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                 = 'cluster1'
+              $desired["ReverseProxy__Routes__${rid}__Match__Path"]               = "/agents/$name/{**remainder}"
+              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathPrefix"] = $p
+            }
           }
 
-          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, foundry ingress: $([bool]($foundryAgents.Count -gt 0)), catch-all neutered):"
+          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
           $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
 
           # Read the current appSettings so we can compute which route settings are now stale.

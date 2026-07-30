@@ -64,6 +64,13 @@ resource nic 'Microsoft.Network/networkInterfaces@2022-05-01' = {
   }
 }
 
+// @onlyIfNotExists: this VM is created once and then reused as the long-lived in-VNet runner
+// host. Its osProfile.customData (cloud-init) is IMMUTABLE on an existing VM — ARM rejects any
+// in-place change with PropertyChangeNotAllowed — so once the box exists we must NOT re-emit it.
+// This decorator makes the deployment a no-op when the VM already exists, so editing
+// cloud-init-linux-vm.yaml (or any other VM property) no longer breaks a re-`azd provision`. To
+// pick up cloud-init changes, delete the VM first so it is recreated.
+@onlyIfNotExists()
 resource vm 'Microsoft.Compute/virtualMachines@2022-03-01' = {
   name: vmName
   location: location
