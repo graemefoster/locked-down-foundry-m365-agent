@@ -13,8 +13,9 @@ name: Deploy agent network integration (Foundry token governance + YARP edge rou
 #   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
 #      appSettings so ONLY explicitly-wired agent paths reach APIM:
 #        * exposeToM365=true  -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
-#        * exposeFoundryApi=true (any agent) -> the shared /<account>/<project> route to the
-#          governed foundry-agents Responses API.
+#        * exposeFoundryApi=true -> an explicit per-agent /agents/<agentName> route that YARP
+#          path-rewrites (PathRemovePrefix + PathPrefix) onto the governed foundry-agents Responses
+#          API path before forwarding to APIM.
 #      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
 #      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
 #      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
@@ -183,8 +184,8 @@ jobs:
           # uses '__' as its delimiter, and we substitute the name's '-' to '_' for the key (below),
           # so an underscore in the name could forge a spurious '__' delimiter.
           $segRe = '^[A-Za-z0-9.-]+$'
-          $teamsAgents = @()
-          $exposeFoundry = $false
+          $teamsAgents   = @()
+          $foundryAgents = @()
 
           Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
             $file = Join-Path $_.FullName 'agent-network.json'
@@ -195,7 +196,10 @@ jobs:
                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
                 $teamsAgents += $name
               }
-              if ($doc.exposeFoundryApi -eq $true) { $exposeFoundry = $true }
+              if ($doc.exposeFoundryApi -eq $true) {
+                if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
+                $foundryAgents += $name
+              }
             }
           }
 
@@ -218,16 +222,29 @@ jobs:
             $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
           }
 
-          if ($exposeFoundry) {
+          # For each exposeFoundryApi=true agent, wire an EXPLICIT per-agent edge path
+          # /agents/<name>/{**remainder} and REWRITE it onto the governed Foundry Responses API path
+          # ($p) before forwarding to APIM (cluster1). YARP applies the transforms in order:
+          # PathRemovePrefix strips '/agents/<name>', then PathPrefix re-adds '$p', so
+          #   /agents/hello-world-agent/responses  ->  $p/responses
+          # This gives each agent a distinct, deny-by-default ingress URL. All rewrite onto the same
+          # shared APIM API (the Foundry Responses API addresses the agent by id in the request body,
+          # not the URL); per-agent access control is enforced downstream by the token-limit policy.
+          if ($foundryAgents.Count -gt 0) {
             if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
               throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
             }
             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
-            $desired['ReverseProxy__Routes__foundry_api__ClusterId']   = 'cluster1'
-            $desired['ReverseProxy__Routes__foundry_api__Match__Path'] = "$p/{**remainder}"
+            foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
+              $rid = "foundry_$($name -replace '-','_')"
+              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                    = 'cluster1'
+              $desired["ReverseProxy__Routes__${rid}__Match__Path"]                  = "/agents/$name/{**remainder}"
+              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathRemovePrefix"] = "/agents/$name"
+              $desired["ReverseProxy__Routes__${rid}__Transforms__1__PathPrefix"]       = $p
+            }
           }
 
-          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, foundry-api=$exposeFoundry, catch-all neutered):"
+          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry per-agent, catch-all neutered):"
           $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
 
           # Read the current appSettings so we can compute which route settings are now stale.

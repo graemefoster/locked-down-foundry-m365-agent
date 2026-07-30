@@ -7,6 +7,9 @@ param aspName string
 @description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to.')
 param apimGatewayUrl string = ''
 
+@description('Optional public IP (bare IPv4 or CIDR) of the provisioning operator to allow into the public YARP edge for dev/test, IN ADDITION to the Microsoft Teams inbound ranges. Empty (default) = Teams-only, no operator hole. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook).')
+param deployerPublicIp string = ''
+
 // Microsoft Teams "Required" published IP ranges — the source ranges the Bot Channel Adapter
 // uses to POST activities to the messaging endpoint. From the Microsoft 365 URLs & IP address
 // ranges list, service area "Skype" / display name "Microsoft Teams" (endpoint sets 11-12).
@@ -42,7 +45,22 @@ var teamsInboundIpRules = [
     description: 'Microsoft Teams Required inbound range'
   }
 ]
-var yarpIpRestrictions = teamsInboundIpRules
+// Opt-in: allow the provisioning operator's own public IP into the PUBLIC YARP edge so they can
+// reach the /agents/<name> and /teams/<name> routes for dev/test. This is only the NETWORK layer:
+// a caller still needs a valid Entra token (audience https://ai.azure.com) AND to be in the
+// deny-by-default token-limit allowlist to actually invoke an agent through APIM. Empty = no rule.
+var deployerIpRules = empty(deployerPublicIp)
+  ? []
+  : [
+      {
+        ipAddress: contains(deployerPublicIp, '/') ? deployerPublicIp : '${deployerPublicIp}/32'
+        action: 'Allow'
+        priority: 90
+        name: 'AllowDeployerIp'
+        description: 'Opt-in provisioning-operator public IP (dev/test access to the YARP edge).'
+      }
+    ]
+var yarpIpRestrictions = concat(teamsInboundIpRules, deployerIpRules)
 
 resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: appInsightsName

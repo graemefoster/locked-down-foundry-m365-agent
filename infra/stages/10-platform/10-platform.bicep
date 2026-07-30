@@ -29,6 +29,9 @@ param acrName string
 param appInsightsName string
 param apimGatewayUrl string
 
+@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
+param deployerPublicIp string = ''
+
 // Storage SKU (computed in main; stage 00 needs it too; used by the storage CMK re-PUT).
 param storageSkuName string
 
@@ -72,6 +75,7 @@ module dataResources 'data-resources.bicep' = {
     appServicePlanName: appServicePlanName
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
+    deployerPublicIp: deployerPublicIp
     logAnalyticsId: logAnalyticsId
     appServiceDelegatedSubnetId: appServiceDelegatedSubnetId
   }
