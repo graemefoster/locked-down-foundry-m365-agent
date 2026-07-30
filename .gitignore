@@ -51,3 +51,7 @@ mcp/agent-tools/dist/
 .DS_Store
 Thumbs.db
 .azure
+
+# drawio editor lock/temp files
+*.dtmp
+.$*.drawio.dtmp
