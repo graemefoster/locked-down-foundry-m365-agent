@@ -28,9 +28,10 @@
   Auth posture:
     * Inbound: the policy (in apim-foundry-agent-limits.bicep) validates the caller's Entra
       token; the caller identity (email / appid) is used ONLY for metering + throttling.
-    * Backend: APIM authenticates to Foundry with its OWN managed identity (keyless), so
-      APIM's MI must hold a Foundry data-plane role (e.g. "Azure AI User") on the project.
-      This is the same keyless posture as the model-gateway inference API.
+    * Backend: APIM forwards the caller's ORIGINAL Authorization header (their Entra token) to
+      Foundry UNCHANGED — Foundry authorizes the END USER directly (data-plane RBAC on the caller,
+      not on APIM's MI). This is the same pass-through posture as the teams API. APIM's MI needs
+      NO Foundry data-plane role for this path.
 */
 
 @description('Name of the existing APIM instance.')

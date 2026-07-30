@@ -36,7 +36,7 @@ hooks:
   # azd then runs its DEPLOY phase for the two `services:` above (MCP + YARP app code), wrapped by
   # the predeploy/postdeploy hooks. AGENT deploys, MCP compliance and Teams / M365 publishing are
   # still done ONLY by the in-VNet self-hosted GitHub Actions workflows (the per-agent
-  # .github/workflows/deploy-*-agent.yml + reusable deploy-agent.yml, and deploy-compliancy.yml),
+  # .github/workflows/deploy-*-agent.yml + reusable deploy-agent.yml, and deploy-agent-network.yml),
   # which run natively on the private VM runner - no `az vm run-command` orchestration from the host.
   postprovision:
     shell: pwsh

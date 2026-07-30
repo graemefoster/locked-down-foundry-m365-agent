@@ -140,7 +140,7 @@ Key parameters:
 | Parameter | Default | Purpose |
 |-----------|---------|---------|
 | `agent-name` (publish-teams action) | — | The single agent to publish. Each per-agent workflow passes the agent it just deployed. Each agent gets its own Azure Bot Service (endpoint `/teams/<agentName>`); the single path-routed APIM Teams API rewrites to each agent's activityProtocol endpoint. |
-| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by `deploy-compliancy.yml` once agents are deployed. |
+| `teamsBotAppIds` | `[]` | Optional pre-known bot App IDs for the APIM `validate-jwt` audience allowlist; empty = issuer-only at provision, allowlist set live by `deploy-agent-network.yml` once agents are deployed. |
 
 Optional publish metadata is read from repo variables by the `publish-teams` action:
 `TEAMS_PUBLISH_SCOPE` (`Shared`/`Tenant`), `TEAMS_APP_VERSION`,

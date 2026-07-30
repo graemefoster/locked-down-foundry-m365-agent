@@ -256,7 +256,7 @@ needs no backend FQDNs (only APIM control-plane inputs), so the SAME wrapper is 
   all-zeros), so out of the box MCP is effectively **deny-all** — intentional and safe, since
   the seeded agents don't call the MCP API. Before an agent can call a server, add its real
   AppId under that server and re-apply.
-- **On demand** — [`.github/workflows/deploy-compliancy.yml`](../.github/workflows/deploy-compliancy.yml)
+- **On demand** — [`.github/workflows/deploy-agent-network.yml`](../.github/workflows/deploy-agent-network.yml)
   (`workflow_dispatch`, self-hosted VNet runner, `vnet-deploy` environment) re-deploys only this
   wrapper after you edit the JSON. Applying an APIM policy is an **ARM control-plane** op, so it
   does not need the private data plane — just Azure RBAC. Needs repo variables

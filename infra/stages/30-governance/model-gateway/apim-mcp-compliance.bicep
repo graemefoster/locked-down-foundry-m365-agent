@@ -8,7 +8,7 @@
   this module once per server in mcp/mcp.json, threading in the resolved policy.
 
   The policy is name-only in the repo (mcp/mcp-policy.json). Agent names are resolved
-  to AppIds at DEPLOY time (deploy-compliancy workflow -> scripts/list-agent-appids.ps1)
+  to AppIds at DEPLOY time (deploy-agent-network workflow -> scripts/list-agent-appids.ps1)
   because agent identities don't exist until the agents are seeded post-provision. The
   resolved (AppId-enriched) policy is passed in via the mcpPolicy parameter; 'azd provision'
   passes a deny-all default because it runs before any agent exists.
@@ -51,7 +51,7 @@ param mcpAudience string
 @description('Entra tenant ID the caller token must be issued by.')
 param tenantId string = subscription().tenantId
 
-@description('RESOLVED MCP rate-limit policy (AppId-enriched). Threaded in from apim-mcp-compliance-all.bicep, which either builds a deny-all default (azd provision, before agents are seeded) or receives the deploy-time-resolved policy from the deploy-compliancy workflow. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }. Defaults to {} (deny-all) so a direct invocation without a policy is safe.')
+@description('RESOLVED MCP rate-limit policy (AppId-enriched). Threaded in from apim-mcp-compliance-all.bicep, which either builds a deny-all default (azd provision, before agents are seeded) or receives the deploy-time-resolved policy from the deploy-agent-network workflow. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }. Defaults to {} (deny-all) so a direct invocation without a policy is safe.')
 param mcpPolicy object = {}
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
@@ -85,7 +85,7 @@ var whenBranches = join(map(agentsForServer, agent => '      <when condition="@(
 // is reused in two shapes: wrapped in <otherwise> when there ARE allow branches, and emitted
 // standalone (no <choose>) when there are NONE - because APIM requires a <choose> to contain at
 // least one <when>, a <choose> with only <otherwise> is INVALID and would fail policy apply.
-var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"agent_not_permitted","message":"This agent identity is not authorized to call this MCP server. Add its AppId under this server in mcp/mcp-policy.json and re-run the deploy-compliancy workflow."}</set-body>\n        </return-response>'
+var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"agent_not_permitted","message":"This agent identity is not authorized to call this MCP server. Add its AppId under this server in mcp/mcp-policy.json and re-run the deploy-agent-network workflow."}</set-body>\n        </return-response>'
 var otherwiseBranch = '      <otherwise>\n        ${denyResponseXml}\n      </otherwise>\n'
 
 // The governance block placed inside <inbound>: a <choose> (>=1 allow <when> + deny <otherwise>)

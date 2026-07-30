@@ -39,7 +39,7 @@
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
 
   All parameters are [string] (comma-separated for -AgentName) so the script stays simple to
-  invoke from the deploy-compliancy workflow on the in-VNet self-hosted runner (plain CLI args).
+  invoke from the deploy-agent-network workflow on the in-VNet self-hosted runner (plain CLI args).
 #>
 [CmdletBinding()]
 param(
@@ -62,7 +62,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
-# All params are [string] (the deploy-compliancy workflow passes plain CLI args on the in-VNet
+# All params are [string] (the deploy-agent-network workflow passes plain CLI args on the in-VNet
 # runner), so normalise the string inputs here:
 $resolveMode   = -not [string]::IsNullOrWhiteSpace($ResolvePolicyPath)
 # Resolve mode needs EVERY live agent to join against, so the name filter is not applied there.

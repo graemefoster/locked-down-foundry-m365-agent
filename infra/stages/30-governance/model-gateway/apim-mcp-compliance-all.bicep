@@ -10,7 +10,7 @@
     * main.bicep (at 'azd up' provision time) omits mcpPolicy -> this wrapper builds a
       DENY-ALL default (every server in mcp.json with an empty agent list), so a fresh
       environment is locked down until access is explicitly granted; and
-    * the deploy-compliancy workflow resolves names -> AppIds on the in-VNet runner and
+    * the deploy-agent-network workflow resolves names -> AppIds on the in-VNet runner and
       passes the enriched policy in, so agents actually gain their configured rate limits.
   Both paths use this ONE module, keeping a single source of truth for the applied policy.
 */
@@ -27,7 +27,7 @@ param tenantId string = subscription().tenantId
 @description('Path (relative to this module) to the MCP servers config that decides WHICH servers exist. Used to build the deny-all default when no resolved mcpPolicy is supplied.')
 param mcpConfig object = loadJsonContent('../../../../mcp/mcp.json')
 
-@description('RESOLVED (AppId-enriched) MCP rate-limit policy. Omit (default {}) to apply DENY-ALL for every server in mcpConfig -- the correct posture at provision time, before agents are seeded. The deploy-compliancy workflow supplies the resolved policy after agents exist. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }.')
+@description('RESOLVED (AppId-enriched) MCP rate-limit policy. Omit (default {}) to apply DENY-ALL for every server in mcpConfig -- the correct posture at provision time, before agents are seeded. The deploy-agent-network workflow supplies the resolved policy after agents exist. Shape: { renewalPeriodSeconds, servers: [ { name, agents: [ { name, appId, requestsPerMinute } ] } ] }.')
 param mcpPolicy object = {}
 
 // When no resolved policy is supplied (azd provision), synthesise a deny-all policy: every MCP

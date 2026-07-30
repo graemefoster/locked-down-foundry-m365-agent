@@ -57,7 +57,7 @@ param callerAudience string = ''
 @description('Application Insights metric namespace for the emitted token metrics.')
 param metricNamespace string = 'foundry-agent-tokens'
 
-@description('Resource the APIM managed identity requests a backend token for (keyless Foundry data-plane auth).')
+@description('The Foundry data-plane audience this API fronts (https://ai.azure.com). Used as the default caller-token audience for validate-azure-ad-token when callerAudience is empty. APIM no longer swaps in an MI token; the caller token is forwarded to Foundry.')
 param backendAuthResource string = 'https://ai.azure.com'
 
 @description('AGGREGATED per-agent token-limit allowlist. Omit (default {}) to apply DENY-ALL (locked until the deploy-agent-network workflow runs). Shape: { metricNamespace?, agents: [ { agentRef, principals: [ { email?, appId?, tokensPerMinute, tokenQuota?, tokenQuotaPeriod? } ] } ] }. agentRef "*" matches any agent.')
@@ -177,12 +177,15 @@ var effectiveAudience = empty(callerAudience) ? backendAuthResource : callerAudi
 var audiencesBlock = '\n      <audiences>\n        <audience>${effectiveAudience}</audience>\n        <audience>${effectiveAudience}/</audience>\n      </audiences>'
 
 // Backend routing (only reached by allowed callers — the <otherwise>/standalone 403 stops the
-// pipeline before it for denied callers). APIM authenticates to Foundry with its own MI (keyless).
+// pipeline before it for denied callers). We do NOT swap in a managed-identity token: the caller's
+// ORIGINAL Authorization header (their Entra user/agent token, already validated above) is
+// forwarded to Foundry UNCHANGED, so Foundry authorizes the END USER directly (data-plane RBAC on
+// the caller, not on APIM's MI). Mirrors the teams API's pass-through posture.
 // Path-preserving rewrite: the whole /agents/<name>/... tail (agentsPath) is proxied onto the
 // Foundry agent endpoint /api/projects/<project>/agents/<name>/endpoint/protocols/..., so every
 // protocol works unchanged. copy-unmatched-params keeps the caller's query string (?api-version=…).
 var backendRewriteTemplate = '@(&quot;/api/projects/${projectName}&quot; + (string)context.Variables[&quot;agentsPath&quot;])'
-var backendRoutingXml = '    <set-backend-service backend-id="${backendId}" />\n    <authentication-managed-identity resource="${backendAuthResource}" />\n    <rewrite-uri template="${backendRewriteTemplate}" copy-unmatched-params="true" />\n'
+var backendRoutingXml = '    <set-backend-service backend-id="${backendId}" />\n    <rewrite-uri template="${backendRewriteTemplate}" copy-unmatched-params="true" />\n'
 
 var policyXml = '<policies>\n  <inbound>\n    <base />\n    <validate-azure-ad-token tenant-id="${tenantId}" header-name="Authorization" output-token-variable-name="jwt" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: caller token failed validation.">${audiencesBlock}\n    </validate-azure-ad-token>\n    <set-variable name="callerEmail" value="@(${jwtEmailExpr})" />\n    <set-variable name="callerAppId" value="@(${jwtAppIdExpr})" />\n    <set-variable name="agentsPath" value="${agentsPathExpr}" />\n    <set-variable name="callerAgent" value="${pathAgentExpr}" />\n    <llm-emit-token-metric namespace="${metricNs}">\n      <dimension name="AgentRef" value="@(${callerAgentVar})" />\n      <dimension name="CallerEmail" value="@(${callerEmailVar})" />\n      <dimension name="CallerAppId" value="@(${callerAppIdVar})" />\n      <dimension name="ApiId" value="@(context.Api.Id)" />\n    </llm-emit-token-metric>\n${governanceXml}${backendRoutingXml}  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>'
 

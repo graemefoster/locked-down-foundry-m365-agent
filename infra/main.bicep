@@ -95,7 +95,7 @@ param deployerPublicIp string = ''
 // the in-VNet Teams-publish workflow path (scripts/publish-teams-runner.ps1 -> publish-teams.ps1),
 // one agent per run. The single path-routed APIM Teams API listens on /teams/{agentName}, so it
 // does not need to know the agent names ahead of time.
-@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; deploy-compliancy.yml rebuilds the full audience allowlist live once the agents are deployed.')
+@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; deploy-agent-network.yml rebuilds the full audience allowlist live once the agents are deployed.')
 param teamsBotAppIds array = []
 
 // Create a short, unique suffix, that will be unique to each resource group
@@ -483,7 +483,7 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
 // ==================== OUTPUTS ====================
 // Surfaced by azd as env vars (and typically mirrored to repo variables). Consumed by the
 // in-VNet self-hosted workflows (the per-agent .github/workflows/deploy-*-agent.yml + reusable
-// deploy-agent.yml, and deploy-compliancy.yml) which do the agent deploys / compliance / Teams
+// deploy-agent.yml, and deploy-agent-network.yml) which do the agent deploys / compliance / Teams
 // publishing, and by the azd predown hook (capability-host cleanup + runner deregistration). azd
 // itself runs nothing after
 // provision.
@@ -551,8 +551,8 @@ output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 @description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The reusable deploy-agent workflow injects this as the MCP tool `server_url` so an agent manifest with an MCP tool stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
 output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
 
-// --- MCP compliance (deploy-compliancy workflow) ---------------------------------
-@description('APIM instance name — used by the deploy-compliancy workflow to re-apply the MCP rate-limit policies on demand.')
+// --- MCP compliance (deploy-agent-network workflow) ---------------------------------
+@description('APIM instance name — used by the deploy-agent-network workflow to re-apply the MCP rate-limit policies on demand.')
 output MCP_COMPLIANCE_APIM_NAME string = apimName
 @description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
 output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount

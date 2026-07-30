@@ -1,17 +1,21 @@
-name: Deploy agent network integration (Foundry token governance + YARP edge routes)
+name: Wire agent network governance (Foundry token limits + YARP edge routes + MCP allowlist)
 
 # ---------------------------------------------------------------------------
-# On-demand (re-)apply of the per-agent NETWORK-INTEGRATION manifests
-# (agents/<name>/agent-network.json). One manifest describes how an agent joins the
-# enterprise network flows; this workflow compiles them into two things:
+# The single "make the network governance match the repo" workflow. Run it after `azd up` and
+# again whenever you add/remove an agent or edit a manifest — it (re-)applies, in one shot, every
+# governance layer that provisioning intentionally leaves DENY-ALL. `azd up` seeds no agents and
+# applies deny-all everywhere, so nothing is reachable until this runs.
 #
-#   1. Foundry token governance — aggregates every manifest's `tokenLimits` block into one
-#      `agentLimits` object and re-deploys ONLY apim-foundry-agent-limits.bicep (the same module
-#      `azd up` runs with an EMPTY allowlist = DENY-ALL), so the provisioned and applied policies
-#      can never diverge. Agents with no `tokenLimits` stay deny-all on the Responses API.
+# It compiles the repo's source-of-truth files into three enforcement points:
+#
+#   1. Foundry token limits (per agent) — aggregates every agents/<name>/agent-network.json
+#      `tokenLimits` block into one allowlist and re-deploys apim-foundry-agent-limits.bicep (the
+#      same module `azd up` runs, but with the real allowlist instead of empty=deny-all). An agent
+#      with no `tokenLimits` stays denied on the Responses API. Caller identity governs metering +
+#      throttling only; the caller's own token is forwarded to Foundry for authorization.
 #
 #   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
-#      appSettings so ONLY explicitly-wired agent paths reach APIM:
+#      appSettings so ONLY explicitly-wired, per-agent paths reach APIM:
 #        * exposeToM365=true    -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
 #        * exposeFoundryApi=true -> an explicit /agents/<agentName>/{**remainder} route (one PER agent)
 #          that YARP prepends (PathPrefix) with the governed foundry-agents API path before forwarding
@@ -24,23 +28,29 @@ name: Deploy agent network integration (Foundry token governance + YARP edge rou
 #      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
 #      are never touched.
 #
-# NAME-ONLY config + host-side aggregation (NO data-plane resolution): caller identities
-# (emails / appids) are known at authoring time and the agent is selected in the request body, so
-# there is NOTHING to resolve against the Foundry data plane. azd deploys no agents post-provision
-# and applies DENY-ALL, so run this after `azd up` and again whenever you edit a manifest. Run it
-# BEFORE publishing an agent to Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
+#   3. MCP allowlist (per agent) — resolves the name-only mcp/mcp-policy.json against LIVE agent
+#      identities read from the Foundry DATA PLANE (instance_identity.client_id on the project
+#      endpoint), dropping any name with no matching / identity-less agent, then re-deploys
+#      apim-mcp-compliance-all.bicep so each governed MCP server (mcp/mcp.json) only answers calls
+#      from allowlisted agents. An agent not in the allowlist gets 403 when it tries to enumerate /
+#      call MCP tools. (This is why the step must run AFTER the agents are seeded.)
 #
-# Runner: control-plane ARM + App Service ops against the resource group the in-VNet runner is
-# joined to. Kept on the in-VNet self-hosted runner for parity with deploy-compliancy — the VM
-# authenticates with its own managed identity (IMDS) and holds Contributor on the resource group.
-# No Microsoft Graph permission is needed. Lockdown: workflow_dispatch only (forks cannot queue),
-# repository guard, and the `vnet-deploy` environment (add a REQUIRED REVIEWER + branch=main for an
-# approval gate).
+# Ordering: token limits + YARP routes only need authoring-time data, so they run first; the MCP
+# step reads the private Foundry data plane, so it needs the agents already seeded. Run the
+# per-agent deploy-*-agent.yml workflows first, then this. Re-run it BEFORE publishing an agent to
+# Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
 #
-# Prerequisites (Bicep outputs, set as repo variables — the postprovision hook syncs these
-# automatically): AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
-# FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
-# FOUNDRY_AGENTS_AUDIENCE. Run `azd env refresh` if any are missing.
+# Runner: reads the PRIVATE Foundry data plane + does control-plane ARM / App Service ops, so it
+# MUST run on the in-VNet self-hosted runner — the VM authenticates with its own managed identity
+# (IMDS, holds Contributor on the resource group). No Microsoft Graph permission is needed.
+# Lockdown: workflow_dispatch only (forks cannot queue) + repository guard.
+#
+# Prerequisites (Bicep outputs synced to repo variables by the postprovision hook; run
+# `azd env refresh` if any are missing):
+#   Token limits + YARP: AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
+#     FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
+#     FOUNDRY_AGENTS_AUDIENCE.
+#   MCP allowlist: MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT.
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -282,3 +292,51 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Failed to prune stale YARP route settings." }
           }
           Write-Host "YARP edge routes applied. Anything not explicitly wired now 404s at the proxy."
+
+      # 3. MCP allowlist. Runs LAST because it resolves the name-only mcp/mcp-policy.json against
+      #    LIVE agent identities on the PRIVATE Foundry data plane (needs the agents already seeded).
+      - name: Resolve agent names to AppIds and apply the MCP allowlist policies
+        shell: pwsh
+        env:
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:        ${{ vars.MCP_COMPLIANCE_APIM_NAME }}
+          MCP_AUDIENCE:     ${{ vars.MCP_COMPLIANCE_AUDIENCE }}
+          FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
+              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE) -or
+              [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+          }
+          $tenantId = az account show --query tenantId -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+            throw "Failed to resolve tenant ID from 'az account show'."
+          }
+
+          # Resolve the name-only mcp/mcp-policy.json against LIVE agent identities read from the
+          # Foundry DATA PLANE (instance_identity.client_id on the project endpoint). Names with no
+          # matching / identity-less agent are dropped (deny-by-default). Needs the private endpoint,
+          # which the in-VNet runner can reach (VM managed identity via IMDS).
+          $resolvedPolicy = Join-Path $env:RUNNER_TEMP 'resolved-mcp-policy.json'
+          Write-Host "Resolving agent names -> AppIds from the Foundry project at '$($env:FOUNDRY_ENDPOINT)'."
+          pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
+            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
+            -ResolvePolicyPath mcp/mcp-policy.json `
+            -OutFile $resolvedPolicy
+          if ($LASTEXITCODE -ne 0) { throw "Agent name resolution failed." }
+          if (-not (Test-Path $resolvedPolicy)) { throw "Resolver did not produce '$resolvedPolicy'." }
+
+          Write-Host "Applying MCP allowlist policies to APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)' for every server in mcp/mcp.json."
+          az deployment group create `
+            --resource-group $env:RESOURCE_GROUP `
+            --name "mcp-compliance-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+            --template-file infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep `
+            --parameters `
+              apimName=$env:APIM_NAME `
+              mcpAudience=$env:MCP_AUDIENCE `
+              tenantId=$tenantId `
+              "mcpPolicy=@$resolvedPolicy" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
+          Write-Host "MCP allowlist policies applied (resolved from mcp/mcp-policy.json)."

@@ -52,7 +52,7 @@ Governance here is reviewable in PRs, not clicked into a portal:
 
 > **Apply order matters.** A fresh `azd up` seeds no agents, so the resolved MCP allowlist can't
 > know real agent AppIds yet — it stays deny-all. After you seed agents, run
-> [`.github/workflows/deploy-compliancy.yml`](../.github/workflows/deploy-compliancy.yml) to
+> [`.github/workflows/deploy-agent-network.yml`](../.github/workflows/deploy-agent-network.yml) to
 > resolve each agent **name → live AppId** (via `scripts/list-agent-appids.ps1`, which reads the
 > private Foundry data plane from the in-VNet runner) and re-apply the policy. Re-run it whenever
 > you edit the JSON. See [what-runs-where.md](./what-runs-where.md) and

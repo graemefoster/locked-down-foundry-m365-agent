@@ -66,11 +66,11 @@ action → `create-agent.ps1` → `publish-agent` action → `publish-agent.ps1`
 The M365 publish call rejects app-only / MI tokens (HTTP 502), so the composite action acquires a
 delegated **user** token (device-code sign-in) and forwards it for that step only.
 
-### MCP compliance (`deploy-compliancy.yml`)
+### MCP allowlist (part of `deploy-agent-network.yml`)
 
 | File | Invoked by | Runs on | Identity | What it does |
 |---|---|---|---|---|
-| `list-agent-appids.ps1` | `deploy-compliancy.yml` (RESOLVE mode) | VM runner | VM MI (IMDS) — **data plane** | Joins each agent **name** in `mcp/mcp-policy.json` to its live `instance_identity.client_id` read from the Foundry data plane and emits the resolved policy for the APIM allowlist Bicep. DISCOVERY mode (default) prints every agent's AppId + a paste-ready policy array. Both modes need the private endpoint → the VM. |
+| `list-agent-appids.ps1` | `deploy-agent-network.yml` (RESOLVE mode) | VM runner | VM MI (IMDS) — **data plane** | Joins each agent **name** in `mcp/mcp-policy.json` to its live `instance_identity.client_id` read from the Foundry data plane and emits the resolved policy for the APIM allowlist Bicep. DISCOVERY mode (default) prints every agent's AppId + a paste-ready policy array. Both modes need the private endpoint → the VM. |
 
 ### Teardown
 

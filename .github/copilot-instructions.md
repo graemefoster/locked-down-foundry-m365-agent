@@ -20,8 +20,8 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
 For a per-file map of what triggers each one, where it runs (azd host vs in-VNet VM) and which
 identity it uses, see `docs/what-runs-where.md`.
-Most don't reference Bicep file paths; the exception is the in-VNet MCP-compliance workflow
-(`.github/workflows/deploy-compliancy.yml`), which deploys
+Most don't reference Bicep file paths; the exception is the in-VNet agent-network workflow
+(`.github/workflows/deploy-agent-network.yml`), whose MCP-allowlist step deploys
 `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` by path — keep
 that path in sync if the module moves.
 
@@ -31,10 +31,10 @@ that path in sync if the module moves.
 azd up
  └─ provision  → deploys infra/main.bicep (all Azure resources). Nothing runs after provision.
 
-Post-provision (agent seeding, MCP compliance, Teams publish)
+Post-provision (agent seeding, network governance)
  └─ in-VNet self-hosted runner workflows — run natively on the private VM:
     * one thin per-agent workflow each (deploy-teams-agent.yml) → the reusable deploy-agent.yml
-    * deploy-compliancy.yml (MCP compliance)
+    * deploy-agent-network.yml (Foundry token limits + YARP edge routes + MCP allowlist)
 
 azd down
  └─ (predown hook) → deregisters the runner + deletes capability hosts, then teardown.
@@ -66,10 +66,9 @@ azd down
   caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
   `.github/workflows/deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
   injects the MCP `server_url` if present, then runs the `create-agent` and
-  `publish-agent` composite actions; an optional gated `publish-teams` job publishes that single
-  agent. `deploy-compliancy.yml` applies MCP compliance. All are `workflow_dispatch`-only,
-  repository-guarded; the Teams-publish / compliance steps are gated by the `vnet-deploy`
-  environment.
+  `publish-agent` composite actions; an optional `publish-teams` job publishes that single
+  agent. `deploy-agent-network.yml` applies the network governance (Foundry token limits + YARP
+  edge routes + MCP allowlist). All are `workflow_dispatch`-only, repository-guarded.
 - Idempotent: an existing agent (matched by name) gets a fresh version. Add an agent by adding a
   manifest folder + a thin caller workflow.
 - The runner VM's managed identity holds **Foundry User** on the project (so `create-agent.ps1` /
@@ -140,8 +139,9 @@ Foundry **data plane** (`instance_identity.client_id` on the project endpoint �
 runtime identity; names with no matching / identity-less agent are dropped), then
 `infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep` writes the APIM policy. At
 provision, `main.bicep` applies a deny-all policy; the real (resolved) policy is then applied
-**only** by `.github/workflows/deploy-compliancy.yml` (run it after agents are seeded, and again
-whenever you edit the JSON). Because resolution reads the private data plane, that workflow **must**
-run on the in-VNet self-hosted runner (VM managed identity via IMDS) — no Microsoft Graph
-permission is needed. azd deploys no agents post-provision, so a fresh `azd up` leaves MCP deny-all
+**only** by the MCP-allowlist step of `.github/workflows/deploy-agent-network.yml` (run it after
+agents are seeded, and again whenever you edit the JSON). Because resolution reads the private data
+plane, that workflow **must** run on the in-VNet self-hosted runner (VM managed identity via IMDS) —
+no Microsoft Graph permission is needed. azd deploys no agents post-provision, so a fresh `azd up`
+leaves MCP deny-all
 until that workflow runs.

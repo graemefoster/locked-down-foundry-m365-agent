@@ -107,7 +107,7 @@ module nonCompliantModelDemo './governance/noncompliant-model-demo.bicep' = if (
 // MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
 // each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
 // per server). Applied here at provision time so a fresh environment starts compliant; the
-// deploy-compliancy workflow re-applies THIS SAME module on demand after the JSON changes.
+// deploy-agent-network workflow re-applies THIS SAME module on demand after the JSON changes.
 module apimMcpComplianceAll './model-gateway/apim-mcp-compliance-all.bicep' = {
   name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {

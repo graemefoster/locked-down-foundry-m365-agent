@@ -111,7 +111,7 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
 4. **Set the deploy-workflow repo variables.** The `postprovision` hook does this for you: after
    `azd provision` succeeds it runs `hooks/postprovision.ps1`, which pushes the relevant azd
    outputs into repo Settings → Secrets and variables → Actions → *Variables* via `gh variable set`
-   (so the per-agent `deploy-*-agent.yml` and `deploy-compliancy.yml` workflows "just work"). It
+   (so the per-agent `deploy-*-agent.yml` and `deploy-agent-network.yml` workflows "just work"). It
    needs the GitHub CLI authenticated (`gh auth login`) with permission to write repo variables.
    Re-run it any time with `azd hooks run postprovision`.
 
