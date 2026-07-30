@@ -57,7 +57,7 @@ var deployerIpRules = empty(deployerPublicIp)
         action: 'Allow'
         priority: 90
         name: 'AllowDeployerIp'
-        description: 'Opt-in provisioning-operator public IP (dev/test access to the YARP edge).'
+        description: 'Opt-in operator public IP (dev/test YARP edge access)'
       }
     ]
 var yarpIpRestrictions = concat(teamsInboundIpRules, deployerIpRules)
