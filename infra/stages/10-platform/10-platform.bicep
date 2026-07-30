@@ -169,6 +169,7 @@ output cosmosDBResourceGroupName string = dataResources.outputs.cosmosDBResource
 
 // Dependent resources (App Service / YARP)
 output yarpWebAppFqdn string = dataResources.outputs.yarpWebAppFqdn
+output yarpWebAppName string = dataResources.outputs.yarpWebAppName
 
 // Model gateway
 output providerAccountId string = modelGateway.outputs.providerAccountId

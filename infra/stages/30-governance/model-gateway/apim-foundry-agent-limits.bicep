@@ -12,13 +12,13 @@
        caller email + caller appid, for cost attribution. The Responses hop returns
        agent-level `usage`, so this "just works" on that traffic.
     3. deny-by-default llm-token-limit — a <choose> whose <when> branches each match ONE
-       (agent, caller) pair from agents/<name>/limits.json and apply that pair's token budget
+       (agent, caller) pair from agents/<name>/agent-network.json and apply that pair's token budget
        (tokens-per-minute, optional token-quota). Any caller/agent not listed falls through
        to <otherwise> and is rejected 403. Allowed callers fall past the <choose> to the
        backend routing (APIM MI -> Foundry over the private endpoint).
 
   Config-as-data: the allowlist is name-only + human-authored per agent
-  (agents/<name>/limits.json). The deploy-agent-limits workflow AGGREGATES every limits.json
+  (agents/<name>/agent-network.json). The deploy-agent-network workflow AGGREGATES every agent-network.json
   into one `agentLimits` object and passes it here; 'azd provision' omits it (default {}) so a
   fresh environment is DENY-ALL until the workflow runs — the same posture as MCP compliance.
   Unlike MCP, NO data-plane resolution is needed: caller identities (emails / appids) are known
@@ -42,7 +42,7 @@ param foundryAccountName string
 @description('Entra tenant ID the caller token must be issued by.')
 param tenantId string = subscription().tenantId
 
-@description('Optional audience the caller Entra token must carry (e.g. api://<clientId> of your agent-facing app registration). Empty = validate tenant + signature only. NOTE: even when empty, access is still gated by the deny-by-default allowlist below (an unlisted email/appid gets 403), so an audience is defence-in-depth against token reuse from another resource rather than the primary gate. Set it in hardened environments.')
+@description('Optional audience the caller Entra token must carry (e.g. api://<clientId> of your agent-facing app registration). Empty = default to backendAuthResource (the Foundry data-plane audience this API fronts) — validate-azure-ad-token has NO "tenant + signature only" mode, it requires at least one audience or client-application-id. Access is still gated primarily by the deny-by-default allowlist below (an unlisted email/appid gets 403), so the audience is defence-in-depth against token reuse from another resource. Override it (api://<clientId>) in hardened environments.')
 param callerAudience string = ''
 
 @description('Application Insights metric namespace for the emitted token metrics.')
@@ -54,7 +54,7 @@ param backendResponsesPath string = '/openai/v1/responses'
 @description('Resource the APIM managed identity requests a backend token for (keyless Foundry data-plane auth).')
 param backendAuthResource string = 'https://ai.azure.com'
 
-@description('AGGREGATED per-agent token-limit allowlist. Omit (default {}) to apply DENY-ALL (locked until the deploy-agent-limits workflow runs). Shape: { metricNamespace?, agents: [ { agentRef, principals: [ { email?, appId?, tokensPerMinute, tokenQuota?, tokenQuotaPeriod? } ] } ] }. agentRef "*" matches any agent.')
+@description('AGGREGATED per-agent token-limit allowlist. Omit (default {}) to apply DENY-ALL (locked until the deploy-agent-network workflow runs). Shape: { metricNamespace?, agents: [ { agentRef, principals: [ { email?, appId?, tokensPerMinute, tokenQuota?, tokenQuotaPeriod? } ] } ] }. agentRef "*" matches any agent.')
 param agentLimits object = {}
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
@@ -83,7 +83,7 @@ var callerAppIdVar = '((string)context.Variables[&quot;callerAppId&quot;])'
 var callerAgentVar = '((string)context.Variables[&quot;callerAgent&quot;])'
 
 // --- Normalise the config before building XML ------------------------------------------------
-// Defence-in-depth (the deploy-agent-limits workflow ALSO validates limits.json before calling
+// Defence-in-depth (the deploy-agent-network workflow ALSO validates agent-network.json before calling
 // this module): lowercase + strip the two characters (&quot; and backslash) that could break out
 // of the C# string literals / XML attributes the values are interpolated into, coerce the numeric
 // budgets through int(), and DROP any principal that carries neither an email nor an appId (so the
@@ -134,16 +134,19 @@ var whenBranches = join(flatten(branchLists), '')
 
 // DENY-BY-DEFAULT 403. Reused wrapped in <otherwise> when there ARE allow branches, and standalone
 // (no <choose>) when there are NONE — an APIM <choose> with only <otherwise> is INVALID.
-var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"caller_not_permitted","message":"This caller identity is not authorized (or has no token budget) for this agent. Add it under the agent in agents/&lt;name&gt;/limits.json and re-run the deploy-agent-limits workflow."}</set-body>\n        </return-response>'
+var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"caller_not_permitted","message":"This caller identity is not authorized (or has no token budget) for this agent. Add it under the agent in agents/&lt;name&gt;/agent-network.json and re-run the deploy-agent-network workflow."}</set-body>\n        </return-response>'
 
 var governanceXml = empty(flatten(branchLists))
   ? '    ${denyResponseXml}\n'
   : '    <choose>\n${whenBranches}      <otherwise>\n        ${denyResponseXml}\n      </otherwise>\n    </choose>\n'
 
-// Optional audience block for validate-azure-ad-token.
-var audiencesBlock = empty(callerAudience)
-  ? ''
-  : '\n      <audiences>\n        <audience>${callerAudience}</audience>\n        <audience>${callerAudience}/</audience>\n      </audiences>'
+// Audience block for validate-azure-ad-token. The policy REQUIRES at least one audience or
+// client-application-id (there is no "tenant + signature only" mode), so when callerAudience is
+// not overridden we fall back to backendAuthResource — the Foundry data-plane audience this API
+// fronts — which a caller obtaining a token for the agents API would naturally request. The
+// deny-by-default allowlist remains the primary gate; the audience is defence-in-depth.
+var effectiveAudience = empty(callerAudience) ? backendAuthResource : callerAudience
+var audiencesBlock = '\n      <audiences>\n        <audience>${effectiveAudience}</audience>\n        <audience>${effectiveAudience}/</audience>\n      </audiences>'
 
 // Backend routing (only reached by allowed callers — the <otherwise>/standalone 403 stops the
 // pipeline before it for denied callers). APIM authenticates to Foundry with its own MI (keyless).

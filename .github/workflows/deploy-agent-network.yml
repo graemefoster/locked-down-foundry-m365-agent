@@ -1,0 +1,254 @@
+name: Deploy agent network integration (Foundry token governance + YARP edge routes)
+
+# ---------------------------------------------------------------------------
+# On-demand (re-)apply of the per-agent NETWORK-INTEGRATION manifests
+# (agents/<name>/agent-network.json). One manifest describes how an agent joins the
+# enterprise network flows; this workflow compiles them into two things:
+#
+#   1. Foundry token governance — aggregates every manifest's `tokenLimits` block into one
+#      `agentLimits` object and re-deploys ONLY apim-foundry-agent-limits.bicep (the same module
+#      `azd up` runs with an EMPTY allowlist = DENY-ALL), so the provisioned and applied policies
+#      can never diverge. Agents with no `tokenLimits` stay deny-all on the Responses API.
+#
+#   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
+#      appSettings so ONLY explicitly-wired agent paths reach APIM:
+#        * exposeToM365=true  -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
+#        * exposeFoundryApi=true (any agent) -> the shared /<account>/<project> route to the
+#          governed foundry-agents Responses API.
+#      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
+#      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
+#      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
+#      are never touched.
+#
+# NAME-ONLY config + host-side aggregation (NO data-plane resolution): caller identities
+# (emails / appids) are known at authoring time and the agent is selected in the request body, so
+# there is NOTHING to resolve against the Foundry data plane. azd deploys no agents post-provision
+# and applies DENY-ALL, so run this after `azd up` and again whenever you edit a manifest. Run it
+# BEFORE publishing an agent to Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
+#
+# Runner: control-plane ARM + App Service ops against the resource group the in-VNet runner is
+# joined to. Kept on the in-VNet self-hosted runner for parity with deploy-compliancy — the VM
+# authenticates with its own managed identity (IMDS) and holds Contributor on the resource group.
+# No Microsoft Graph permission is needed. Lockdown: workflow_dispatch only (forks cannot queue),
+# repository guard, and the `vnet-deploy` environment (add a REQUIRED REVIEWER + branch=main for an
+# approval gate).
+#
+# Prerequisites (Bicep outputs, set as repo variables — the postprovision hook syncs these
+# automatically): AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
+# FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
+# FOUNDRY_AGENTS_AUDIENCE. Run `azd env refresh` if any are missing.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-agent-network:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: vnet-deploy
+    steps:
+      - uses: actions/checkout@v5
+
+      # az is installed on the Linux worker VM by cloud-init. Authenticate as the VM
+      # managed identity (holds Contributor on the resource group) — no secrets needed.
+      - name: Sign in with the VM managed identity
+        shell: pwsh
+        run: az login --identity --output none
+
+      - name: Aggregate tokenLimits and apply the Foundry agent token-limit policy
+        shell: pwsh
+        env:
+          RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
+          API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
+          ACCOUNT_NAME:    ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
+          CALLER_AUDIENCE: ${{ vars.FOUNDRY_AGENTS_AUDIENCE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
+              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+          }
+          $tenantId = az account show --query tenantId -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+            throw "Failed to resolve tenant ID from 'az account show'."
+          }
+
+          # Aggregate every agents/<name>/agent-network.json `tokenLimits` block into one
+          # { agents: [ { agentRef, principals } ] } object. agentRef defaults to the folder name;
+          # a manifest may override it (e.g. "*" wildcard). Manifests with no `tokenLimits` are
+          # skipped (that agent stays deny-all on the Responses API). Keys starting with "//" are
+          # comments and ignored.
+          $agents = @()
+          # Strict validation of every principal BEFORE it reaches the Bicep policy generator.
+          # The manifest is repo-controlled (trusted via PR), but the values are interpolated into
+          # APIM policy XML / C# match expressions, so reject anything that could break out of a
+          # string literal or is otherwise malformed. This is the primary injection guard (the
+          # Bicep module also strips quotes/backslashes as defence-in-depth).
+          $emailRe  = '^[^@\s"\\<>]+@[^@\s"\\<>]+\.[^@\s"\\<>]+$'
+          $guidRe   = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          $refRe    = '^[A-Za-z0-9._*-]+$'
+          $periods  = @('Hourly','Daily','Weekly','Monthly','Yearly')
+          function Test-Principal([object]$p, [string]$src) {
+            $hasEmail = $p.PSObject.Properties.Name -contains 'email' -and -not [string]::IsNullOrWhiteSpace([string]$p.email)
+            $hasAppId = $p.PSObject.Properties.Name -contains 'appId' -and -not [string]::IsNullOrWhiteSpace([string]$p.appId)
+            if (-not ($hasEmail -or $hasAppId)) { throw "${src}: a principal has neither 'email' nor 'appId'." }
+            if ($hasEmail -and ([string]$p.email) -notmatch $emailRe) { throw "${src}: invalid email '$($p.email)'." }
+            if ($hasAppId -and ([string]$p.appId) -notmatch $guidRe) { throw "${src}: 'appId' must be a GUID, got '$($p.appId)'." }
+            $tpm = 0
+            if (-not [int]::TryParse([string]$p.tokensPerMinute, [ref]$tpm) -or $tpm -le 0) {
+              throw "${src}: 'tokensPerMinute' must be a positive integer, got '$($p.tokensPerMinute)'."
+            }
+            if ($p.PSObject.Properties.Name -contains 'tokenQuota') {
+              $tq = 0
+              if (-not [int]::TryParse([string]$p.tokenQuota, [ref]$tq) -or $tq -le 0) {
+                throw "${src}: 'tokenQuota' must be a positive integer, got '$($p.tokenQuota)'."
+              }
+              $period = if ($p.PSObject.Properties.Name -contains 'tokenQuotaPeriod') { [string]$p.tokenQuotaPeriod } else { 'Daily' }
+              if ($periods -notcontains $period) { throw "${src}: 'tokenQuotaPeriod' must be one of $($periods -join ', '), got '$period'." }
+            }
+          }
+
+          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
+            $file = Join-Path $_.FullName 'agent-network.json'
+            if (Test-Path $file) {
+              $doc = Get-Content $file -Raw | ConvertFrom-Json
+              $tl  = $doc.tokenLimits
+              if ($null -eq $tl) {
+                Write-Host "$file has no 'tokenLimits' — skipping (that agent stays deny-all on the Responses API)."
+              } else {
+                $principals = @($tl.principals) | Where-Object { $_ -ne $null }
+                if ($principals.Count -eq 0) {
+                  Write-Host "::warning::$file 'tokenLimits' has no 'principals' — skipping (that agent stays deny-all)."
+                } else {
+                  $agentRef = if ($tl.PSObject.Properties.Name -contains 'agentRef' -and
+                                  -not [string]::IsNullOrWhiteSpace([string]$tl.agentRef)) {
+                    [string]$tl.agentRef
+                  } else {
+                    $_.Name
+                  }
+                  if ($agentRef -notmatch $refRe) { throw "${file}: invalid agentRef '$agentRef' (allowed: letters, digits, . _ - *)." }
+                  foreach ($p in $principals) { Test-Principal -p $p -src $file }
+                  $agents += [pscustomobject]@{ agentRef = $agentRef; principals = $principals }
+                  Write-Host "Loaded $($principals.Count) principal(s) for agent '$agentRef' from $file."
+                }
+              }
+            }
+          }
+          if ($agents.Count -eq 0) {
+            Write-Host "::warning::No agents/*/agent-network.json with tokenLimits found — applying DENY-ALL."
+          }
+
+          $merged = [pscustomobject]@{ agents = $agents }
+          $limitsFile = Join-Path $env:RUNNER_TEMP 'agent-limits.json'
+          $merged | ConvertTo-Json -Depth 10 | Set-Content -Path $limitsFile -Encoding utf8
+          Write-Host "Aggregated $($agents.Count) agent allowlist(s) -> $limitsFile."
+
+          $audience = if ([string]::IsNullOrWhiteSpace($env:CALLER_AUDIENCE)) { '' } else { $env:CALLER_AUDIENCE }
+
+          Write-Host "Applying Foundry agent token-limit policy to API '$($env:API_NAME)' on APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)'."
+          az deployment group create `
+            --resource-group $env:RESOURCE_GROUP `
+            --name "foundry-agent-limits-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+            --template-file infra/stages/30-governance/model-gateway/apim-foundry-agent-limits.bicep `
+            --parameters `
+              apimName=$env:APIM_NAME `
+              apiName=$env:API_NAME `
+              foundryAccountName=$env:ACCOUNT_NAME `
+              tenantId=$tenantId `
+              callerAudience=$audience `
+              "agentLimits=@$limitsFile" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "Foundry agent token-limit deployment failed." }
+          Write-Host "Foundry agent token-limit policy applied (aggregated from agents/*/agent-network.json)."
+
+      - name: Wire YARP edge routes (deny-by-default) from agent-network.json
+        shell: pwsh
+        env:
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          YARP_WEBAPP_NAME: ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
+          FOUNDRY_API_PATH: ${{ vars.FOUNDRY_AGENTS_API_PATH }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or [string]::IsNullOrWhiteSpace($env:YARP_WEBAPP_NAME)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP and TEAMS_YARP_WEBAPP_NAME (the postprovision hook syncs them; or run 'azd env refresh')."
+          }
+
+          # Agent folder name is used both as a route-id-key segment and a /teams/<name> URL path
+          # segment. Restrict it to characters safe in a URL path AND, after '-'->'_' substitution,
+          # a POSIX-safe env-var name. NO '_' allowed in the folder name itself: the appSetting key
+          # uses '__' as its delimiter, and we substitute the name's '-' to '_' for the key (below),
+          # so an underscore in the name could forge a spurious '__' delimiter.
+          $segRe = '^[A-Za-z0-9.-]+$'
+          $teamsAgents = @()
+          $exposeFoundry = $false
+
+          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
+            $file = Join-Path $_.FullName 'agent-network.json'
+            if (Test-Path $file) {
+              $doc  = Get-Content $file -Raw | ConvertFrom-Json
+              $name = $_.Name
+              if ($doc.exposeToM365 -eq $true) {
+                if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
+                $teamsAgents += $name
+              }
+              if ($doc.exposeFoundryApi -eq $true) { $exposeFoundry = $true }
+            }
+          }
+
+          # DESIRED ReverseProxy__Routes__* appSettings (ASP.NET '__' -> ':' config binding). We
+          # manage ONLY the Routes; cluster1 (-> APIM) and the AI settings in the baked config are
+          # left alone. route1 (the image's baked {**catch-all}) is NEUTERED to a non-routable path
+          # so the edge is deny-by-default.
+          # NOTE: the route-id KEY segment must be a POSIX-safe env-var name on Linux App Service
+          # (App Service injects appSettings as container env vars; hyphenated names are unreliable),
+          # so we substitute the agent name's '-' with '_' for the KEY only. The route-id is an
+          # internal YARP dictionary key never seen in a URL; the actual /teams/<name> Match__Path
+          # VALUE keeps the real (hyphenated) agent name.
+          $desired = [ordered]@{}
+          $desired['ReverseProxy__Routes__route1__ClusterId']   = 'cluster1'
+          $desired['ReverseProxy__Routes__route1__Match__Path'] = '/__disabled_no_route__/{**catch-all}'
+
+          foreach ($name in ($teamsAgents | Sort-Object -Unique)) {
+            $rid = "teams_$($name -replace '-','_')"
+            $desired["ReverseProxy__Routes__${rid}__ClusterId"]   = 'cluster1'
+            $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
+          }
+
+          if ($exposeFoundry) {
+            if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
+              throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
+            }
+            $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
+            $desired['ReverseProxy__Routes__foundry_api__ClusterId']   = 'cluster1'
+            $desired['ReverseProxy__Routes__foundry_api__Match__Path'] = "$p/{**remainder}"
+          }
+
+          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, foundry-api=$exposeFoundry, catch-all neutered):"
+          $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
+
+          # Read the current appSettings so we can compute which route settings are now stale.
+          $currentJson = az webapp config appsettings list -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME -o json
+          if ($LASTEXITCODE -ne 0) { throw "Failed to read YARP web app appSettings." }
+          $current = $currentJson | ConvertFrom-Json
+
+          # Apply the desired routes FIRST (set is a merge; it also neuters route1). We deliberately
+          # set-then-prune so a partial failure fails OPEN (stale routes linger) rather than CLOSED
+          # (a failed set after a successful delete would drop every route -> total edge lockout).
+          $settings = @($desired.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
+          az webapp config appsettings set -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --settings @settings --output none
+          if ($LASTEXITCODE -ne 0) { throw "Failed to apply YARP edge route settings." }
+
+          # Prune any existing ReverseProxy__Routes__* settings NOT in the desired set, so removing
+          # an agent / flipping a flag removes its route (deny-by-default). Runs after set so the
+          # desired routes are already live before any stale ones are removed.
+          $stale = @($current | Where-Object { $_.name -like 'ReverseProxy__Routes__*' -and -not $desired.Contains($_.name) } | ForEach-Object { $_.name })
+          if ($stale.Count -gt 0) {
+            Write-Host "Pruning $($stale.Count) stale route setting(s): $($stale -join ', ')"
+            az webapp config appsettings delete -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --setting-names @stale --output none
+            if ($LASTEXITCODE -ne 0) { throw "Failed to prune stale YARP route settings." }
+          }
+          Write-Host "YARP edge routes applied. Anything not explicitly wired now 404s at the proxy."

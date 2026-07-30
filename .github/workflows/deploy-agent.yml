@@ -44,8 +44,29 @@ jobs:
     outputs:
       agent-name: ${{ steps.create.outputs.agent-name }}
       endpoint: ${{ steps.cfg.outputs.endpoint }}
+      expose-to-m365: ${{ steps.netcfg.outputs.expose-to-m365 }}
     steps:
       - uses: actions/checkout@v5
+
+      # The per-agent network-integration manifest (agents/<name>/agent-network.json) is the
+      # authoritative gate for Teams / M365 exposure: exposeToM365 must be true for the publish
+      # job below to run (even if the caller passed publish-to-teams=true). A missing manifest or
+      # exposeToM365=false means the agent is NOT wired into YARP's /teams/<name> edge route, so
+      # publishing it to Teams would create a bot whose messaging endpoint 404s at the proxy.
+      - name: Read network manifest (exposeToM365 gate)
+        id: netcfg
+        shell: pwsh
+        env:
+          MANIFEST: ${{ inputs.manifest-path }}
+        run: |
+          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+          $expose = 'false'
+          if (Test-Path $net) {
+            $doc = Get-Content $net -Raw | ConvertFrom-Json
+            if ($doc.exposeToM365 -eq $true) { $expose = 'true' }
+          }
+          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "exposeToM365 = $expose (from $net)"
 
       # yq is installed by cloud-init on the in-VNet Linux runner
       # (infra/stages/40-runner/resources/cloud-init-linux-vm.yaml).
@@ -108,13 +129,15 @@ jobs:
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
 
   # --- publish to Teams / M365 (MANUAL APPROVAL) -------------------------------
-  # Gated by the `vnet-deploy` environment: add a REQUIRED REVIEWER (+ branch=main) to that
+  # Gated by BOTH the manifest's exposeToM365 flag (agents/<name>/agent-network.json — the
+  # authoritative exposure gate; the deploy-agent-network workflow wires the matching YARP edge
+  # route) AND the `vnet-deploy` environment: add a REQUIRED REVIEWER (+ branch=main) to that
   # environment in repo Settings so this job pauses for approval before it creates the Azure Bot
   # Service and submits the app to the Microsoft 365 catalog. Targets the single agent this run
-  # just deployed. Only runs when publish-to-teams is true.
+  # just deployed. Only runs when publish-to-teams is true AND exposeToM365 is true.
   publish-teams:
     needs: deploy
-    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams }}
+    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams && needs.deploy.outputs.expose-to-m365 == 'true' }}
     runs-on: [self-hosted, vnet, foundry-private]
     environment: vnet-deploy
     steps:

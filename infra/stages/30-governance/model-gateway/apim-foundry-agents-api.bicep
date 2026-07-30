@@ -5,8 +5,8 @@
   invocations can be metered + throttled at the edge. This module owns only the
   STRUCTURE (API + backend + operation); the inbound POLICY (validate-jwt +
   llm-emit-token-metric + deny-by-default llm-token-limit) is authored by the
-  sibling apim-foundry-agent-limits.bicep so the deploy-agent-limits workflow can
-  re-apply just the policy after agents/<name>/limits.json changes — exactly the split
+  sibling apim-foundry-agent-limits.bicep so the deploy-agent-network workflow can
+  re-apply just the policy after agents/<name>/agent-network.json changes — exactly the split
   used by the MCP api (structure) + apim-mcp-compliance (policy) pair.
 
     Web tier / user  --Entra JWT-->  THIS APIM API (/<foundry>/<proj>/responses)

@@ -157,7 +157,7 @@ module apimTeamsApi './model-gateway/apim-teams-api.bicep' = {
 // APIM Foundry agent /responses inbound API (structure) + token-governance policy. The API is
 // created once here; the deny-by-default token-limit + llm-emit-token-metric policy is applied
 // with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
-// agents/<name>/limits.json by the deploy-agent-limits workflow. Always deployed.
+// agents/<name>/agent-network.json by the deploy-agent-network workflow. Always deployed.
 module apimFoundryAgentsApi './model-gateway/apim-foundry-agents-api.bicep' = {
   name: 'foundry-agents-apim-api-${uniqueSuffix}-deployment'
   params: {
@@ -175,8 +175,8 @@ module apimFoundryAgentLimits './model-gateway/apim-foundry-agent-limits.bicep' 
     foundryAccountName: aiAccountName
     tenantId: tenant().tenantId
     callerAudience: agentCallerAudience
-    // agentLimits omitted -> DENY-ALL until the deploy-agent-limits workflow supplies the
-    // aggregated agents/<name>/limits.json allowlist.
+    // agentLimits omitted -> DENY-ALL until the deploy-agent-network workflow supplies the
+    // aggregated agents/<name>/agent-network.json allowlist.
   }
 }
 
@@ -232,7 +232,7 @@ output teamsApiName string = apimTeamsApi.outputs.apiName
 @description('Number of MCP servers governed by the applied compliance policies.')
 output governedServerCount int = apimMcpComplianceAll.outputs.governedServerCount
 
-@description('APIM API name for the governed Foundry agent /responses endpoint (deploy-agent-limits attaches the policy to this).')
+@description('APIM API name for the governed Foundry agent /responses endpoint (deploy-agent-network attaches the policy to this).')
 output foundryAgentsApiName string = apimFoundryAgentsApi.outputs.apiName
 
 @description('Public path of the governed Foundry agent /responses API (<account>/<project>).')

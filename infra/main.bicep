@@ -523,6 +523,9 @@ output SEED_ENABLE_TEAMS_PUBLISH bool = true
 @description('Public FQDN of the YARP proxy — the Azure Bot Service messaging endpoint host.')
 output TEAMS_YARP_FQDN string = stage10.outputs.yarpWebAppFqdn
 
+@description('Name of the YARP proxy web app — the deploy-agent-network workflow patches its ReverseProxy__Routes__* appSettings to wire the per-agent edge routes (deny-by-default).')
+output TEAMS_YARP_WEBAPP_NAME string = stage10.outputs.yarpWebAppName
+
 @description('APIM instance name (the Teams-publish path pins the Teams API validate-jwt audience live once the bot App ID is known).')
 output TEAMS_APIM_NAME string = apimName
 
@@ -552,12 +555,12 @@ output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
 output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
 
-// --- Foundry agent token governance (deploy-agent-limits workflow) ----------------
-@description('APIM instance name — used by the deploy-agent-limits workflow to re-apply the Foundry agent token-limit policy on demand.')
+// --- Foundry agent token governance (deploy-agent-network workflow) ----------------
+@description('APIM instance name — used by the deploy-agent-network workflow to re-apply the Foundry agent token-limit policy on demand.')
 output FOUNDRY_AGENTS_APIM_NAME string = apimName
-@description('APIM API resource name the deploy-agent-limits workflow attaches the aggregated token-limit policy to.')
+@description('APIM API resource name the deploy-agent-network workflow attaches the aggregated token-limit policy to.')
 output FOUNDRY_AGENTS_API_NAME string = stage30.outputs.foundryAgentsApiName
-@description('Primary Foundry account name — the deploy-agent-limits workflow derives the backend entity ID from it.')
+@description('Primary Foundry account name — the deploy-agent-network workflow derives the backend entity ID from it.')
 output FOUNDRY_AGENTS_ACCOUNT_NAME string = stage13.outputs.aiAccountName
 @description('Optional caller audience the foundry-agents API validates (empty = tenant + signature only).')
 output FOUNDRY_AGENTS_AUDIENCE string = agentCallerAudience

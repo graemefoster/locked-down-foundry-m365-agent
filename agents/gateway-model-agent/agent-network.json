@@ -1,0 +1,23 @@
+{
+  "//": "Network-integration manifest for gateway-model-agent. Describes how this agent is wired",
+  "//flows": "into the enterprise network flows. Aggregated by the deploy-agent-network workflow.",
+  "//exposeToM365": "false: this agent is NOT published to Microsoft Teams / M365, so YARP does NOT wire a /teams/<agentName> edge route for it and the Teams publish job is skipped.",
+  "//exposeFoundryApi": "true: reachable through the governed Foundry Responses API. YARP wires the shared /<account>/<project> edge route to the foundry-agents APIM API (token limits below apply).",
+  "//tokenLimits": "DENY-BY-DEFAULT allowlist for the governed foundry-agents Responses API. Only the callers listed here may invoke this agent; everyone else gets 403. agentRef defaults to the folder name; use \"*\" for any agent. Each principal is keyed by email (interactive user), appId (web/daemon), or BOTH (OBO, AND-matched). tokensPerMinute is required; tokenQuota + tokenQuotaPeriod are optional.",
+  "exposeToM365": false,
+  "exposeFoundryApi": true,
+  "tokenLimits": {
+    "principals": [
+      {
+        "email": "admin@contoso.net",
+        "tokensPerMinute": 20000,
+        "tokenQuota": 500000,
+        "tokenQuotaPeriod": "Daily"
+      },
+      {
+        "appId": "00000000-0000-0000-0000-000000000000",
+        "tokensPerMinute": 50000
+      }
+    ]
+  }
+}
