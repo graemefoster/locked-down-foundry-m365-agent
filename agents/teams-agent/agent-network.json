@@ -5,5 +5,20 @@
   "//exposeFoundryApi": "false: NOT reachable through the governed Foundry Responses API path.",
   "//tokenLimits": "Omitted: the Teams (activityProtocol) path is governed by the Bot Framework validate-jwt policy on the APIM Teams API, not by the Responses token-limit policy.",
   "exposeToM365": true,
-  "exposeFoundryApi": false
+  "exposeFoundryApi": true,
+  "tokenLimits": {
+    "principals": [
+      {
+        "email": "admin@M365CPI15529713.onmicrosoft.com",
+        "tokensPerMinute": 10000
+      },
+      {
+        "email": "admin@M365CPI15529713.onmicrosoft.com",
+        "appId": "11111111-1111-1111-1111-111111111111",
+        "tokensPerMinute": 30000,
+        "tokenQuota": 1000000,
+        "tokenQuotaPeriod": "Daily"
+      }
+    ]
+  }
 }

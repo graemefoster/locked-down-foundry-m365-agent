@@ -20,6 +20,9 @@ param appServiceDelegationSubnetId string
 @description('APIM gateway base URL the YARP proxy forwards Teams traffic to.')
 param apimGatewayUrl string = ''
 
+@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
+param deployerPublicIp string = ''
+
 // CosmosDB creation
 
 var canaryRegions = ['eastus2euap', 'centraluseuap']
@@ -223,6 +226,7 @@ module appService '../gateway/app-service.bicep' = {
 
     //wire up the YARP proxy
     apimGatewayUrl: apimGatewayUrl
+    deployerPublicIp: deployerPublicIp
   }
 }
 

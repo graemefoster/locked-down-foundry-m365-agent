@@ -7,6 +7,7 @@
 
       * DEPLOY_WINDOWS_VM      — deploy the RDP-in Windows dev VM (+ Azure Bastion)?
       * GITHUB_RUNNER_REPO_URL — install the in-VNet self-hosted GitHub Actions runner?
+      * DEPLOYER_PUBLIC_IP     — allow THIS machine's public IP through the YARP edge (opt-in)?
 
   The answers are persisted to the azd environment (.azure/<env>/.env), which
   infra/main.parameters.json reads via ${VAR=default}. This hook therefore only records the
@@ -75,6 +76,44 @@ else {
       Write-Host '  It is a secret, so it is not prompted here. Set it before provisioning with:'
       Write-Host '      azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>'
     }
+  }
+}
+
+# 3) Deployer public IP allow (opt-in). The YARP public edge defaults to deny-by-default with
+#    only Microsoft Teams' service IP ranges allowed, so a developer testing /agents or /teams
+#    from their laptop is blocked at the network layer. Offer to punch THIS machine's current
+#    public IP through as an Allow rule. Off by default (blank key recorded so it is remembered):
+#    the IP is only a network-layer gate — the caller STILL needs a valid Entra token + an
+#    agent-network.json allowlist entry to reach a Foundry agent, so this does not weaken auth.
+if (Test-AzdEnvKeySet 'DEPLOYER_PUBLIC_IP') {
+  $existing = azd env get-value DEPLOYER_PUBLIC_IP
+  $shown = if ([string]::IsNullOrWhiteSpace($existing)) { '(none)' } else { $existing }
+  Write-Host "[preprovision] DEPLOYER_PUBLIC_IP already set ($shown); leaving as-is."
+}
+else {
+  $myIp = ''
+  try {
+    $myIp = (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5).ToString().Trim()
+  }
+  catch {
+    Write-Host '[preprovision] Could not auto-detect your public IP (api.ipify.org unreachable).'
+  }
+  $prompt = if ([string]::IsNullOrWhiteSpace($myIp)) {
+    'Allow your public IP through the YARP edge? Enter an IP/CIDR (blank = skip)'
+  }
+  else {
+    "Allow your public IP ($myIp) through the YARP edge? [y/N, or enter a different IP/CIDR]"
+  }
+  $answer = (Read-Host $prompt).Trim()
+  $deployerIp = if ($answer -match '^(y|yes)$') { $myIp }
+                elseif ($answer -match '^(n|no)?$') { '' }
+                else { $answer }
+  azd env set DEPLOYER_PUBLIC_IP $deployerIp | Out-Null
+  if ([string]::IsNullOrWhiteSpace($deployerIp)) {
+    Write-Host '[preprovision] DEPLOYER_PUBLIC_IP = (none); only Microsoft Teams ranges reach the edge.'
+  }
+  else {
+    Write-Host "[preprovision] DEPLOYER_PUBLIC_IP = $deployerIp (added as a YARP Allow rule)."
   }
 }
 

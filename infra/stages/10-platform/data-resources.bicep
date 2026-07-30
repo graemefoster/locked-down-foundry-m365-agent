@@ -20,6 +20,9 @@ param appInsightsName string
 // Deterministic gateway URL (threaded so no dependency on the APIM module).
 param apimGatewayUrl string
 
+@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
+param deployerPublicIp string = ''
+
 // From stage 00.
 param logAnalyticsId string
 param appServiceDelegatedSubnetId string
@@ -50,6 +53,7 @@ module aiDependencies './resources/standard-dependent-resources.bicep' = {
 
     //wire up the YARP proxy
     apimGatewayUrl: apimGatewayUrl
+    deployerPublicIp: deployerPublicIp
 
   }
 }

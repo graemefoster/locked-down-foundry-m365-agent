@@ -173,6 +173,7 @@ module apimFoundryAgentLimits './model-gateway/apim-foundry-agent-limits.bicep' 
     apimName: apimName
     apiName: apimFoundryAgentsApi.outputs.apiName
     foundryAccountName: aiAccountName
+    projectName: projectName
     tenantId: tenant().tenantId
     callerAudience: agentCallerAudience
     // agentLimits omitted -> DENY-ALL until the deploy-agent-network workflow supplies the

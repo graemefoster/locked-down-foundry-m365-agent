@@ -13,8 +13,10 @@ name: Deploy agent network integration (Foundry token governance + YARP edge rou
 #   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
 #      appSettings so ONLY explicitly-wired agent paths reach APIM:
 #        * exposeToM365=true  -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
-#        * exposeFoundryApi=true (any agent) -> the shared /<account>/<project> route to the
-#          governed foundry-agents Responses API.
+#        * exposeFoundryApi=true (on ANY agent) -> ONE shared /agents/{**remainder} route that YARP
+#          prepends (PathPrefix) with the governed foundry-agents API path before forwarding to APIM.
+#          APIM reads the agent from the path and rewrites the tail onto the Foundry agent endpoint,
+#          so every protocol (openai/responses, invocations, …) an agent exposes is proxied through.
 #      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
 #      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
 #      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
@@ -65,17 +67,25 @@ jobs:
           APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
           API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
           ACCOUNT_NAME:    ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
+          API_PATH:        ${{ vars.FOUNDRY_AGENTS_API_PATH }}
           CALLER_AUDIENCE: ${{ vars.FOUNDRY_AGENTS_AUDIENCE }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
               [string]::IsNullOrWhiteSpace($env:API_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
               [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME, FOUNDRY_AGENTS_API_PATH and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
+          }
+          # The policy rewrites onto /api/projects/<project>/agents/... — derive <project> from the
+          # API path repo variable ('<account>/<project>'), so no extra repo var is needed.
+          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
+          if ([string]::IsNullOrWhiteSpace($projectName)) {
+            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
           }
 
           # Aggregate every agents/<name>/agent-network.json `tokenLimits` block into one
@@ -159,6 +169,7 @@ jobs:
               apimName=$env:APIM_NAME `
               apiName=$env:API_NAME `
               foundryAccountName=$env:ACCOUNT_NAME `
+              projectName=$projectName `
               tenantId=$tenantId `
               callerAudience=$audience `
               "agentLimits=@$limitsFile" `
@@ -183,8 +194,8 @@ jobs:
           # uses '__' as its delimiter, and we substitute the name's '-' to '_' for the key (below),
           # so an underscore in the name could forge a spurious '__' delimiter.
           $segRe = '^[A-Za-z0-9.-]+$'
-          $teamsAgents = @()
-          $exposeFoundry = $false
+          $teamsAgents   = @()
+          $foundryAgents = @()
 
           Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
             $file = Join-Path $_.FullName 'agent-network.json'
@@ -195,7 +206,10 @@ jobs:
                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
                 $teamsAgents += $name
               }
-              if ($doc.exposeFoundryApi -eq $true) { $exposeFoundry = $true }
+              if ($doc.exposeFoundryApi -eq $true) {
+                if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
+                $foundryAgents += $name
+              }
             }
           }
 
@@ -218,16 +232,26 @@ jobs:
             $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
           }
 
-          if ($exposeFoundry) {
+          # ONE shared Foundry ingress: if ANY agent sets exposeFoundryApi=true, wire a single
+          # edge path /agents/{**remainder} that PREPENDS the governed foundry-agents API path ($p =
+          # '<account>/<project>') and forwards the whole tail to APIM (cluster1). YARP applies just
+          # a PathPrefix, so
+          #   /agents/hello-world-agent/endpoint/protocols/openai/responses
+          #     ->  $p/agents/hello-world-agent/endpoint/protocols/openai/responses
+          # APIM then reads the agent from the path, meters/throttles it, and rewrites the tail onto
+          # /api/projects/<project>/agents/<name>/endpoint/protocols/... — so every protocol an agent
+          # exposes is proxied through the one governed API (no per-agent, per-protocol route).
+          if ($foundryAgents.Count -gt 0) {
             if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
               throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
             }
             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
-            $desired['ReverseProxy__Routes__foundry_api__ClusterId']   = 'cluster1'
-            $desired['ReverseProxy__Routes__foundry_api__Match__Path'] = "$p/{**remainder}"
+            $desired['ReverseProxy__Routes__foundry_agents__ClusterId']                 = 'cluster1'
+            $desired['ReverseProxy__Routes__foundry_agents__Match__Path']               = '/agents/{**remainder}'
+            $desired['ReverseProxy__Routes__foundry_agents__Transforms__0__PathPrefix'] = $p
           }
 
-          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, foundry-api=$exposeFoundry, catch-all neutered):"
+          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, foundry ingress: $([bool]($foundryAgents.Count -gt 0)), catch-all neutered):"
           $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
 
           # Read the current appSettings so we can compute which route settings are now stale.

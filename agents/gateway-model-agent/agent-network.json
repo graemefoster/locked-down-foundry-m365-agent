@@ -9,14 +9,10 @@
   "tokenLimits": {
     "principals": [
       {
-        "email": "admin@contoso.net",
+        "email": "admin@M365CPI15529713.onmicrosoft.com",
         "tokensPerMinute": 20000,
         "tokenQuota": 500000,
         "tokenQuotaPeriod": "Daily"
-      },
-      {
-        "appId": "00000000-0000-0000-0000-000000000000",
-        "tokensPerMinute": 50000
       }
     ]
   }

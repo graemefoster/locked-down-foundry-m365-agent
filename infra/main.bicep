@@ -85,6 +85,9 @@ param gatewayCallerAppId string = ''
 @description('Optional audience the caller Entra token must carry for the governed foundry-agents /responses API (e.g. api://<clientId>). Empty = validate tenant + signature only.')
 param agentCallerAudience string = ''
 
+@description('Optional provisioning-operator public IP (bare IPv4 or CIDR) to allow into the PUBLIC YARP edge for dev/test, in addition to the Microsoft Teams inbound ranges. Empty (default) = Teams-only. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook). Network layer only — callers still need a valid Entra token + token-limit allowlist entry.')
+param deployerPublicIp string = ''
+
 // ==================== TEAMS / M365 PUBLISH ====================
 // The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
 // to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
@@ -285,6 +288,7 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     acrName: acrName
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
+    deployerPublicIp: deployerPublicIp
     storageSkuName: storageSkuName
     providerAccountName: providerAccountName
     apimName: apimName
