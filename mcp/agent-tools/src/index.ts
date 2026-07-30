@@ -16,7 +16,7 @@ import { registerWorldcupMcpTools } from './WorldcupMcpTools';
 import { registerCrmMcpTools } from './CrmMcpTools';
 
 const app = express();
-const port = 8080;
+const port = Number(process.env.PORT) || 8080;
 const websiteHostname = process.env.WEBSITE_HOSTNAME?.trim();
 const fallback = 'https://5bcd-2404-f801-e818-14-2583-9c48-41c7-ff1f.ngrok-free.app'
 const fallbackPublicBaseUrl = websiteHostname ? `https://${websiteHostname}` : fallback;

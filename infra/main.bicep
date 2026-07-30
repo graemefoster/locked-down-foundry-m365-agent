@@ -559,6 +559,9 @@ output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount
 @description('MCP app registration audience the compliance policy validates the agent token against.')
 output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
 
+@description('Name of the private MCP (agent-tools) web app. The predeploy/postdeploy hooks open and re-close its SCM site so azd can zip-deploy the Node source.')
+output MCP_WEBAPP_NAME string = stage20.outputs.mcpWebAppName
+
 // --- Foundry agent token governance (deploy-agent-network workflow) ----------------
 @description('APIM instance name — used by the deploy-agent-network workflow to re-apply the Foundry agent token-limit policy on demand.')
 output FOUNDRY_AGENTS_APIM_NAME string = apimName

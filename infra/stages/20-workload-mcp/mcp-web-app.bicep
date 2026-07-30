@@ -33,6 +33,11 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
   name: 'mcp-${aspName}'
   location: location
   kind: 'app,linux'
+  // azd maps the 'mcp' service (azure.yaml) to this web app via this tag, then builds
+  // agent-tools locally and zip-deploys it (no container image).
+  tags: {
+    'azd-service-name': 'mcp'
+  }
   identity: {
     type: 'UserAssigned'
     userAssignedIdentities: {
@@ -42,7 +47,10 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
   properties: {
     serverFarmId: aspTest.id
     siteConfig: {
-      linuxFxVersion: 'DOCKER|docker.io/graemefoster/my-mcp-function-webapp:0.9'
+      // Node code stack (was a DOCKER image). Source lives in mcp/agent-tools; azd zip-deploys it
+      // and App Service runs `npm start` (ts-node src/index.ts).
+      linuxFxVersion: 'NODE|22-lts'
+      appCommandLine: 'node index.js'
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -56,6 +64,12 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
         }
+        // node_modules are built on the azd host and shipped in the zip, so Kudu must NOT rebuild
+        // (the app's outbound traffic is VNet-routed through a deny-by-default firewall = no npm).
+        {
+          name: 'SCM_DO_BUILD_DURING_DEPLOYMENT'
+          value: 'false'
+        }
         // Magic setting: tells App Service built-in auth to authenticate as the app
         // registration using this managed identity as a federated credential (no secret).
         {
@@ -63,7 +77,13 @@ resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
           value: mcpIdentity.properties.clientId
         }
       ]
+      // Fully private at rest (private endpoint only). The predeploy hook temporarily enables
+      // public access + allows the deployer IP through the SCM site so azd can zip-deploy, then
+      // the postdeploy hook re-disables it. Deny-by-default on the SCM site is belt-and-braces
+      // for the deploy window.
       publicNetworkAccess: 'Disabled'
+      scmIpSecurityRestrictionsUseMain: false
+      scmIpSecurityRestrictionsDefaultAction: 'Deny'
     }
     httpsOnly: true
     virtualNetworkSubnetId: appServiceDelegationSubnetId

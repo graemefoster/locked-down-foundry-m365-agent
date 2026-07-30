@@ -11,6 +11,12 @@
 !agents/**/agent-network.json
 # ...and the MCP gateway config + per-agent rate-limit config (source of truth compiled into APIM).
 !mcp/*.json
+# ...and the App Service source that azd deploys as CODE (these are real app config/manifests,
+# not compiled ARM): the Node MCP app's package manifests + the YARP app's appsettings.
+!mcp/agent-tools/package.json
+!mcp/agent-tools/package-lock.json
+!apps/sample-gateway/appsettings.json
+!apps/sample-gateway/appsettings.Development.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.
@@ -35,6 +41,11 @@ venv/
 # .NET build output
 **/bin/
 **/obj/
+
+# Node dependencies (azd restores these during deploy; never commit them)
+node_modules/
+# Node build output (azd runs `npm run build` to regenerate the bundled MCP app on deploy)
+mcp/agent-tools/dist/
 
 # OS
 .DS_Store

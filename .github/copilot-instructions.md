@@ -10,8 +10,9 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `infra/main.bicep` | Thin deployment orchestrator — declares params + addressing vars and calls the sequential stages under `infra/stages/`. |
 | `infra/main.parameters.json` | **azd** parameter source. Maps each Bicep param to an env var with an inline default (`${VAR=default}`). |
 | `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
-| `azure.yaml` | Wires `infra/` + the `preprovision`, `postprovision` and `predown` hooks. The only post-provision automation is the host-side `postprovision` repo-variable sync — no predeploy/postdeploy, no agent deploys. |
+| `azure.yaml` | Wires `infra/`, two `services:` (the MCP Node app `mcp/agent-tools` + the YARP .NET app `apps/sample-gateway`, both `host: appservice` deployed as CODE), and the `preprovision`, `postprovision`, `predeploy`, `postdeploy` and `predown` hooks. azd provisions, syncs repo variables (`postprovision`), then deploys the two apps' code (wrapped by `predeploy`/`postdeploy`). Still no agent deploys — those stay workflow-only. |
 | `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
+| `hooks/predeploy.ps1` / `hooks/postdeploy.ps1` | azd **predeploy**/**postdeploy** hooks — host-side; open (then re-lock) the deny-by-default SCM sites of the MCP + YARP web apps for the deployer's public IP (MCP also toggles `publicNetworkAccess`) so azd can zip-deploy the app code. Both dot-source `hooks/appservice-scm-common.ps1`. |
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the GitHub runner **host-side via `gh`** (delete by name `<vmName>-vnet`) + deletes capability hosts before teardown. |
 | `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
 | `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
@@ -46,9 +47,10 @@ azd down
   requires it (use lowercase `true`/`false`).
 - `vmAdminPassword` has **no** default and is **omitted** from `main.parameters.json`, so azd
   **prompts for it interactively** — it is never stored in the repo.
-- **azd deploys no agents** — its only post-provision step is the `postprovision` hook, which
-  syncs repo variables (`gh variable set`) so the workflows just work. Seeding/compliance/publish
-  are workflow-only (below).
+- **azd deploys no agents** — post-provision it runs the `postprovision` hook (syncs repo
+  variables via `gh variable set` so the workflows just work) and then its deploy phase pushes the
+  two App Service **code** `services:` (MCP + YARP). Agent seeding/compliance/publish are
+  workflow-only (below).
 - **Known transient failure:** provisioning can fail the first time with
   `KeyVaultAuthenticationFailure` / `AccessPolicyNotConfiguredForKeyVault`. This is an RBAC
   **role-assignment propagation delay** (the Key Vault Crypto role granted to the AI Services /
@@ -117,9 +119,11 @@ azd down
   If a workflow reads it as `vars.NAME`, also add it to the `$variableMap` in
   `hooks/postprovision.ps1` so the postprovision sync pushes it to repo variables. Hooks (predown)
   read outputs straight from the env.
-- **`azure.yaml` has no `services:` and no predeploy/postdeploy hooks.** azd provisions and then
-  runs one host-side `postprovision` step (repo-variable sync only). `predown` runs on any
-  `azd down`. All agent/compliance/publish work is the in-VNet runner workflows.
+- **`azure.yaml` has two `services:` (MCP Node app + YARP .NET app) deployed as code, plus
+  `predeploy`/`postdeploy` hooks** that open and re-lock the apps' SCM sites for the deploy. azd
+  provisions, runs the host-side `postprovision` step (repo-variable sync), then deploys the two
+  apps' code. `predown` runs on any `azd down`. All agent/compliance/publish work is still the
+  in-VNet runner workflows.
 
 ## AI gateway (a.k.a. model gateway in Bicep)
 The shared private APIM instance is always deployed. Bicep still names it `model-gateway`

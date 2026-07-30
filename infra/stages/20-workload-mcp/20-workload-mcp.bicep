@@ -92,3 +92,4 @@ module mcpBuiltinAuth './gateway/builtin-auth.bicep' = {
 
 output servers array = apimMcpServers.outputs.servers
 output mcpAudience string = mcpAppRegistration.outputs.audience
+output mcpWebAppName string = mcpWebApp.outputs.mcpWebAppName
