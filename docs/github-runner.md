@@ -18,14 +18,14 @@ no Run Command) — there is no point installing a runner it can't register.
 
 | VM | Module | When | Purpose |
 |---|---|---|---|
-| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/stages/40-runner/resources/vm-linux.bicep` | **always** | Hosts the Actions runner, and is the `az vm run-command` target for agent seeding. Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
+| **Linux worker** (Ubuntu 24.04, `Standard_D2s_v6`) | `infra/stages/40-runner/resources/vm-linux.bicep` | **always** | Hosts the Actions runner (agent seeding runs on it as the runner). Holds **all** the private-plane RBAC (Foundry, Key Vault, Contributor, OpenAI User). |
 | **Windows dev VM** | `infra/stages/40-runner/resources/vm.bicep` | only when `deployWindowsVm` is true (**default false**) | Human-only: RDP in over Bastion and run Edge to inspect the environment behind the firewall. Holds **no** RBAC. |
 
 Azure Bastion lives in its own module (`infra/stages/40-runner/resources/bastion.bicep`) and exists
 purely for **interactive human access**. It is the only way into the Windows dev VM (RDP),
 so it is gated by `deployBastion`, which **defaults to `deployWindowsVm`** — bring the
 Windows VM up and Bastion comes with it. The Linux worker needs no interactive path (agent
-seeding goes through `az vm run-command`, and the runner registers *outbound*), so the
+seeding runs on the runner, which registers *outbound*), so the
 default deployment gets neither. `azd up`'s preprovision hook prompts whether to deploy
 the Windows VM; you can also set it non-interactively:
 
@@ -109,26 +109,11 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
    collaborators'** fork-PR workflow runs; set the default `GITHUB_TOKEN` to read-only.
 
 4. **Set the deploy-workflow repo variables.** The `postprovision` hook does this for you: after
-   `azd provision` succeeds it runs `hooks/postprovision.ps1`, which pushes the relevant azd
-   outputs into repo Settings → Secrets and variables → Actions → *Variables* via `gh variable set`
-   (so the per-agent `deploy-*-agent.yml` and `deploy-agent-network.yml` workflows "just work"). It
-   needs the GitHub CLI authenticated (`gh auth login`) with permission to write repo variables.
-   Re-run it any time with `azd hooks run postprovision`.
-
-   It syncs the same-named outputs (`AZURE_RESOURCE_GROUP`, `AZURE_AI_PROJECT_ENDPOINT`,
-   `AZURE_AI_MODEL_DEPLOYMENT_NAME`, `MCP_COMPLIANCE_APIM_NAME`, `MCP_COMPLIANCE_AUDIENCE`,
-   `TEAMS_*`) plus one rename — `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`. `TEAMS_PUBLISH_SCOPE` has no
-   output (it is an operator choice), so set it manually if you use Teams publishing.
-
-   To set any variable by hand instead (e.g. from a different environment), mirror the azd output:
-
-   ```bash
-   gh variable set AZURE_AI_PROJECT_ENDPOINT --body "$(azd env get-value AZURE_AI_PROJECT_ENDPOINT)"
-   gh variable set MCP_SERVER_URL --body "$(azd env get-value MCP_GATEWAY_URL)"
-   ```
-
-   You can also override any variable per-run via the workflow's dispatch inputs; the inputs take
-   precedence over the variables.
+   `azd provision` succeeds it pushes the relevant azd outputs into repo variables via
+   `gh variable set` (needs `gh auth login` with variable-write permission). Re-run any time with
+   `azd hooks run postprovision`. It syncs the same-named outputs plus one rename
+   (`MCP_SERVER_URL` ← `MCP_GATEWAY_URL`); `TEAMS_PUBLISH_SCOPE` has no output, so set it by hand
+   if you use Teams publishing. Workflow dispatch inputs override any variable per-run.
 
 ## Enable it
 

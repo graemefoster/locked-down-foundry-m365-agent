@@ -20,17 +20,14 @@ It plays **three roles** on the same instance:
 Putting all three behind one APIM means there is a **single enforcement point** for auth, rate
 limiting, quotas, and usage attribution across models, tools, and inbound M365 traffic.
 
-> **Naming note.** The Bicep still calls this the *model gateway* (modules under
-> `infra/stages/*/model-gateway/`, the `model-gateway` connection, the `10.3.0.0/16`
-> "model-gateway spoke"). Those identifiers are unchanged to avoid churning a live deployment;
-> "AI gateway" is the broader concept the same infrastructure has grown into. Where you see
-> `model-gateway` in code/paths below, read it as "the AI gateway".
-
-> **APIM and the whole gateway are always deployed.** The APIM Standard v2 instance, its
-> gateway spoke (`10.3.0.0/16`), inbound private endpoint, `privatelink.azure-api.net` DNS zone,
-> the **provider Foundry** account, the APIM inference API/connection, the MCP APIs, and the
-> second seeded agent are all provisioned unconditionally — the model path, the MCP path, *and*
-> the [Teams / M365 publish path](./teams-m365.md) all route through this shared infrastructure.
+> **Always deployed.** APIM (Standard v2), its gateway spoke (`10.3.0.0/16`), inbound PE,
+> `privatelink.azure-api.net` DNS zone, the provider Foundry account, the inference
+> API/connection, the MCP APIs, and the second seeded agent are all provisioned unconditionally.
+>
+> **Naming note:** the Bicep still calls this the *model gateway* (modules under
+> `infra/stages/*/model-gateway/`, the `model-gateway` connection, the `10.3.0.0/16` spoke) —
+> those identifiers are unchanged to avoid churning a live deployment. Read `model-gateway` in
+> code/paths as "the AI gateway".
 
 ---
 

@@ -42,31 +42,26 @@ Foundry, read the primer first.
 
 ## New to Foundry? A 5-minute primer
 
-A few Foundry concepts explain *why* the locked-down design looks the way it does. If these
-are already familiar, skip to [What gets deployed](#what-gets-deployed).
+A few Foundry concepts explain *why* the design looks the way it does. Skip to
+[What gets deployed](#what-gets-deployed) if they're familiar.
 
-- **Foundry account & project.** The **account** (an `Microsoft.CognitiveServices` resource
-  of kind `AIServices`) is the top-level Foundry resource; a **project** is an isolated
-  workspace inside it. Agents live in a project, and all agents in a project share the same
-  file storage, conversation (thread) storage, and search indexes. Projects are the unit of
-  isolation.
+- **Account & project.** The **account** (`Microsoft.CognitiveServices`, kind `AIServices`) is
+  the top-level resource; a **project** is an isolated workspace inside it. Agents live in a
+  project and share its file/thread/search storage. The project is the unit of isolation.
 - **Agents.** An agent is a model + instructions (+ optional tools). This sample deploys
-  **prompt agents** (declared in `agents/<name>/agent.yaml`). Foundry also supports **hosted**
-  (containerized) agents — see the [roadmap](./BACKLOG.md).
-- **Bring-Your-Own (BYO) data plane.** Foundry agents are **stateful**, and their state is
-  stored in **your own** Azure resources, not Microsoft-managed ones: **Azure Cosmos DB**
-  (threads/conversation history), **Azure AI Search** (vector stores), and **Azure Storage**
-  (files). Locking down the agent therefore means locking down *all* of these too.
-- **Capability host.** When you enable the Agents feature on a project, Foundry provisions an
-  **Agents capability host** — the managed compute (an Azure Container Apps environment) that
-  actually runs agents, injected into a **delegated subnet** in your VNet. This is why the
-  agent subnet is delegated to `Microsoft.App/environments`, and why teardown has to delete
-  the capability host *before* the account/project.
-- **Why "private" is the hard part.** With public network access disabled, the Foundry data
-  plane (the Agents REST API) is reachable **only from inside the VNet**. That single fact
-  drives Level 2 and Level 3: you can't create, publish, or govern agents from your laptop or
-  a GitHub-hosted runner — you need compute *inside* the network. This sample solves that with
-  an **in-VNet self-hosted GitHub Actions runner**.
+  **prompt agents** (`agents/<name>/agent.yaml`); hosted (containerized) agents are on the
+  [roadmap](./BACKLOG.md).
+- **BYO data plane.** Agents are stateful, and their state lives in **your own** resources:
+  **Cosmos DB** (threads), **AI Search** (vectors), **Storage** (files). Locking down the agent
+  means locking down all three.
+- **Capability host.** Enabling Agents on a project provisions an **Agents capability host** —
+  managed compute (an Azure Container Apps environment) injected into a **delegated subnet** in
+  your VNet. Hence the agent subnet is delegated to `Microsoft.App/environments`, and teardown
+  must delete the capability host *before* the account/project.
+- **Why "private" is the hard part.** With public access disabled, the Foundry data plane (the
+  Agents REST API) is reachable **only from inside the VNet** — you can't create, publish, or
+  govern agents from a laptop or a GitHub-hosted runner. This sample solves that with an
+  **in-VNet self-hosted GitHub Actions runner**.
 
 ## What gets deployed
 
@@ -166,25 +161,16 @@ and single-tenant lockdown.
 
 ---
 
-## Documentation map
+## Documentation
 
-**Cross-cutting** (used by all three levels):
+**Cross-cutting** (all levels): [architecture](./docs/architecture.md) ·
+[governance](./docs/governance.md) · [ai-gateway](./docs/ai-gateway.md) ·
+[what-runs-where](./docs/what-runs-where.md).
+Each level's docs are linked from its section above.
 
-| Doc | What's inside |
-|-----|---------------|
-| [docs/architecture.md](./docs/architecture.md) | Resource-by-resource deep dive, private DNS zones, RBAC, Bicep `stages/` module structure. |
-| [docs/governance.md](./docs/governance.md) | How governance is layered (model content safety, agent/tool access, gateway & M365 auth) and where it lives in the code. |
-| [docs/ai-gateway.md](./docs/ai-gateway.md) | The shared private AI gateway (APIM) that fronts models, MCP servers, and the Teams/M365 inbound path. |
-| [docs/what-runs-where.md](./docs/what-runs-where.md) | What each `hooks/`/`scripts/` file does, where it runs, and which identity it uses. |
-
-**By level:** Level 1 → [NETWORKING.md](./docs/NETWORKING.md) · [architecture](./docs/architecture.md) ·
-[RAI guardrail](./docs/rai-guardrail-policy.md) — Level 2 → [deployment](./docs/deployment.md) ·
-[github-runner](./docs/github-runner.md) · [ai-gateway](./docs/ai-gateway.md) — Level 3 →
-[teams-m365](./docs/teams-m365.md). **Cross-cutting** → [governance](./docs/governance.md).
-
-> **Roadmap.** Where this reference implementation is heading (hosted agents, eval gates,
-> multi-environment promotion, governance, a sample UI) lives in
-> **[BACKLOG.md](./BACKLOG.md)** — it's project direction, not part of the learning path above.
+> **Roadmap.** Where this is heading (hosted agents, eval gates, multi-environment promotion,
+> governance, a sample UI) lives in **[BACKLOG.md](./BACKLOG.md)** — project direction, not part
+> of the learning path.
 
 ## References
 

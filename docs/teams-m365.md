@@ -152,8 +152,8 @@ Optional publish metadata is read from repo variables by the `publish-teams` act
 > unique resource suffix (`TEAMS_NAME_PREFIX`) so agents from different deployments stay
 > distinct in a shared tenant catalog instead of colliding on a bare name like `teams-agent`.
 
-> **Caller RBAC:** VM run-command invoke (e.g. *Virtual Machine Contributor*) +
-> *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.
+> **Runner RBAC:** the VM managed identity holds *Azure Bot Service Contributor* (create the
+> bot) + *Contributor* on the RG + *Foundry User* on the project.
 > The `Microsoft.BotService` resource provider is registered by the hook.
 
 See [NETWORKING.md](./NETWORKING.md#teams--m365-publish-inbound-path) for
