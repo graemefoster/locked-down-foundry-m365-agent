@@ -79,7 +79,7 @@ param gatewayModelSkuName string = 'GlobalStandard'
 @description('Capacity (TPM) of the gateway-exposed model deployment.')
 param gatewayModelCapacity int = 30
 
-@description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See NETWORKING.md.')
+@description('Optional caller app/client ID to pin in the APIM validate-azure-ad-token policy (empty = validate tenant + audience only). See docs/NETWORKING.md.')
 param gatewayCallerAppId string = ''
 
 @description('Optional audience the caller Entra token must carry for the governed foundry-agents /responses API (e.g. api://<clientId>). Empty = validate tenant + signature only.')

@@ -1,8 +1,8 @@
 # Foundry Standard Agent — Network Lockdown Reference
 
 > **Level 1 — Lock down the network.** Part of the
-> [locked-down Foundry agent](./README.md) reference implementation.
-> Resource deep dive: [docs/architecture.md](./docs/architecture.md).
+> [locked-down Foundry agent](../README.md) reference implementation.
+> Resource deep dive: [docs/architecture.md](./architecture.md).
 
 > The definitive, rule-by-rule reference for the network posture in this sample
 > (`99-private-network-standard-agent-firewall`). Every NSG rule and every
@@ -70,7 +70,7 @@ tags** — the tightest option that still works without breaking the platform.
 ## Agent subnet NSG (`<vnet>-agent-nsg`)
 
 Attached to `agent-subnet` only. Deny-by-default in **both** directions.
-Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](./infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
+Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](../infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
 
 ### Inbound
 
@@ -234,7 +234,7 @@ against a dataset. The action can also produce a **version-over-version comparis
 
 ## Azure Firewall — deny-by-default for the agent subnet
 
-Basic tier, defined in [`infra/stages/00-foundation/network/firewall.bicep`](./infra/stages/00-foundation/network/firewall.bicep).
+Basic tier, defined in [`infra/stages/00-foundation/network/firewall.bicep`](../infra/stages/00-foundation/network/firewall.bicep).
 Azure Firewall has an **implicit final DENY**: anything not matched by an Allow
 rule is dropped. We exploit that to lock the agent subnet while leaving the dev
 VM and App Service spoke on their existing general egress.
@@ -282,7 +282,7 @@ control-plane surfaces plus the single A365 hostname.
 ## Optional: Model Gateway spoke (APIM + provider Foundry)
 
 > **Naming:** the Bicep/spoke is called *model-gateway*, but conceptually this APIM is the
-> shared **AI gateway** (models + MCP + M365 auth). See [docs/ai-gateway.md](./docs/ai-gateway.md).
+> shared **AI gateway** (models + MCP + M365 auth). See [docs/ai-gateway.md](./ai-gateway.md).
 > The rule and resource names below keep the `model-gateway` prefix.
 
 Always deployed. It adds a
@@ -490,7 +490,7 @@ AZFWNetworkRule
 NSG flow logs are **retired** (no new logs after **2025-06-30**, full retirement
 **2027-09-30**), so this sample uses the successor **VNet flow logs** on the
 agent subnet, defined in
-[`infra/stages/00-foundation/network/agent-flow-logs.bicep`](./infra/stages/00-foundation/network/agent-flow-logs.bicep):
+[`infra/stages/00-foundation/network/agent-flow-logs.bicep`](../infra/stages/00-foundation/network/agent-flow-logs.bicep):
 
 - Target: the agent subnet.
 - Storage: a dedicated locked-down account (no anonymous blob access, HTTPS
@@ -545,7 +545,7 @@ order — the earlier items are the ones that actually bit us.
    agent NSG blocks outbound to the APIM private endpoint unless explicitly
    allowed. The fix that finally worked was the `Allow-ModelGatewayApim-Outbound`
    rule (agent subnet → APIM PE CIDR :443) in
-   [`foundry-spoke-vnet.bicep`](./infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
+   [`foundry-spoke-vnet.bicep`](../infra/stages/00-foundation/network/foundry-spoke-vnet.bicep).
    **Verify the runtime path in the firewall** — you should see the agent subnet
    reach the APIM PE IP:
 

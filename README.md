@@ -133,7 +133,7 @@ encryption, and VNet flow logs for observability.
 
 | Doc | What's inside |
 |-----|---------------|
-| **[NETWORKING.md](./NETWORKING.md)** | The definitive, rule-by-rule network reference: topology, every NSG and firewall rule with its purpose, the two known limitations to raise with the product team, observability (firewall logs + VNet flow logs), and a debugging playbook. |
+| **[NETWORKING.md](./docs/NETWORKING.md)** | The definitive, rule-by-rule network reference: topology, every NSG and firewall rule with its purpose, the two known limitations to raise with the product team, observability (firewall logs + VNet flow logs), and a debugging playbook. |
 | **[docs/architecture.md](./docs/architecture.md)** | Resource-by-resource deep dive: Foundry account/project, BYO Cosmos/Search/Storage, private DNS zones, RBAC role assignments, and the Bicep `stages/` module structure. |
 | **[docs/rai-guardrail-policy.md](./docs/rai-guardrail-policy.md)** | Governing the *model* layer: a strict content-filter (Responsible AI) baseline assigned as an Azure Policy initiative (Audit), why it can't block, and an optional non-compliant demo. (Part of the broader [governance](./docs/governance.md) story.) |
 
@@ -162,7 +162,7 @@ and single-tenant lockdown.
 | Doc | What's inside |
 |-----|---------------|
 | **[docs/teams-m365.md](./docs/teams-m365.md)** | The full publish path: why the Azure Bot Service is a registration (not an appliance), the inbound firewall/JWT flow, the DNS/firewall tradeoff, the workflow-driven publish, and the delegated-token requirement. |
-| **[NETWORKING.md § Teams / M365 publish inbound path](./NETWORKING.md#teams--m365-publish-inbound-path)** | The network-level detail: the `401` trap (APIM → `login.botframework.com`), the cross-spoke APIM → Foundry path, and the Teams published-IP allow-list. |
+| **[NETWORKING.md § Teams / M365 publish inbound path](./docs/NETWORKING.md#teams--m365-publish-inbound-path)** | The network-level detail: the `401` trap (APIM → `login.botframework.com`), the cross-spoke APIM → Foundry path, and the Teams published-IP allow-list. |
 
 ---
 
@@ -177,7 +177,7 @@ and single-tenant lockdown.
 | [docs/ai-gateway.md](./docs/ai-gateway.md) | The shared private AI gateway (APIM) that fronts models, MCP servers, and the Teams/M365 inbound path. |
 | [docs/what-runs-where.md](./docs/what-runs-where.md) | What each `hooks/`/`scripts/` file does, where it runs, and which identity it uses. |
 
-**By level:** Level 1 → [NETWORKING.md](./NETWORKING.md) · [architecture](./docs/architecture.md) ·
+**By level:** Level 1 → [NETWORKING.md](./docs/NETWORKING.md) · [architecture](./docs/architecture.md) ·
 [RAI guardrail](./docs/rai-guardrail-policy.md) — Level 2 → [deployment](./docs/deployment.md) ·
 [github-runner](./docs/github-runner.md) · [ai-gateway](./docs/ai-gateway.md) — Level 3 →
 [teams-m365](./docs/teams-m365.md). **Cross-cutting** → [governance](./docs/governance.md).

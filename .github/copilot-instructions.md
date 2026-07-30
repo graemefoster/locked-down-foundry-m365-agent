@@ -130,7 +130,7 @@ The shared private APIM instance is always deployed. Bicep still names it `model
 broader **AI gateway**: it fronts models (APIM-fronted provider Foundry + a second seeded agent
 routed through it), MCP servers, and the Teams/M365 inbound auth checks. See `docs/ai-gateway.md`
 (full design + MCP governance) and `docs/governance.md` (governance overview). Networking
-deep-dive: `NETWORKING.md`.
+deep-dive: `docs/NETWORKING.md`.
 
 ## MCP compliance (agent → APIM allowlist)
 `mcp/mcp-policy.json` is the **name-only** source of truth (deny-by-default). At apply time,

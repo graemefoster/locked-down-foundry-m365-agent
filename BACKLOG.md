@@ -35,7 +35,7 @@ Understanding the current state keeps the backlog honest. Already shipped:
 
 - **Locked-down infrastructure** via `azd` + Bicep: private VNet, private endpoints on every
   dependency, deny-by-default Azure Firewall, CMK encryption, RBAC, in-VNet VM. See
-  [docs/architecture.md](./docs/architecture.md) and [NETWORKING.md](./NETWORKING.md).
+  [docs/architecture.md](./docs/architecture.md) and [NETWORKING.md](./docs/NETWORKING.md).
 - **Prompt-agent CI/CD**: [`.github/workflows/deploy-teams-agent.yml`](./.github/workflows/deploy-teams-agent.yml)
   (a thin caller of the reusable [`deploy-agent.yml`](./.github/workflows/deploy-agent.yml))
   parses `agents/teams-agent/agent.yaml`, then creates/updates + publishes the agent version

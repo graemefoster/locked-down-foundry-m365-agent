@@ -2,7 +2,7 @@
 
 > **Level 2 — Automate agent deployment.** Part of the
 > [locked-down Foundry agent](../README.md) reference implementation.
-> Networking: [NETWORKING.md § gateway spoke](../NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
+> Networking: [NETWORKING.md § gateway spoke](./NETWORKING.md#optional-model-gateway-spoke-apim--provider-foundry).
 > Governance overview: [governance.md](./governance.md).
 
 This sample deploys **one shared, private Azure API Management (Standard v2) instance** that

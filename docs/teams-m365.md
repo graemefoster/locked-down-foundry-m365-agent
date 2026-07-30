@@ -2,7 +2,7 @@
 
 > **Level 3 — Publish to Teams / M365.** Part of the
 > [locked-down Foundry agent](../README.md) reference implementation. Networking deep-dive:
-> [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path).
+> [NETWORKING.md](./NETWORKING.md#teams--m365-publish-inbound-path).
 
 The Teams / M365 publish path is **always deployed**. Each agent that wants a Teams presence is
 published by **its own deploy workflow** (`deploy-teams-agent.yml`,
@@ -156,5 +156,5 @@ Optional publish metadata is read from repo variables by the `publish-teams` act
 > *Azure Bot Service Contributor* (create the bot) + *Foundry User* on the project.
 > The `Microsoft.BotService` resource provider is registered by the hook.
 
-See [NETWORKING.md](../NETWORKING.md#teams--m365-publish-inbound-path) for
+See [NETWORKING.md](./NETWORKING.md#teams--m365-publish-inbound-path) for
 the inbound/return firewall and routing details.

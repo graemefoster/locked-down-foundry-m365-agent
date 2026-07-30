@@ -2,7 +2,7 @@
   Teams / M365 publish: APIM inbound API + policy
   -----------------------------------------------
   The inbound path for publishing a private Foundry agent to Microsoft Teams /
-  M365 Copilot (see the Learn article linked in README.md / NETWORKING.md):
+  M365 Copilot (see the Learn article linked in README.md / docs/NETWORKING.md):
 
     Bot Channel Adapter -> Azure Bot Service -> YARP (public App Service)
       -> THIS APIM API -> the Foundry agent activityProtocol endpoint (private PE).

@@ -3,7 +3,7 @@
 > **Cross-cutting foundation** (underpins all three levels). Part of the
 > [locked-down Foundry agent](../README.md) reference implementation.
 
-Resource-by-resource detail of the network-secured Foundry agent environment. For the rule-by-rule networking reference see [NETWORKING.md](../NETWORKING.md); for deployment steps see [deployment.md](./deployment.md).
+Resource-by-resource detail of the network-secured Foundry agent environment. For the rule-by-rule networking reference see [NETWORKING.md](./NETWORKING.md); for deployment steps see [deployment.md](./deployment.md).
 
 ## Network Secured Agent Project Architecture Deep Dive
 
