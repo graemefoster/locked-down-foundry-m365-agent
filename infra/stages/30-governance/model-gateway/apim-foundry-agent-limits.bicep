@@ -76,12 +76,12 @@ var metricNs = agentLimits.?metricNamespace ?? metricNamespace
 var agents = agentLimits.?agents ?? []
 
 // --- Caller-identity variable expressions (read once from the validated `jwt`) ----------------
-// Email: preferred_username (v2) -> upn (v1) -> email; AppId: appid (v1) -> azp (v2). All
+// Email: unique_name -> upn -> email; AppId: azp (v2) -> appid (v1). All
 // lowercased so the allowlist compare is case-insensitive. Agent: read from the URL PATH
 // (…/agents/<name>/…) — a multi-protocol passthrough addresses the agent in the path, not the
 // body — so metering/throttling works for EVERY protocol (openai/responses, invocations, …).
-var jwtEmailExpr = '((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;preferred_username&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;upn&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;email&quot;, string.Empty))).ToLowerInvariant()'
-var jwtAppIdExpr = '((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;appid&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;azp&quot;, string.Empty)).ToLowerInvariant()'
+var jwtEmailExpr = '((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;unique_name&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;upn&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;email&quot;, string.Empty))).ToLowerInvariant()'
+var jwtAppIdExpr = '((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;azp&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;appid&quot;, string.Empty)).ToLowerInvariant()'
 // agentsPath = the URL tail from '/agents/' onwards (e.g. /agents/<name>/endpoint/protocols/openai/responses).
 // This is BOTH the throttling key source (agent segment) and the backend rewrite source.
 var agentsPathExpr = '@{ var p = context.Request.OriginalUrl.Path; var i = p.IndexOf(&quot;/agents/&quot;, System.StringComparison.OrdinalIgnoreCase); return i &gt;= 0 ? p.Substring(i) : string.Empty; }'

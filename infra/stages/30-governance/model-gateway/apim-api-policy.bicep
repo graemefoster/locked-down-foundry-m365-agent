@@ -57,6 +57,9 @@ param callerProjectResourceId string = ''
 @description('API version used for the ARM control-plane model-discovery calls (GET /deployments).')
 param deploymentDiscoveryApiVersion string = '2023-05-01'
 
+@description('Application Insights metric namespace for chat-completions token usage.')
+param metricNamespace string = 'model-gateway-tokens'
+
 var tenantId = subscription().tenantId
 
 var clientAppRestriction = empty(projectMiClientId)
@@ -88,7 +91,7 @@ var armBackendId = 'model-gateway-arm'
 var policyTemplate = '''<policies>
   <inbound>
     <base />
-    <validate-azure-ad-token tenant-id="@@TENANT@@" header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: token failed validation.">
+    <validate-azure-ad-token tenant-id="@@TENANT@@" header-name="Authorization" output-token-variable-name="jwt" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: token failed validation.">
       @@CLIENT_APPS@@
       <audiences>
         <audience>@@AUDIENCE@@</audience>
@@ -96,6 +99,13 @@ var policyTemplate = '''<policies>
       </audiences>
       @@REQUIRED_CLAIMS@@
     </validate-azure-ad-token>
+    <set-variable name="callerAppId" value="@(((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;azp&quot;, ((Jwt)context.Variables[&quot;jwt&quot;]).Claims.GetValueOrDefault(&quot;appid&quot;, string.Empty)).ToLowerInvariant())" />
+    <llm-emit-token-metric namespace="@@METRIC_NAMESPACE@@">
+      <dimension name="API ID" />
+      <dimension name="Operation ID" />
+      <dimension name="Backend ID" />
+      <dimension name="CallerAppId" value="@((string)context.Variables[&quot;callerAppId&quot;])" />
+    </llm-emit-token-metric>
     <set-backend-service backend-id="@@BACKENDID@@" />
     <authentication-managed-identity resource="@@AUDIENCE@@" />
   </inbound>
@@ -136,6 +146,8 @@ var renderedPolicy = replace(
   '@@BACKENDID@@',
   dataPlaneBackendId
 )
+
+var renderedPolicyWithMetricNamespace = replace(renderedPolicy, '@@METRIC_NAMESPACE@@', metricNamespace)
 
 // -------------------- Dynamic model discovery --------------------
 // Foundry discovers models at runtime by calling GET /deployments (list) and
@@ -258,7 +270,7 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2024-05-01' = 
   name: 'policy'
   properties: {
     format: 'rawxml'
-    value: renderedPolicy
+    value: renderedPolicyWithMetricNamespace
   }
   dependsOn: [
     chatCompletionsOperation

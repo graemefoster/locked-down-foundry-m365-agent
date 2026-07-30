@@ -26,6 +26,8 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
     Flow_Type: 'BlueField'
     WorkspaceResourceId: lanalytics.id
     RetentionInDays: 30
+    #disable-next-line BCP037
+    CustomMetricsOptedInType: 'WithDimensions'
   }
 }
 

@@ -120,6 +120,7 @@ resource apimAppInsightsDiagnostic 'Microsoft.ApiManagement/service/diagnostics@
   name: 'applicationinsights'
   properties: {
     loggerId: apimAppInsightsLogger.id
+    metrics: true
     alwaysLog: 'allErrors'
     sampling: {
       samplingType: 'fixed'
