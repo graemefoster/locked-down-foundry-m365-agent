@@ -1,0 +1,151 @@
+name: Deploy agent limits (Foundry token governance)
+
+# ---------------------------------------------------------------------------
+# On-demand (re-)apply of the per-agent LLM token-governance policy from every
+# agents/<name>/limits.json into the governed foundry-agents APIM API. This is the fast
+# path used after editing a limits.json — it re-deploys ONLY the
+# apim-foundry-agent-limits.bicep module (the same module `azd up` runs with an EMPTY
+# allowlist, i.e. DENY-ALL), so the provisioned and applied policies can never diverge. A
+# full `azd up` is not required just to change token budgets.
+#
+# NAME-ONLY config + host-side aggregation (NO data-plane resolution):
+#   Unlike MCP compliance, caller identities (emails / appids) are known at authoring time and
+#   the agent is selected in the request body, so there is NOTHING to resolve against the Foundry
+#   data plane. This workflow simply AGGREGATES every agents/<name>/limits.json into one
+#   `agentLimits` object (injecting agentRef = the agent folder name unless the file overrides it),
+#   then passes it to the Bicep module. azd deploys no agents post-provision and applies DENY-ALL,
+#   so run this after `azd up` and again whenever you edit a limits.json.
+#
+# Runner:
+#   The APIM policy deployment is an ARM control-plane op, but this repo's APIM is private and the
+#   deployment runs against the resource group the in-VNet runner is joined to. Keep it on the
+#   in-VNet self-hosted runner for parity with deploy-compliancy — the VM authenticates with its
+#   own managed identity (IMDS) and holds Contributor on the resource group. No Microsoft Graph
+#   permission is needed. Lockdown: workflow_dispatch only (forks cannot queue), repository guard,
+#   and the `vnet-deploy` environment (add a REQUIRED REVIEWER + branch=main for an approval gate).
+#
+# Prerequisites (Bicep outputs, set as repo variables — the postprovision hook syncs these
+# automatically): AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
+# FOUNDRY_AGENTS_ACCOUNT_NAME, and (optional) FOUNDRY_AGENTS_AUDIENCE. Run `azd env refresh` if
+# any are missing. Which agents get a budget is driven by the agents/*/limits.json files.
+# ---------------------------------------------------------------------------
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apply-agent-limits:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: vnet-deploy
+    steps:
+      - uses: actions/checkout@v5
+
+      # az is installed on the Linux worker VM by cloud-init. Authenticate as the VM
+      # managed identity (holds Contributor on the resource group) — no secrets needed.
+      - name: Sign in with the VM managed identity
+        shell: pwsh
+        run: az login --identity --output none
+
+      - name: Aggregate limits.json and apply the Foundry agent token-limit policy
+        shell: pwsh
+        env:
+          RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
+          API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
+          ACCOUNT_NAME:    ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
+          CALLER_AUDIENCE: ${{ vars.FOUNDRY_AGENTS_AUDIENCE }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
+              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+          }
+          $tenantId = az account show --query tenantId -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+            throw "Failed to resolve tenant ID from 'az account show'."
+          }
+
+          # Aggregate every agents/<name>/limits.json into one { agents: [ { agentRef, principals } ] }
+          # object. agentRef defaults to the folder name; a file may override it (e.g. "*" wildcard).
+          # Keys starting with "//" are treated as comments and ignored.
+          $agents = @()
+          # Strict validation of every principal BEFORE it reaches the Bicep policy generator.
+          # limits.json is repo-controlled (trusted via PR), but the values are interpolated into
+          # APIM policy XML / C# match expressions, so reject anything that could break out of a
+          # string literal or is otherwise malformed. This is the primary injection guard (the
+          # Bicep module also strips quotes/backslashes as defence-in-depth).
+          $emailRe  = '^[^@\s"\\<>]+@[^@\s"\\<>]+\.[^@\s"\\<>]+$'
+          $guidRe   = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          $refRe    = '^[A-Za-z0-9._*-]+$'
+          $periods  = @('Hourly','Daily','Weekly','Monthly','Yearly')
+          function Test-Principal([object]$p, [string]$src) {
+            $hasEmail = $p.PSObject.Properties.Name -contains 'email' -and -not [string]::IsNullOrWhiteSpace([string]$p.email)
+            $hasAppId = $p.PSObject.Properties.Name -contains 'appId' -and -not [string]::IsNullOrWhiteSpace([string]$p.appId)
+            if (-not ($hasEmail -or $hasAppId)) { throw "$src: a principal has neither 'email' nor 'appId'." }
+            if ($hasEmail -and ([string]$p.email) -notmatch $emailRe) { throw "$src: invalid email '$($p.email)'." }
+            if ($hasAppId -and ([string]$p.appId) -notmatch $guidRe) { throw "$src: 'appId' must be a GUID, got '$($p.appId)'." }
+            $tpm = 0
+            if (-not [int]::TryParse([string]$p.tokensPerMinute, [ref]$tpm) -or $tpm -le 0) {
+              throw "$src: 'tokensPerMinute' must be a positive integer, got '$($p.tokensPerMinute)'."
+            }
+            if ($p.PSObject.Properties.Name -contains 'tokenQuota') {
+              $tq = 0
+              if (-not [int]::TryParse([string]$p.tokenQuota, [ref]$tq) -or $tq -le 0) {
+                throw "$src: 'tokenQuota' must be a positive integer, got '$($p.tokenQuota)'."
+              }
+              $period = if ($p.PSObject.Properties.Name -contains 'tokenQuotaPeriod') { [string]$p.tokenQuotaPeriod } else { 'Daily' }
+              if ($periods -notcontains $period) { throw "$src: 'tokenQuotaPeriod' must be one of $($periods -join ', '), got '$period'." }
+            }
+          }
+
+          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
+            $file = Join-Path $_.FullName 'limits.json'
+            if (Test-Path $file) {
+              $doc = Get-Content $file -Raw | ConvertFrom-Json
+              $principals = @($doc.principals) | Where-Object { $_ -ne $null }
+              if ($principals.Count -eq 0) {
+                Write-Host "::warning::$file has no 'principals' — skipping (that agent stays deny-all)."
+              } else {
+                $agentRef = if ($doc.PSObject.Properties.Name -contains 'agentRef' -and
+                                -not [string]::IsNullOrWhiteSpace([string]$doc.agentRef)) {
+                  [string]$doc.agentRef
+                } else {
+                  $_.Name
+                }
+                if ($agentRef -notmatch $refRe) { throw "$file: invalid agentRef '$agentRef' (allowed: letters, digits, . _ - *)." }
+                foreach ($p in $principals) { Test-Principal -p $p -src $file }
+                $agents += [pscustomobject]@{ agentRef = $agentRef; principals = $principals }
+                Write-Host "Loaded $($principals.Count) principal(s) for agent '$agentRef' from $file."
+              }
+            }
+          }
+          if ($agents.Count -eq 0) {
+            Write-Host "::warning::No agents/*/limits.json with principals found — applying DENY-ALL."
+          }
+
+          $merged = [pscustomobject]@{ agents = $agents }
+          $limitsFile = Join-Path $env:RUNNER_TEMP 'agent-limits.json'
+          $merged | ConvertTo-Json -Depth 10 | Set-Content -Path $limitsFile -Encoding utf8
+          Write-Host "Aggregated $($agents.Count) agent allowlist(s) -> $limitsFile."
+
+          $audience = if ([string]::IsNullOrWhiteSpace($env:CALLER_AUDIENCE)) { '' } else { $env:CALLER_AUDIENCE }
+
+          Write-Host "Applying Foundry agent token-limit policy to API '$($env:API_NAME)' on APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)'."
+          az deployment group create `
+            --resource-group $env:RESOURCE_GROUP `
+            --name "foundry-agent-limits-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+            --template-file infra/stages/30-governance/model-gateway/apim-foundry-agent-limits.bicep `
+            --parameters `
+              apimName=$env:APIM_NAME `
+              apiName=$env:API_NAME `
+              foundryAccountName=$env:ACCOUNT_NAME `
+              tenantId=$tenantId `
+              callerAudience=$audience `
+              "agentLimits=@$limitsFile" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "Foundry agent token-limit deployment failed." }
+          Write-Host "Foundry agent token-limit policy applied (aggregated from agents/*/limits.json)."
