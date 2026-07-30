@@ -288,6 +288,7 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     acrName: acrName
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
+    deployerPublicIp: deployerPublicIp
     storageSkuName: storageSkuName
     providerAccountName: providerAccountName
     apimName: apimName

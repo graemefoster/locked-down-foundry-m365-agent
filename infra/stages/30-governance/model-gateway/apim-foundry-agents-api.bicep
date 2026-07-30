@@ -1,22 +1,29 @@
 /*
-  Model-Gateway: Foundry agent /responses inbound API (structure only)
-  --------------------------------------------------------------------
-  Fronts the PRIMARY Foundry project's Responses API through APIM so agent
-  invocations can be metered + throttled at the edge. This module owns only the
-  STRUCTURE (API + backend + operation); the inbound POLICY (validate-jwt +
-  llm-emit-token-metric + deny-by-default llm-token-limit) is authored by the
-  sibling apim-foundry-agent-limits.bicep so the deploy-agent-network workflow can
-  re-apply just the policy after agents/<name>/agent-network.json changes — exactly the split
+  Model-Gateway: Foundry agent multi-protocol passthrough API (structure only)
+  ----------------------------------------------------------------------------
+  Fronts the PRIMARY Foundry project's agent surface through APIM so agent
+  invocations can be metered + throttled + auth-gated at the edge. This module owns
+  only the STRUCTURE (API + backend + wildcard operations); the inbound POLICY
+  (validate-jwt + llm-emit-token-metric + deny-by-default llm-token-limit + the
+  path-preserving rewrite to the Foundry agent endpoint) is authored by the sibling
+  apim-foundry-agent-limits.bicep so the deploy-agent-network workflow can re-apply
+  just the policy after agents/<name>/agent-network.json changes — exactly the split
   used by the MCP api (structure) + apim-mcp-compliance (policy) pair.
 
-    Web tier / user  --Entra JWT-->  THIS APIM API (/<foundry>/<proj>/responses)
-      -> rewrite to the Foundry Responses endpoint -> forward to the primary
-         Foundry account over its private endpoint (APIM outbound VNet integration
-         -> firewall -> foundry PE, the SAME egress the Teams API already uses).
+    Web tier / user  --Entra JWT-->  THIS APIM API (/<foundry>/<proj>/agents/<name>/...)
+      -> policy rewrites to /api/projects/<proj>/agents/<name>/endpoint/protocols/...
+         -> forward to the primary Foundry account over its private endpoint (APIM
+            outbound VNet integration -> firewall -> foundry PE, the SAME egress the
+            Teams API already uses).
 
-  Path shape (per the design): the API path is '<foundryAccount>/<project>', so callers
-  POST to https://<apim>/<foundryAccount>/<project>/responses and the policy rewrites to
-  the backend Responses path (backendResponsesPath), dropping the public prefix.
+  Path shape (multi-protocol): a Foundry agent exposes SEVERAL protocol endpoints under
+  one agent name (…/agents/<name>/endpoint/protocols/{openai/responses | invocations | …}).
+  Rather than a per-protocol operation, this API is a path-preserving passthrough — mirroring
+  the Teams API's path-routed pattern. The API path is '<foundryAccount>/<project>', so callers
+  hit https://<apim>/<foundryAccount>/<project>/agents/<name>/endpoint/protocols/... and the
+  policy (a) reads <name> from the URL path for metering/throttling and (b) rewrites the whole
+  /agents/<name>/... tail onto /api/projects/<project>/agents/<name>/... — everything after
+  'agents/<name>' is proxied through unchanged.
 
   Auth posture:
     * Inbound: the policy (in apim-foundry-agent-limits.bicep) validates the caller's Entra
@@ -48,15 +55,15 @@ var backendId = 'foundry-agents-${foundryAccountName}'
 var backendBaseUrl = 'https://${foundryAccountName}.services.ai.azure.com'
 
 // Public path = '<account>/<project>' (per the design). The account/project prefix is only for
-// addressing/routing at the edge; the policy rewrites to the Foundry Responses path.
+// addressing/routing at the edge; the policy rewrites onto the Foundry agent endpoint path.
 var apiPath = '${foundryAccountName}/${projectName}'
 
 resource foundryAgentsBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
   parent: apim
   name: backendId
   properties: {
-    title: 'Primary Foundry account (Responses API)'
-    description: 'Primary Foundry account private endpoint; APIM rewrites to the Responses endpoint and forwards over VNet integration -> firewall -> Foundry PE.'
+    title: 'Primary Foundry account (agent passthrough)'
+    description: 'Primary Foundry account private endpoint; APIM rewrites to the agent protocol endpoint and forwards over VNet integration -> firewall -> Foundry PE.'
     protocol: 'http'
     url: backendBaseUrl
   }
@@ -66,7 +73,7 @@ resource foundryAgentsApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
   name: apiName
   properties: {
-    displayName: 'Foundry agent responses (governed)'
+    displayName: 'Foundry agent passthrough (governed)'
     path: apiPath
     protocols: [
       'https'
@@ -78,19 +85,41 @@ resource foundryAgentsApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   }
 }
 
-// Single POST operation: callers POST to /<account>/<project>/responses; the policy rewrites
-// to the backend Responses path. One operation + policy serves every agent (the agent is
-// selected in the request body and read by the policy for scoping/metering).
-resource responsesOperation 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = {
-  parent: foundryAgentsApi
-  name: 'post-responses'
-  properties: {
-    displayName: 'Post Responses'
-    method: 'POST'
-    urlTemplate: '/responses'
-    description: 'Governed agent invocation: caller posts a Responses request; APIM meters tokens (llm-emit-token-metric) and enforces the per-caller deny-by-default token limit before forwarding to Foundry.'
+// Path-preserving wildcard passthrough: one operation per HTTP method matching
+// /agents/{agentName}/* (agentName plus the whole protocol tail). The API-level policy
+// (apim-foundry-agent-limits.bicep) reads the agent from the URL path and rewrites the
+// tail onto /api/projects/<project>/agents/<name>/endpoint/protocols/..., so ONE API +
+// policy serves every agent and every protocol (openai/responses, invocations, …) — no
+// per-agent, per-protocol re-provision. Foundry agent protocols are POST/GET (streaming +
+// retrieval); PUT/DELETE/PATCH are included so the passthrough is complete.
+var passthroughMethods = [
+  'GET'
+  'POST'
+  'PUT'
+  'DELETE'
+  'PATCH'
+]
+
+resource agentPassthroughOperations 'Microsoft.ApiManagement/service/apis/operations@2024-05-01' = [
+  for method in passthroughMethods: {
+    parent: foundryAgentsApi
+    name: 'agents-${toLower(method)}'
+    properties: {
+      displayName: 'Agents passthrough (${method})'
+      method: method
+      urlTemplate: '/agents/{agentName}/*'
+      templateParameters: [
+        {
+          name: 'agentName'
+          description: 'Seeded Foundry agent name; the whole /agents/<name>/... tail is proxied to that agent.'
+          type: 'string'
+          required: true
+        }
+      ]
+      description: 'Governed agent passthrough: APIM meters tokens (llm-emit-token-metric), enforces the per-caller deny-by-default token limit, then rewrites the /agents/<name>/... tail onto the Foundry agent endpoint before forwarding.'
+    }
   }
-}
+]
 
 @description('APIM API resource name (attach the limits policy to this).')
 output apiName string = foundryAgentsApi.name
