@@ -118,7 +118,8 @@ and the Run Command is sequenced **after** both that assignment and the PAT-secr
 ## Enable it
 
 `azd up`'s **preprovision hook** (`hooks/preprovision.ps1`) prompts once for the runner
-repo URL (leave it blank to skip). Alternatively set it non-interactively:
+repo URL (leave it blank to skip); when you supply one it then prompts (with hidden input) for
+the fine-grained PAT and wires both into the azd env. Alternatively set them non-interactively:
 
 ```bash
 azd env set GITHUB_RUNNER_REPO_URL https://github.com/<owner>/<repo>
@@ -128,8 +129,8 @@ azd provision
 azd env set GITHUB_RUNNER_PAT ""
 ```
 
-The **PAT is a secret and is never prompted** — supply it with `azd env set GITHUB_RUNNER_PAT`
-before provisioning (the hook reminds you when you enter a repo URL without one set).
+The PAT is a secret, so the hook reads it with **hidden input** (and only when you enable the
+runner and haven't already set it); it is stored in the gitignored azd env, not the repo.
 
 `GITHUB_RUNNER_PAT` is a `@secure()` param sourced from `${GITHUB_RUNNER_PAT}` (empty by
 default). While set, it lives in the local, gitignored `.azure/<env>/.env`. It is **required**

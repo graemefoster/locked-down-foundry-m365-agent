@@ -19,8 +19,10 @@
     * Non-interactive shells (e.g. CI) skip prompting entirely and fall back to the
       parameters.json defaults / any pre-set env values.
 
-  The runner PAT is a secret and is deliberately NOT prompted here — set it with
-  `azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>`. See docs/github-runner.md.
+  The runner PAT is a secret, so it is prompted with hidden input (only when you enable the
+  runner and have not already set it) and written to the gitignored azd env. You can also set
+  it non-interactively with `azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>`. See
+  docs/github-runner.md.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -72,9 +74,22 @@ else {
     Write-Host "[preprovision] GITHUB_RUNNER_REPO_URL = $repoUrl"
     if (-not (Test-AzdEnvKeySet 'GITHUB_RUNNER_PAT')) {
       Write-Host ''
-      Write-Host '  IMPORTANT: the runner needs a fine-grained PAT (Administration: read & write).'
-      Write-Host '  It is a secret, so it is not prompted here. Set it before provisioning with:'
-      Write-Host '      azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>'
+      Write-Host '  The runner needs a fine-grained PAT to register itself with your repo.'
+      Write-Host '  Why: the VM mints a short-lived runner registration token from this PAT'
+      Write-Host '       (it is stored in Key Vault, never in the repo). Create one at'
+      Write-Host '       https://github.com/settings/personal-access-tokens with this repo as'
+      Write-Host '       the resource and the "Administration: read & write" permission.'
+      Write-Host '  See docs/github-runner.md for the full setup.'
+      $secure = Read-Host '  Paste the fine-grained PAT (input hidden; blank = skip runner)' -AsSecureString
+      $pat = [System.Net.NetworkCredential]::new('', $secure).Password
+      if ([string]::IsNullOrWhiteSpace($pat)) {
+        Write-Host '[preprovision] No PAT entered; the self-hosted runner will NOT be installed.'
+        Write-Host '               Set it later with: azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>'
+      }
+      else {
+        azd env set GITHUB_RUNNER_PAT $pat | Out-Null
+        Write-Host '[preprovision] GITHUB_RUNNER_PAT set (stored in the gitignored .azure/<env>/.env).'
+      }
     }
   }
 }
