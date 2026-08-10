@@ -45,7 +45,7 @@ hook script.
 Everything under `scripts/` runs on the VM because it needs the private Foundry endpoint. They
 authenticate as the **VM managed identity via IMDS** — never `az login`.
 
-### Agent create / publish (reusable `deploy-agent.yml`)
+### Agent create / publish (reusable `_deploy-agent.yml`)
 
 | File | Invoked by | Runs on | Identity | What it does |
 |---|---|---|---|---|
@@ -53,10 +53,10 @@ authenticate as the **VM managed identity via IMDS** — never `az login`.
 | `publish-agent.ps1` | `publish-agent` composite action | VM runner | VM MI (IMDS) | Route 100% of the agent endpoint's traffic to a version ("Publish Updates"). |
 | `foundry-agent-common.ps1` | *(dot-sourced by the two above)* | VM runner | VM MI (IMDS) | **Single source of truth** for the Foundry Agents REST helpers (token via IMDS, GET/POST/PATCH). No external modules. |
 
-Chain: `deploy-<name>-agent.yml` → `deploy-agent.yml` → `yq` (manifest→json) → `create-agent`
+Chain: `deploy-<name>-agent.yml` → `_deploy-agent.yml` → `yq` (manifest→json) → `create-agent`
 action → `create-agent.ps1` → `publish-agent` action → `publish-agent.ps1`.
 
-### Teams / M365 publish (optional `publish-teams` job in `deploy-agent.yml`)
+### Teams / M365 publish (optional `publish-teams` job in `_deploy-agent.yml`)
 
 | File | Invoked by | Runs on | Identity | What it does |
 |---|---|---|---|---|

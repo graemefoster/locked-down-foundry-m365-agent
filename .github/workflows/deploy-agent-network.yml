@@ -46,7 +46,7 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 # Ordering: token limits + YARP routes only need authoring-time data, so they run first; the MCP +
 # Teams-audience steps read the private Foundry data plane, so they need the agents already seeded.
 # Run the per-agent deploy-*-agent.yml workflows first, then this. Re-run it BEFORE publishing an
-# agent to Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
+# agent to Teams (_deploy-agent.yml) so its /teams/<name> edge route exists.
 #
 # Runner: reads the PRIVATE Foundry data plane + does control-plane ARM / App Service ops, so it
 # MUST run on the in-VNet self-hosted runner — the VM authenticates with its own managed identity

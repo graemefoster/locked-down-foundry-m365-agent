@@ -56,3 +56,4 @@ Thumbs.db
 *.dtmp
 .$*.drawio.dtmp
 *.log
+agents/support-case-agent/

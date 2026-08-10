@@ -91,7 +91,7 @@ activityProtocol endpoint.
 Steps 2–4 need values that only exist **after** the agent is deployed (the agent identity
 `principal_id` = that bot's Microsoft App ID), so publishing is driven by the in-VNet
 self-hosted GitHub Actions workflows (the reusable
-[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml), called by each per-agent workflow
+[`_deploy-agent.yml`](../.github/workflows/_deploy-agent.yml), called by each per-agent workflow
 with `publishToTeams: true`, via the
 [`publish-teams`](../.github/actions/publish-teams/action.yml) composite action →
 [`scripts/publish-teams-runner.ps1`](../scripts/publish-teams-runner.ps1)) rather than

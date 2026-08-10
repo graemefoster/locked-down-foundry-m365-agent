@@ -78,6 +78,7 @@ $variableMap = [ordered]@{
   TEAMS_YARP_FQDN                = 'TEAMS_YARP_FQDN'
   TEAMS_YARP_WEBAPP_NAME         = 'TEAMS_YARP_WEBAPP_NAME'
   TEAMS_LOG_ANALYTICS_ID         = 'TEAMS_LOG_ANALYTICS_ID'
+  AZURE_CONTAINER_REGISTRY_NAME  = 'AZURE_CONTAINER_REGISTRY_NAME'
 }
 
 $target = if ($repoArgs.Count) { $repoArgs[1] } else { '(current git remote)' }

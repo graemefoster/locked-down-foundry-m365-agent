@@ -47,7 +47,7 @@ plus `git`, `jq` and `yq`. That cloud-init file is the **only** shell script in 
 — all downstream logic stays in cross-platform PowerShell.
 
 Because the in-VNet runner is now Linux, two GitHub-hosted workarounds are gone:
-the reusable `deploy-agent.yml` no longer needs a separate `ubuntu-latest` `prepare` job to
+the reusable `_deploy-agent.yml` no longer needs a separate `ubuntu-latest` `prepare` job to
 convert `agent.yaml` → `agent.json` (plus an artifact round-trip), and eval workflows can
 consume `microsoft/ai-agent-evals@v3-beta` directly instead
 of checking the action out and invoking `action.py` by hand.
@@ -63,9 +63,9 @@ on it**:
 | Control | Where |
 |---|---|
 | PR CI runs on **GitHub-hosted** runners only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`) |
-| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent `deploy-*-agent.yml` callers + reusable `.github/workflows/deploy-agent.yml` |
+| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent `deploy-*-agent.yml` callers + reusable `.github/workflows/_deploy-agent.yml` |
 | VNet deploy is gated by a **required-reviewer environment** (Teams-publish / compliance jobs) | `environment: vnet-deploy` |
-| `if: github.repository == ...` guard | `deploy-agent.yml` + each caller |
+| `if: github.repository == ...` guard | `_deploy-agent.yml` + each caller |
 
 A fork PR can never select the self-hosted runner (label mismatch) and can never
 invoke the deploy workflow (no PR trigger). The idle runner simply never picks up an

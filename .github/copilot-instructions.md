@@ -14,7 +14,7 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 | `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
 | `hooks/predeploy.ps1` / `hooks/postdeploy.ps1` | azd **predeploy**/**postdeploy** hooks — host-side; open (then re-lock) the deny-by-default SCM sites of the MCP + YARP web apps for the deployer's public IP (MCP also toggles `publicNetworkAccess`) so azd can zip-deploy the app code. Both dot-source `hooks/appservice-scm-common.ps1`. |
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the GitHub runner **host-side via `gh`** (delete by name `<vmName>-vnet`) + deletes capability hosts before teardown. |
-| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
+| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `_deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
 | `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
@@ -33,7 +33,7 @@ azd up
 
 Post-provision (agent seeding, network governance)
  └─ in-VNet self-hosted runner workflows — run natively on the private VM:
-    * one thin per-agent workflow each (deploy-teams-agent.yml) → the reusable deploy-agent.yml
+    * one thin per-agent workflow each (deploy-teams-agent.yml) → the reusable _deploy-agent.yml
     * deploy-agent-network.yml (Foundry token limits + YARP edge routes + MCP allowlist)
 
 azd down
@@ -64,7 +64,7 @@ azd down
   the endpoint directly. The runner is therefore **required** for these steps.
 - **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
   caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
-  `.github/workflows/deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
+  `.github/workflows/_deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
   injects the MCP `server_url` if present, then runs the `create-agent` and
   `publish-agent` composite actions; an optional `publish-teams` job publishes that single
   agent. `deploy-agent-network.yml` applies the network governance (Foundry token limits + YARP

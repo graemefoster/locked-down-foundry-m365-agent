@@ -65,7 +65,7 @@ reviewable data, how that agent joins the network flows. It has three parts:
 
 | Key | Meaning | Wired by |
 |-----|---------|----------|
-| `exposeToM365` (bool) | Publish this agent to Teams/M365 **and** open a `/teams/<name>` edge route on the YARP proxy. | `deploy-agent.yml` (gates the `publish-teams` job) + `deploy-agent-network.yml` (adds the YARP route). |
+| `exposeToM365` (bool) | Publish this agent to Teams/M365 **and** open a `/teams/<name>` edge route on the YARP proxy. | `_deploy-agent.yml` (gates the `publish-teams` job) + `deploy-agent-network.yml` (adds the YARP route). |
 | `exposeFoundryApi` (bool) | Open the shared `/<foundry>/<project>/…` edge route so web/OBO callers can reach this agent's `/responses` via the APIM Foundry API. | `deploy-agent-network.yml` (adds the single shared `foundry-api` YARP route if **any** agent opts in). |
 | `tokenLimits` (optional) | Per-caller LLM token allowlist (email / appId / both-OBO → tokens-per-minute + optional quota), applied as the APIM `llm-token-limit` + `llm-emit-token-metric` policy. Deny-by-default: a caller not listed gets **403**. | `deploy-agent-network.yml` (aggregates every manifest → one policy). |
 

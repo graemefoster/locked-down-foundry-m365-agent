@@ -2,7 +2,7 @@ name: Deploy teams-agent (VNet self-hosted)
 
 # Thin caller for the agent published to Microsoft Teams / M365 (agents/teams-agent/agent.yaml),
 # served through the enterprise model gateway (APIM). All the work lives in the reusable
-# .github/workflows/deploy-agent.yml — this file only targets ONE agent (endpoint + gateway model
+# .github/workflows/_deploy-agent.yml — this file only targets ONE agent (endpoint + gateway model
 # come from repo variables / the manifest) and, by default, publishes it to Teams. The Teams
 # publish is a separate job gated by the `vnet-deploy` environment for manual approval.
 on:
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: ./.github/workflows/deploy-agent.yml
+    uses: ./.github/workflows/_deploy-agent.yml
     with:
       manifest-path: agents/teams-agent/agent.yaml
       publish-to-teams: ${{ inputs.publishToTeams }}

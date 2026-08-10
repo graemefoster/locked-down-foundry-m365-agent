@@ -587,3 +587,6 @@ output GITHUB_RUNNER_PAT_SECRET_NAME string = githubRunnerPatSecretName
 
 @description('Local account the runner service runs as (the VM admin user), set by the VM bootstrap.')
 output GITHUB_RUNNER_USER string = vmAdminUsername
+
+@description('Name of the private Azure Container Registry. The deploy-hosted-agent workflow runs `az acr build` against it (server-side build, no Docker daemon on the runner) and pushes the hosted-agent image the Foundry project pulls to run the agent.')
+output AZURE_CONTAINER_REGISTRY_NAME string = stage10.outputs.acrName

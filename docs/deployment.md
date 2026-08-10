@@ -70,7 +70,7 @@ it first — see [github-runner.md](./github-runner.md).
 
 **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
 caller workflow (`deploy-<name>-agent.yml`) that calls the reusable
-[`deploy-agent.yml`](../.github/workflows/deploy-agent.yml). The reusable workflow converts the
+[`_deploy-agent.yml`](../.github/workflows/_deploy-agent.yml). The reusable workflow converts the
 manifest with `yq`, injects the MCP `server_url` if present, then creates/updates the agent
 version and publishes it.
 
