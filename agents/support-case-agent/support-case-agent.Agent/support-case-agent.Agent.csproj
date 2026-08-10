@@ -10,7 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Microsoft.Agents.AI.Foundry.Hosting" Version="1.10.0-preview.260610.1" />
+    <PackageReference Include="Microsoft.Agents.AI.Foundry.Hosting" Version="1.17.0-preview.260804.1" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Prompt.md" LogicalName="Prompt.md" />
