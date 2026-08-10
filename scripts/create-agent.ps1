@@ -42,10 +42,9 @@ $metadata    = $agent.metadata
 $token = Get-FoundryToken
 Write-Host '[create-agent] Token acquired.'
 
-$existing = Get-ExistingAgents -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion
-$existingNames = @($existing | ForEach-Object { $_.name })
+$existingAgent = Get-AgentByName -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion -Name $name
 
-if ($existingNames -contains $name) {
+if ($null -ne $existingAgent) {
   Write-Host "[create-agent] Agent '$name' exists - adding a version if the definition changed."
   $before  = Get-LatestAgentVersion -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion -Name $name
   $version = New-AgentVersion -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion `

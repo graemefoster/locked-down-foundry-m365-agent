@@ -29,7 +29,7 @@
     Get-FoundryToken           managed-identity token for the data plane (via IMDS)
     Get-HttpErrorDetail        unwrap the real {error} body from a failed REST call
     Invoke-FoundryRequest      wrapper: retry w/ backoff + print failure bodies
-    Get-ExistingAgents         list agents (used to decide create vs. version)
+    Get-AgentByName            fetch one agent by name (404 => $null); create-vs-version check
     New-Agent                  step 1 — create a brand-new agent
     New-AgentVersion           step 2 — add a version to an existing agent
     Get-LatestAgentVersion     highest version number (int) for an agent
@@ -77,7 +77,8 @@ function Invoke-FoundryRequest {
     [string]$Label,
     [scriptblock]$Request,
     [int]$MaxAttempts = 5,
-    [int]$InitialDelaySeconds = 5
+    [int]$InitialDelaySeconds = 5,
+    [int[]]$ReturnNullOnStatus = @()
   )
   $delay = $InitialDelaySeconds
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
@@ -86,6 +87,12 @@ function Invoke-FoundryRequest {
     }
     catch {
       $detail = Get-HttpErrorDetail -ErrorRecord $_
+      # A definitive answer (e.g. 404 = "not found") is NOT a transient error: return $null
+      # immediately instead of retrying and then throwing. This lets existence checks tell
+      # "absent" apart from "backend degraded" (which still retries/throws below).
+      if ($detail.Status -ne 'n/a' -and $ReturnNullOnStatus -contains [int]$detail.Status) {
+        return $null
+      }
       Write-Host "[foundry] $Label failed (attempt $attempt/$MaxAttempts): status=$($detail.Status)"
       if (-not [string]::IsNullOrWhiteSpace($detail.Body)) {
         Write-Host "[foundry]   response body: $($detail.Body)"
@@ -100,16 +107,22 @@ function Invoke-FoundryRequest {
   }
 }
 
-function Get-ExistingAgents {
-  param([string]$Token, [string]$Endpoint, [string]$ApiVersion)
-  $response = Invoke-FoundryRequest -Label 'list agents' -Request {
+# Fetch a single agent BY NAME. Returns the agent object if it exists, or $null if it
+# DEFINITIVELY does not (HTTP 404). Any other failure — including the Cosmos "agent index"
+# timeout (HTTP 400 invalid_configuration) — is retried and ultimately THROWN.
+#
+# Prefer this over listing all agents + membership-testing for the create-vs-version decision:
+# the whole-index list is Cosmos-backed and can return 200 with an empty/partial body when the
+# backend is degraded, which would be misread as "agent absent" and silently create a duplicate.
+# A by-name lookup only reports "absent" on an explicit 404, never on a degraded read.
+function Get-AgentByName {
+  param([string]$Token, [string]$Endpoint, [string]$ApiVersion, [string]$Name)
+  return Invoke-FoundryRequest -Label "get agent '$Name'" -ReturnNullOnStatus 404 -Request {
     Invoke-RestMethod `
       -Method Get `
-      -Uri "$Endpoint/agents?api-version=$ApiVersion" `
+      -Uri "$Endpoint/agents/$Name`?api-version=$ApiVersion" `
       -Headers @{ Authorization = "Bearer $Token" }
   }
-  # Foundry Agents API returns agents under .data (OpenAI schema), not .value.
-  return $response.data
 }
 
 # Create a brand-new agent. $Definition/$Metadata are objects (from the parsed manifest).
