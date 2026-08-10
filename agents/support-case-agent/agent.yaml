@@ -4,7 +4,7 @@ description: The agent published to Microsoft Teams / M365, served through the m
 definition:
   kind: hosted
   container_protocol_versions:
-    - protocol: invocations
+    - protocol: responses
       version: 1.0.0
   cpu: "0.5"
   memory: 1Gi
