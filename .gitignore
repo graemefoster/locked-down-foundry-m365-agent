@@ -1,5 +1,7 @@
 # Compiled ARM templates (generated from bicep — do not commit)
 *.json
+!*.appsettings.json
+!appsettings.json
 # ...except the azd parameters file, which must be committed.
 !infra/main.parameters.json
 # ...and the bicep extension config (enables the microsoftGraphV1 extension).
@@ -56,4 +58,4 @@ Thumbs.db
 *.dtmp
 .$*.drawio.dtmp
 *.log
-agents/support-case-agent/
+# agents/support-case-agent/
