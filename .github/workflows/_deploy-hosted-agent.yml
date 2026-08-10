@@ -90,9 +90,11 @@ jobs:
         shell: pwsh
         run: az login --identity --output none
 
-      # Build the container SERVER-SIDE in the private ACR and push it, tagged with the git SHA
-      # (immutable, traceable). No Docker daemon needed on the runner.
-      - name: Build and push the agent image (az acr build)
+      # Build the container image on the runner with the local Docker Engine and push it to the
+      # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable).
+      # We build locally rather than with `az acr build` because ACR Tasks run in a
+      # Microsoft-managed environment that can't reach a publicNetworkAccess=Disabled registry.
+      - name: Build and push the agent image (docker + private ACR)
         id: image
         shell: pwsh
         env:
@@ -104,20 +106,11 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:ACR_NAME)) {
             throw "Repo variable AZURE_CONTAINER_REGISTRY_NAME is not set (the postprovision hook syncs it from the Bicep output; or run 'azd env refresh')."
           }
-          if (-not (Test-Path (Join-Path $env:CONTEXT $env:DOCKERFILE))) {
-            throw "Dockerfile not found at '$(Join-Path $env:CONTEXT $env:DOCKERFILE)'."
+          $dockerfilePath = Join-Path $env:CONTEXT $env:DOCKERFILE
+          if (-not (Test-Path $dockerfilePath)) {
+            throw "Dockerfile not found at '$dockerfilePath'."
           }
-          $tag       = "${{ github.sha }}".Substring(0, 12)
-          $imageName = "$($env:REPO):$tag"
-
-          Write-Host "Building '$imageName' in ACR '$($env:ACR_NAME)' from context '$($env:CONTEXT)'."
-          az acr build `
-            --registry $env:ACR_NAME `
-            --image $imageName `
-            --file (Join-Path $env:CONTEXT $env:DOCKERFILE) `
-            $env:CONTEXT `
-            --output none
-          if ($LASTEXITCODE -ne 0) { throw "az acr build failed for '$imageName'." }
+          $tag = "${{ github.sha }}".Substring(0, 12)
 
           # Full pullable reference = <loginServer>/<repo>:<tag>. Query the login server rather than
           # hard-coding '.azurecr.io' so this stays correct across clouds.
@@ -125,9 +118,22 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($loginServer)) {
             throw "Could not resolve the ACR login server for '$($env:ACR_NAME)'."
           }
-          $imageRef = "$loginServer/$imageName"
+          $imageRef = "$loginServer/$($env:REPO):$tag"
+
+          # AAD `docker login` to the registry as the VM managed identity, over the private
+          # endpoint (the VM MI is Contributor on the RG, which grants ACR push).
+          az acr login --name $env:ACR_NAME --output none
+          if ($LASTEXITCODE -ne 0) { throw "az acr login failed for '$($env:ACR_NAME)' (is the private endpoint reachable + Docker running?)." }
+
+          Write-Host "Building '$imageRef' from context '$($env:CONTEXT)'."
+          docker build --tag $imageRef --file $dockerfilePath $env:CONTEXT
+          if ($LASTEXITCODE -ne 0) { throw "docker build failed for '$imageRef'." }
+
+          docker push $imageRef
+          if ($LASTEXITCODE -ne 0) { throw "docker push failed for '$imageRef'." }
+
           "image-ref=$imageRef" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "Built image: $imageRef"
+          Write-Host "Pushed image: $imageRef"
 
       # yq is installed by cloud-init on the in-VNet Linux runner.
       - name: Convert agent.yaml -> agent.json + patch the image reference (yq)

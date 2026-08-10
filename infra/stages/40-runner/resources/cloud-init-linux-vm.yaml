@@ -9,7 +9,10 @@
 # Installed:
 #   pwsh        - runs scripts/*.ps1 via `az vm run-command` and in workflow steps
 #   azure-cli   - control-plane work as the VM managed identity (`az login --identity`),
-#                 including `az acr build` so container builds need no Docker daemon
+#                 plus `az acr login` to auth Docker against the PRIVATE registry
+#   docker.io   - builds hosted-agent container images on the runner and pushes them to the
+#                 private ACR over its private endpoint (ACR Tasks / `az acr build` can't reach a
+#                 publicNetworkAccess=Disabled registry, so we build locally instead)
 #   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
 #   git, jq     - actions/checkout and general workflow plumbing
 #   yq          - agent.yaml -> agent.json in the reusable deploy-agent.yml (this is why
@@ -28,6 +31,10 @@ packages:
   - python3-pip
   - python3-venv
   - libicu-dev
+  # Docker Engine from the Ubuntu archive. The runner user is added to the `docker`
+  # group in bootstrap-github-runner.sh (it knows RUNNER_USER) BEFORE the runner
+  # systemd service starts, so hosted-agent workflow steps can run `docker` without sudo.
+  - docker.io
 
 runcmd:
   # Each item is a LIST so cloud-init runs it via execve under bash — NOT the default

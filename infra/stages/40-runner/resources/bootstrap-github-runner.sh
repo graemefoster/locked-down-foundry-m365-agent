@@ -114,6 +114,18 @@ tar xzf "${cache_dir}/${tarball}"
 # the VM admin user; svc.sh then installs the systemd unit for that account.
 chown -R "${RUNNER_USER}:${RUNNER_USER}" "$INSTALL_DIR"
 
+# Hosted-agent workflows build container images with the local Docker Engine
+# (cloud-init installs docker.io) and push to the private ACR. Grant the runner
+# user Docker socket access BEFORE the systemd service starts so it inherits the
+# `docker` group. (`docker.io` may not exist if cloud-init hasn't finished, but the
+# bootstrap blocks on `cloud-init status --wait`, so the group is guaranteed present.)
+if getent group docker >/dev/null 2>&1; then
+  usermod -aG docker "${RUNNER_USER}"
+  log "Added '${RUNNER_USER}' to the docker group."
+else
+  log 'WARNING: docker group not found — hosted-agent image builds will fail until Docker is installed.'
+fi
+
 log "Configuring runner '$(hostname)-vnet'..."
 sudo -u "${RUNNER_USER}" env RUNNER_ALLOW_RUNASROOT=0 \
   "$INSTALL_DIR/config.sh" --unattended --url "${REPO_URL}" --token "${reg_token}" \
