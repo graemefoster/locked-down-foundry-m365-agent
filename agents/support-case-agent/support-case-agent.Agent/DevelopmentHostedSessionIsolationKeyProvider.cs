@@ -11,7 +11,6 @@ public class DevelopmentHostedSessionIsolationKeyProvider : HostedSessionIsolati
     {
         return new ValueTask<HostedSessionContext?>(
             new HostedSessionContext(
-                "development-user",
-                "development-chat"));
+                "development-user"));
     }
 }

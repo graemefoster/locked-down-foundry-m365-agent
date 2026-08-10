@@ -6,7 +6,7 @@
     <UserSecretsId>74296b63-3993-4778-95d6-ab761590efc6</UserSecretsId>
   </PropertyGroup>
   <PropertyGroup>
-    <NoWarn>$(NoWarn);NU1903;NU1605;OPENAI001</NoWarn>
+    <NoWarn>$(NoWarn);NU1903;NU1605;OPENAI001;MAAI001</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
