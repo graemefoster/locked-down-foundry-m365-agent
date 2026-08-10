@@ -43,7 +43,7 @@ host.Run();
 static string LoadEmbeddedResource(string resourceName)
 {
     using var stream = typeof(Program).Assembly.GetManifestResourceStream(resourceName)
-        ?? throw new InvalidOperationException($"Embedded resource '{resourceName}' was not found :( ...");
+        ?? throw new InvalidOperationException($"Embedded resource '{resourceName}' was not found :( ..");
     using var reader = new StreamReader(stream);
     return reader.ReadToEnd();
 }
