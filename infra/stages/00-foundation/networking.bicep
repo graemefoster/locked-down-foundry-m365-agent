@@ -88,9 +88,19 @@ module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
 
 // Step 4b: Flow logs for the locked-down agent subnet (observability of over-blocking).
 // Storage account for raw VNet flow logs — no anonymous blob access, HTTPS only, TLS 1.2.
+// The SecurityControl=Ignore tag exempts this account from the MCAPS
+// StorageAccount_PublicNetwork_Modify governance policy, which otherwise forces
+// publicNetworkAccess=Disabled. The Network Watcher flow-log writer is a Microsoft-managed
+// service (NOT in this VNet, so a private endpoint does NOT help it) that reaches the account
+// over the trusted-services path — which requires publicNetworkAccess=Enabled with
+// defaultAction=Deny + bypass=AzureServices. Without the tag the policy disables public
+// access and no flow logs are ever written (0 bytes, empty Traffic Analytics).
 resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: toLower('${uniqueSuffix}flowlogs')
   location: location
+  tags: {
+    SecurityControl: 'Ignore'
+  }
   sku: {
     name: storageSkuName
   }
@@ -100,9 +110,10 @@ resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
     allowSharedKeyAccess: true
+    publicNetworkAccess: 'Enabled'
     networkAcls: {
       bypass: 'AzureServices'
-      defaultAction: 'Allow'
+      defaultAction: 'Deny'
     }
   }
 }
