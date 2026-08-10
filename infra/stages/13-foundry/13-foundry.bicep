@@ -70,17 +70,6 @@ module aiAccount './foundry/ai-services-account.bicep' = {
   }
 }
 
-module aiAccountPrivateEndpoint './network/ai-account-private-endpoint.bicep' = {
-  name: 'stage13-account-pe-${uniqueSuffix}'
-  params: {
-    aiAccountName: aiAccount.outputs.accountName
-    foundrySpokeVnetName: foundrySpokeVnetName
-    foundryPeSubnetName: foundryPeSubnetName
-    aiServicesDnsZoneId: aiServicesDnsZoneId
-    openAiDnsZoneId: openAiDnsZoneId
-    cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
-  }
-}
 
 module appInsightsAccountRoleAssignment './rbac/app-insights-account-role-assignment.bicep' = {
   name: 'appi-account-ra-${uniqueSuffix}-deployment'
@@ -116,6 +105,22 @@ module aiAccountEncryption './encryption/ai-account-encryption.bicep' = {
     keyVaultAccountRoleAssignment
   ]
 }
+
+module aiAccountPrivateEndpoint './network/ai-account-private-endpoint.bicep' = {
+  name: 'stage13-account-pe-${uniqueSuffix}'
+  params: {
+    aiAccountName: aiAccount.outputs.accountName
+    foundrySpokeVnetName: foundrySpokeVnetName
+    foundryPeSubnetName: foundryPeSubnetName
+    aiServicesDnsZoneId: aiServicesDnsZoneId
+    openAiDnsZoneId: openAiDnsZoneId
+    cognitiveServicesDnsZoneId: cognitiveServicesDnsZoneId
+  }
+  dependsOn: [
+    aiAccountEncryption //slow things down. Been getting some private-endpoint errors as Foundry not ready.
+  ]
+}
+
 
 output aiAccountName string = aiAccount.outputs.accountName
 output accountPrincipalId string = aiAccount.outputs.accountPrincipalId
