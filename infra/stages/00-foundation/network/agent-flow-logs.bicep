@@ -43,6 +43,9 @@ param workspaceRegion string
 @description('Retention in days for raw flow logs in storage.')
 param retentionDays int = 30
 
+@description('Resource id of the user-assigned managed identity the flow log uses to write to storage (shared-key access is disabled by governance).')
+param flowLogsIdentityId string
+
 // Regional Network Watcher auto-created by the platform in NetworkWatcherRG.
 resource networkWatcher 'Microsoft.Network/networkWatchers@2023-11-01' existing = {
   name: 'NetworkWatcher_${location}'
@@ -52,6 +55,12 @@ resource flowLog 'Microsoft.Network/networkWatchers/flowLogs@2023-11-01' = {
   parent: networkWatcher
   name: flowLogName
   location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${flowLogsIdentityId}': {}
+    }
+  }
   properties: {
     targetResourceId: targetSubnetId
     storageId: flowLogsStorageId

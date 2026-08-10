@@ -95,6 +95,11 @@ module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
 // over the trusted-services path — which requires publicNetworkAccess=Enabled with
 // defaultAction=Deny + bypass=AzureServices. Without the tag the policy disables public
 // access and no flow logs are ever written (0 bytes, empty Traffic Analytics).
+//
+// Shared-key access is disabled by MCAPS governance, so the flow-log writer CANNOT use the
+// account key. Instead the flow log authenticates with the user-assigned managed identity
+// below (granted Storage Blob Data Contributor) — see
+// https://learn.microsoft.com/azure/network-watcher/vnet-flow-logs-managed-identity.
 resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: toLower('${uniqueSuffix}flowlogs')
   location: location
@@ -109,12 +114,31 @@ resource flowLogsStorage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
     minimumTlsVersion: 'TLS1_2'
-    allowSharedKeyAccess: true
+    allowSharedKeyAccess: false
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       bypass: 'AzureServices'
       defaultAction: 'Deny'
     }
+  }
+}
+
+// User-assigned managed identity the VNet flow log uses to write to the (shared-key-disabled)
+// storage account and ingest into Traffic Analytics.
+resource flowLogsIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: '${uniqueSuffix}-flowlog-uami'
+  location: location
+}
+
+// Storage Blob Data Contributor for the flow-log identity on the flow-log storage account.
+resource flowLogsBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: flowLogsStorage
+  name: guid(flowLogsStorage.id, flowLogsIdentity.id, 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+  properties: {
+    // Storage Blob Data Contributor
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
+    principalId: flowLogsIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
   }
 }
 
@@ -127,10 +151,14 @@ module agentFlowLogs './network/agent-flow-logs.bicep' = {
     targetSubnetId: foundrySpokeVnet.outputs.agentSubnetId
     flowLogsStorageId: flowLogsStorage.id
     flowLogName: '${uniqueSuffix}-agent-subnet-flowlog'
+    flowLogsIdentityId: flowLogsIdentity.id
     workspaceResourceId: logAnalyticsId
     workspaceGuid: logAnalyticsCustomerId
     workspaceRegion: location
   }
+  dependsOn: [
+    flowLogsBlobContributor
+  ]
 }
 
 // Step 5: VNet Peerings (Hub ↔ Foundry Spoke)
