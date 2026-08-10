@@ -1,0 +1,30 @@
+name: Deploy support-case-agent (code, VNet self-hosted)
+
+# Thin caller for the CODE (source-zip) deploy of support-case-agent
+# (agents/support-case-agent/agent-code.yaml, definition.code_configuration). All the work lives in
+# the reusable .github/workflows/_deploy-code-agent.yml - this file only targets ONE agent: it
+# points at the code manifest and the build context (the .Agent project holding the Dockerfile).
+#
+# This is the alternative to deploy-support-case-agent.yml (the container-image path). It hands
+# Foundry the `dotnet publish` output as a zip instead of a prebuilt image, so it never requires
+# Foundry to pull from the private ACR - the deploy path that works in the locked-down environment.
+# Teams publishing is off by default (this agent has no agent-network.json exposeToM365 route yet).
+on:
+  workflow_dispatch:
+    inputs:
+      publishToTeams:
+        description: "After deploy, publish this agent to Teams / M365 (requires exposeToM365 + manual approval)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy-code-agent.yml
+    with:
+      manifest-path: agents/support-case-agent/agent-code.yaml
+      build-context: agents/support-case-agent/support-case-agent.Agent
+      publish-to-teams: ${{ inputs.publishToTeams }}
