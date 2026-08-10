@@ -1,6 +1,6 @@
 object: agent.version
-name: teams-agent
-description: The agent published to Microsoft Teams / M365, served through the model gateway.
+name: support-case-agent
+description: Hosted support-case agent (container image), served through the model gateway.
 definition:
   kind: hosted
   container_protocol_versions:
