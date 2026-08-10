@@ -70,7 +70,7 @@ delegated **user** token (device-code sign-in) and forwards it for that step onl
 
 | File | Invoked by | Runs on | Identity | What it does |
 |---|---|---|---|---|
-| `list-agent-appids.ps1` | `deploy-agent-network.yml` (RESOLVE mode) | VM runner | VM MI (IMDS) — **data plane** | Joins each agent **name** in `mcp/mcp-policy.json` to its live `instance_identity.client_id` read from the Foundry data plane and emits the resolved policy for the APIM allowlist Bicep. DISCOVERY mode (default) prints every agent's AppId + a paste-ready policy array. Both modes need the private endpoint → the VM. |
+| `list-agent-appids.ps1` | `deploy-agent-network.yml` (RESOLVE mode) | VM runner | VM MI (IMDS) — **data plane** | Joins each agent **name** in `mcp/mcp-policy.json` to its live `instance_identity.client_id` read from the Foundry data plane and emits the resolved policy for the APIM allowlist Bicep. DISCOVERY mode (default) prints every agent's AppId + a paste-ready policy array. RESOLVE-TEAMS-AUDIENCE mode (`-ResolveTeamsAudience true`) maps the `exposeToM365` agent names to their bot App IDs (`instance_identity.principal_id`) and emits the `botAppIds` array the same workflow feeds to `apim-teams-api.bicep` to pin the Teams validate-jwt audience. All modes need the private endpoint → the VM. |
 
 ### Teardown
 

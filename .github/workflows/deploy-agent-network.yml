@@ -6,7 +6,7 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 # governance layer that provisioning intentionally leaves DENY-ALL. `azd up` seeds no agents and
 # applies deny-all everywhere, so nothing is reachable until this runs.
 #
-# It compiles the repo's source-of-truth files into three enforcement points:
+# It compiles the repo's source-of-truth files into four enforcement points:
 #
 #   1. Foundry token limits (per agent) — aggregates every agents/<name>/agent-network.json
 #      `tokenLimits` block into one allowlist and re-deploys apim-foundry-agent-limits.bicep (the
@@ -35,10 +35,18 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 #      from allowlisted agents. An agent not in the allowlist gets 403 when it tries to enumerate /
 #      call MCP tools. (This is why the step must run AFTER the agents are seeded.)
 #
-# Ordering: token limits + YARP routes only need authoring-time data, so they run first; the MCP
-# step reads the private Foundry data plane, so it needs the agents already seeded. Run the
-# per-agent deploy-*-agent.yml workflows first, then this. Re-run it BEFORE publishing an agent to
-# Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
+#   4. Teams audience allowlist — resolves the exposeToM365 agent NAMES to their bot Microsoft App
+#      IDs (each = the agent identity instance_identity.principal_id, the msaAppId the publish path
+#      gives the Azure Bot Service) from the Foundry DATA PLANE, then re-deploys apim-teams-api.bicep
+#      with `botAppIds` set so the Teams API validate-jwt ALSO pins the token audience (not just the
+#      Bot Framework issuer + serviceurl tenant). No exposeToM365 agent -> empty allowlist =
+#      issuer-only (the provision default). This closes the defense-in-depth gap the provision leaves
+#      open (principal_id only exists after seeding), so it also runs AFTER the agents are seeded.
+#
+# Ordering: token limits + YARP routes only need authoring-time data, so they run first; the MCP +
+# Teams-audience steps read the private Foundry data plane, so they need the agents already seeded.
+# Run the per-agent deploy-*-agent.yml workflows first, then this. Re-run it BEFORE publishing an
+# agent to Teams (deploy-agent.yml) so its /teams/<name> edge route exists.
 #
 # Runner: reads the PRIVATE Foundry data plane + does control-plane ARM / App Service ops, so it
 # MUST run on the in-VNet self-hosted runner — the VM authenticates with its own managed identity
@@ -51,6 +59,8 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 #     FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
 #     FOUNDRY_AGENTS_AUDIENCE.
 #   MCP allowlist: MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT.
+#   Teams audience: TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH,
+#     AZURE_AI_PROJECT_ENDPOINT.
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
@@ -340,3 +350,81 @@ jobs:
             --output none
           if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
           Write-Host "MCP allowlist policies applied (resolved from mcp/mcp-policy.json)."
+
+      # 4. Teams audience allowlist. Runs after the agents are seeded because each bot's App ID is
+      #    the agent identity principal_id, which only exists on the PRIVATE Foundry data plane
+      #    once seeded. Re-deploys ONLY apim-teams-api.bicep against the existing APIM (seconds, not
+      #    a full provision) so the Teams validate-jwt pins the token audience, not just the issuer.
+      - name: Resolve exposeToM365 agents to bot App IDs and pin the Teams APIM audience allowlist
+        shell: pwsh
+        env:
+          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          APIM_NAME:        ${{ vars.TEAMS_APIM_NAME }}
+          ACCOUNT_NAME:     ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
+          API_PATH:         ${{ vars.FOUNDRY_AGENTS_API_PATH }}
+          FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
+              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
+              [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
+            throw "Set repo variables AZURE_RESOURCE_GROUP, TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+          }
+          $tenantId = az account show --query tenantId -o tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
+            throw "Failed to resolve tenant ID from 'az account show'."
+          }
+          # apim-teams-api.bicep rewrites onto /api/projects/<project>/... — derive <project> from the
+          # governed foundry-agents API path repo variable ('<account>/<project>'), as the token step does.
+          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
+          if ([string]::IsNullOrWhiteSpace($projectName)) {
+            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
+          }
+
+          # Collect the agent NAMES that opt into Teams/M365 (agents/<name>/agent-network.json
+          # exposeToM365=true). The folder name is a /teams/<name> URL segment, so restrict it to
+          # URL-path-safe characters (same guard as the YARP-route step).
+          $segRe = '^[A-Za-z0-9.-]+$'
+          $teamsAgents = @()
+          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
+            $file = Join-Path $_.FullName 'agent-network.json'
+            if (Test-Path $file) {
+              $doc = Get-Content $file -Raw | ConvertFrom-Json
+              if ($doc.exposeToM365 -eq $true) {
+                if ($_.Name -notmatch $segRe) { throw "${file}: agent folder name '$($_.Name)' is not a safe route segment (allowed: letters, digits, . -)." }
+                $teamsAgents += $_.Name
+              }
+            }
+          }
+          $teamsAgents = @($teamsAgents | Sort-Object -Unique)
+
+          # Resolve those names -> bot App IDs (instance_identity.principal_id) on the private data
+          # plane. Empty list => issuer-only audience (the provision default). Names that resolve to
+          # NO live identity are dropped; if names were supplied but NONE resolve the resolver THROWS
+          # (agents not seeded) rather than silently emit an empty (issuer-only) allowlist.
+          $botIdsFile = Join-Path $env:RUNNER_TEMP 'teams-bot-app-ids.json'
+          Write-Host "Resolving $($teamsAgents.Count) exposeToM365 agent name(s) -> bot App IDs from the Foundry project at '$($env:FOUNDRY_ENDPOINT)'."
+          pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
+            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
+            -ResolveTeamsAudience true `
+            -AgentName ($teamsAgents -join ',') `
+            -OutFile $botIdsFile
+          if ($LASTEXITCODE -ne 0) { throw "Teams bot App ID resolution failed." }
+          if (-not (Test-Path $botIdsFile)) { throw "Resolver did not produce '$botIdsFile'." }
+          $botCount = @((Get-Content $botIdsFile -Raw | ConvertFrom-Json)).Count
+
+          Write-Host "Pinning the Teams APIM audience allowlist ($botCount bot App ID(s)) on APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)'."
+          az deployment group create `
+            --resource-group $env:RESOURCE_GROUP `
+            --name "teams-audience-$(Get-Date -Format 'yyyyMMddHHmmss')" `
+            --template-file infra/stages/30-governance/model-gateway/apim-teams-api.bicep `
+            --parameters `
+              apimName=$env:APIM_NAME `
+              foundryAccountName=$env:ACCOUNT_NAME `
+              projectName=$projectName `
+              expectedTenantId=$tenantId `
+              "botAppIds=@$botIdsFile" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "Teams audience allowlist deployment failed." }
+          Write-Host "Teams APIM audience allowlist applied ($botCount bot App ID(s); empty = issuer-only)."

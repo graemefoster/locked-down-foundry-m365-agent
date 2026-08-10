@@ -20,8 +20,8 @@
       botAppIds are supplied) the audience against a SET of the published bots'
       Microsoft App IDs (each = an agent identity principal_id, which only exists
       AFTER agent seeding). botAppIds defaults to [] here (issuer-only validation)
-      and the publish hook rebuilds the full audience allowlist live once the
-      agents are seeded and their bots created.
+      and the deploy-agent-network.yml network workflow rebuilds the full audience
+      allowlist live once the agents are seeded and their bots created.
     * The ORIGINAL Authorization header (bot JWT) is forwarded to Foundry
       unchanged — Foundry validates the token on your behalf and authorizes the
       end user. We do NOT swap in a managed-identity token.
@@ -46,7 +46,7 @@ param projectName string
 @description('API version for the agent activityProtocol endpoint')
 param activityApiVersion string = '2025-05-15-preview'
 
-@description('List of bot Microsoft App IDs (= each published agent identity principal_id) to allow as validate-jwt audiences. Each published agent has its own bot, so this is a set. Empty = validate issuer only (the publish hook rebuilds the full audience set live once agents are seeded).')
+@description('List of bot Microsoft App IDs (= each published agent identity principal_id) to allow as validate-jwt audiences. Each published agent has its own bot, so this is a set. Empty = validate issuer only (the deploy-agent-network.yml network workflow rebuilds the full audience set live once agents are seeded).')
 param botAppIds array = []
 
 @description('Expected Entra tenant GUID. When set, the policy asserts the Bot Framework token serviceurl is scoped to this tenant (the GUID appears in the serviceurl path, e.g. smba.trafficmanager.net/amer/<tenantId>/) and rejects anything else with 403 — single-tenant lockdown. Empty = skip the assertion.')

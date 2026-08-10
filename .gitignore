@@ -55,3 +55,4 @@ Thumbs.db
 # drawio editor lock/temp files
 *.dtmp
 .$*.drawio.dtmp
+*.log

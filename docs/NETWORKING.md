@@ -397,9 +397,12 @@ Teams / M365 Copilot
 The original Bot Framework JWT is **forwarded unchanged** to Foundry (Foundry
 re-validates it and authorizes the end user); the APIM `validate-jwt` is
 defense-in-depth. The bot App ID = the agent identity `principal_id`, which only
-exists after seeding; the audience allowlist is not pinned automatically (the former
-postdeploy Phase B was removed), so issuer validation + IP restriction carry the check
-unless you pin it manually.
+exists after seeding, so the audience allowlist is not pinned at provision (it
+defaults to issuer-only). The `deploy-agent-network.yml` network workflow pins it
+live once the agents are seeded — it resolves every `exposeToM365` agent's
+`principal_id` from the Foundry data plane and re-deploys `apim-teams-api.bicep`
+with `botAppIds` set. Until that workflow runs, issuer validation + serviceurl
+tenant assertion + IP restriction carry the check.
 
 > **Single-tenant lockdown via `serviceurl`.** The Bot Framework token has **no `tid`
 > claim**, but its signed `serviceurl` embeds the caller's tenant GUID

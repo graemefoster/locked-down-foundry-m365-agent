@@ -37,6 +37,16 @@
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -AgentName 'teams-agent'
     # Resolve name-only policy -> resolved policy file:
     ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolvePolicyPath mcp/mcp-policy.json -OutFile resolved.json
+    # Resolve Teams-published agent NAMES -> bot App IDs (principal_id) for the APIM audience allowlist:
+    ./list-agent-appids.ps1 -FoundryProjectEndpoint <endpoint> -ResolveTeamsAudience true -AgentName 'teams-agent' -OutFile bot-app-ids.json
+
+  A THIRD mode (RESOLVE TEAMS AUDIENCE, -ResolveTeamsAudience true) maps the exposeToM365 agent
+  NAMES (via -AgentName, comma-separated) to their bot Microsoft App IDs and emits a JSON array for
+  apim-teams-api.bicep's `botAppIds`. In this topology each bot's msaAppId is the agent identity
+  `instance_identity.principal_id` (see hooks/bot-service.bicep), so this mode emits principal_ids
+  (NOT the client_id the MCP modes use). Names with no live identity are DROPPED; if names were
+  supplied but NONE resolve it THROWS (agents not seeded / endpoint unreachable) rather than emit an
+  empty allowlist that would silently weaken the check to issuer-only. An empty name list emits [].
 
   All parameters are [string] (comma-separated for -AgentName) so the script stays simple to
   invoke from the deploy-agent-network workflow on the in-VNet self-hosted runner (plain CLI args).
@@ -55,8 +65,11 @@ param(
   [Parameter(Mandatory = $false)] [string]$IncludeBlueprint = 'false',
   # RESOLVE MODE: path to the name-only mcp-policy.json to resolve into an AppId-enriched policy.
   [Parameter(Mandatory = $false)] [string]$ResolvePolicyPath = '',
-  # In resolve mode, write the resolved policy JSON here (recommended, keeps stdout clean).
-  # If empty in resolve mode, the resolved JSON is written to stdout.
+  # RESOLVE TEAMS AUDIENCE MODE: 'true' maps the -AgentName names to their bot App IDs (principal_id)
+  # and emits a JSON array for apim-teams-api.bicep's `botAppIds` (see the header for the full flow).
+  [Parameter(Mandatory = $false)] [string]$ResolveTeamsAudience = 'false',
+  # In resolve modes, write the resolved JSON here (recommended, keeps stdout clean).
+  # If empty in a resolve mode, the resolved JSON is written to stdout.
   [Parameter(Mandatory = $false)] [string]$OutFile = '',
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
@@ -65,7 +78,9 @@ $ErrorActionPreference = 'Stop'
 # All params are [string] (the deploy-agent-network workflow passes plain CLI args on the in-VNet
 # runner), so normalise the string inputs here:
 $resolveMode   = -not [string]::IsNullOrWhiteSpace($ResolvePolicyPath)
-# Resolve mode needs EVERY live agent to join against, so the name filter is not applied there.
+$teamsMode     = $ResolveTeamsAudience -eq 'true'
+# Resolve (MCP) mode needs EVERY live agent to join against, so the name filter is not applied
+# there. Discovery + Teams-audience modes DO honour -AgentName (comma-separated).
 $agentFilter   = $resolveMode ? @() : @($AgentName -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $rpm           = [int]$RequestsPerMinute
 $showBlueprint = $IncludeBlueprint -eq 'true'
@@ -123,9 +138,45 @@ function Get-AgentIdentityRows {
     [pscustomobject]@{
       name        = $a.name
       appId       = $detail.instance_identity.client_id
+      principalId = $detail.instance_identity.principal_id
       blueprintId = $detail.blueprint.client_id
     }
   }
+}
+
+# --- RESOLVE TEAMS AUDIENCE MODE (data plane): agent NAMES -> bot App IDs (principal_id) ---
+# The APIM Teams validate-jwt audience allowlist = the published bots' Microsoft App IDs, and in
+# this locked-down topology each bot's msaAppId is the agent identity principal_id (see
+# hooks/bot-service.bicep). Given the exposeToM365 agent NAMES (via -AgentName), emit a JSON array
+# of their principal_ids for apim-teams-api.bicep's `botAppIds`. Names with no live identity are
+# DROPPED; if names were supplied but NONE resolve we THROW (agents not seeded / endpoint
+# unreachable) rather than emit [] and silently weaken the check to issuer-only. An empty name list
+# (no agent exposes to M365) deterministically emits [] (issuer-only), which is a valid posture.
+if ($teamsMode) {
+  $ids = @()
+  if ($agentFilter.Count -gt 0) {
+    $rows = @(Get-AgentIdentityRows | Where-Object { $agentFilter -contains $_.name })
+    $ids  = @($rows | ForEach-Object { $_.principalId } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($ids.Count -eq 0) {
+      throw "[teams-audience] $($agentFilter.Count) exposeToM365 agent name(s) were supplied ($($agentFilter -join ', ')) but NONE resolved to a live bot App ID (instance_identity.principal_id) at '$FoundryProjectEndpoint'. Refusing to emit an empty allowlist — ensure the agents are seeded and the endpoint is reachable."
+    }
+    $resolved = @($rows | Where-Object { -not [string]::IsNullOrWhiteSpace($_.principalId) } | ForEach-Object { $_.name })
+    $dropped  = @($agentFilter | Where-Object { $resolved -notcontains $_ })
+    foreach ($d in $dropped) { Write-Host "[teams-audience] Dropping agent '$d': no live bot App ID (principal_id) found." }
+    Write-Host "[teams-audience] Resolved $($ids.Count) bot App ID(s) for the APIM Teams audience allowlist."
+  }
+  else {
+    Write-Host "[teams-audience] No exposeToM365 agent names supplied — emitting an empty allowlist (issuer-only audience validation)."
+  }
+  $json = ($ids.Count -eq 0) ? '[]' : (@($ids) | ConvertTo-Json -Depth 3 -AsArray)
+  if (-not [string]::IsNullOrWhiteSpace($OutFile)) {
+    Set-Content -Path $OutFile -Value $json -Encoding utf8
+    Write-Host "[teams-audience] Wrote $($ids.Count) bot App ID(s) to '$OutFile'."
+  }
+  else {
+    Write-Output $json
+  }
+  return
 }
 
 # --- RESOLVE MODE (data plane): name-only policy -> AppId-enriched policy ---
