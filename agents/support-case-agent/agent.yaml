@@ -5,7 +5,7 @@ definition:
   kind: hosted
   container_protocol_versions:
     - protocol: responses
-      version: 1.0.0
+      version: 2.0.0
   cpu: "0.5"
   memory: 1Gi
   image: "{{agentAcrImage}}"
