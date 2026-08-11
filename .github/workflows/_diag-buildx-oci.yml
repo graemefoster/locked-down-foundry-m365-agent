@@ -1,0 +1,77 @@
+name: (diag) buildx OCI proof
+
+# TEMPORARY — prove the fix end-to-end on the runner:
+#  1. install buildx as a CLI plugin from a GitHub release (no sudo, like yq)
+#  2. build+push a scratch image via the docker-container (BuildKit) driver with oci-mediatypes=true
+#  3. read the STORED manifest media types back via `az acr manifest show` (uses the VM MI login)
+# Expect: OCI layer media type. Delete after use.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  diag:
+    runs-on: [self-hosted, vnet, foundry-private]
+    env:
+      ACR_NAME: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}
+      BUILDX_VERSION: v0.19.3
+    steps:
+      - name: Install buildx, build+push OCI, verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ACR_NAME:-}" ]; then echo "ACR_NAME repo var not set"; exit 1; fi
+
+          echo "=== sudo availability (informational) ==="
+          if sudo -n true 2>/dev/null; then echo "passwordless sudo: YES"; else echo "passwordless sudo: NO"; fi
+
+          echo "=== install buildx CLI plugin (no sudo) ==="
+          mkdir -p "$HOME/.docker/cli-plugins"
+          if ! docker buildx version >/dev/null 2>&1; then
+            curl -fsSL -o "$HOME/.docker/cli-plugins/docker-buildx" \
+              "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-amd64"
+            chmod 0755 "$HOME/.docker/cli-plugins/docker-buildx"
+          fi
+          docker buildx version
+
+          echo "=== create docker-container builder (pulls moby/buildkit from Docker Hub) ==="
+          docker buildx rm ocibuilder >/dev/null 2>&1 || true
+          docker buildx create --name ocibuilder --driver docker-container --use
+          docker buildx inspect --bootstrap ocibuilder
+
+          az login --identity --output none
+          loginServer=$(az acr show --name "$ACR_NAME" --query loginServer -o tsv)
+          az acr login --name "$ACR_NAME" --output none
+
+          work=$(mktemp -d)
+          echo "hello-oci $(date -u +%s)" > "$work/test.txt"
+          printf 'FROM scratch\nCOPY test.txt /test.txt\n' > "$work/Dockerfile"
+          repo="mediatype-probe"; tag="oci$(date -u +%s)"
+          imageRef="$loginServer/$repo:$tag"
+
+          echo "=== buildx build + push (oci-mediatypes=true) ==="
+          docker buildx build --builder ocibuilder --push --provenance=false \
+            --output "type=image,name=$imageRef,oci-mediatypes=true" \
+            --file "$work/Dockerfile" "$work"
+
+          echo "=== read STORED manifest via az acr manifest show ==="
+          az acr manifest show -r "$ACR_NAME" -n "$repo:$tag" -o json > "$work/m.json" || \
+            az acr manifest show --registry "$ACR_NAME" --name "$repo:$tag" -o json > "$work/m.json"
+          echo "--- manifest.mediaType ---";      jq -r '.mediaType // "(none)"' "$work/m.json"
+          echo "--- config.mediaType ---";        jq -r '.config.mediaType // "(none)"' "$work/m.json"
+          echo "--- layers[].mediaType ---";      jq -r '(.layers // [])[].mediaType' "$work/m.json"
+
+          lyr=$(jq -r '((.layers // [])[0].mediaType) // ""' "$work/m.json")
+          echo "=== VERDICT ==="
+          case "$lyr" in
+            application/vnd.oci.image.layer.v1.tar+gzip) echo ">>> OCI \u2705 buildx OCI path works on the runner." ;;
+            application/vnd.docker.image.rootfs.diff.tar.gzip) echo ">>> STILL schema2 \u274c" ;;
+            *) echo ">>> Unexpected/again check: '$lyr'" ;;
+          esac
+
+          echo "=== cleanup ==="
+          az acr repository delete --name "$ACR_NAME" --image "$repo:$tag" --yes 2>/dev/null || true
+          docker buildx rm ocibuilder >/dev/null 2>&1 || true
+          rm -rf "$work"
