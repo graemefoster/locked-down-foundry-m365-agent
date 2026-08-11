@@ -137,6 +137,27 @@ jobs:
           # build on a fresh runner pulls the `moby/buildkit` image. In a locked-down VNet this
           # egress must be reachable (Docker Hub / a mirror); if it is blocked, use the code
           # (source-zip) deploy path instead, which never touches ACR.
+          #
+          # The Ubuntu `docker.io` package does NOT ship the buildx plugin, and without it
+          # `docker build` silently falls back to the LEGACY builder, which only emits Docker
+          # schema2 layers (the exact media type Foundry rejects). cloud-init installs buildx
+          # system-wide; this guard also installs it per-user (GitHub release binary, like yq)
+          # so an already-provisioned runner works without a reprovision.
+          $buildxVersion = "v0.19.3"
+          docker buildx version *> $null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "buildx plugin not found — installing $buildxVersion into ~/.docker/cli-plugins."
+            $pluginDir = Join-Path $env:HOME ".docker/cli-plugins"
+            New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+            $pluginPath = Join-Path $pluginDir "docker-buildx"
+            curl --fail --silent --show-error --location -o $pluginPath `
+              "https://github.com/docker/buildx/releases/download/$buildxVersion/buildx-$buildxVersion.linux-amd64"
+            if ($LASTEXITCODE -ne 0) { throw "Failed to download the buildx plugin $buildxVersion." }
+            chmod 0755 $pluginPath
+            docker buildx version *> $null
+            if ($LASTEXITCODE -ne 0) { throw "buildx plugin still not usable after install." }
+          }
+
           $builderName = "ocibuilder"
           docker buildx inspect $builderName *> $null
           if ($LASTEXITCODE -ne 0) {

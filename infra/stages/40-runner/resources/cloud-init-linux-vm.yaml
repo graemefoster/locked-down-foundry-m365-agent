@@ -13,6 +13,11 @@
 #   docker.io   - builds hosted-agent container images on the runner and pushes them to the
 #                 private ACR over its private endpoint (ACR Tasks / `az acr build` can't reach a
 #                 publicNetworkAccess=Disabled registry, so we build locally instead)
+#   docker buildx - the Ubuntu `docker.io` package does NOT include buildx; without it
+#                 `docker build` falls back to the legacy builder, which only emits Docker
+#                 schema2 layer media types. Foundry's private/locked-down server-side image
+#                 build rejects those ("ImageBuildFailed: unsupported MIME type for
+#                 compression"), so we install the buildx plugin and build OCI images.
 #   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
 #   git, jq     - actions/checkout and general workflow plumbing
 #   yq          - agent.yaml -> agent.json in the reusable deploy-agent.yml (this is why
@@ -68,3 +73,15 @@ runcmd:
       curl -fsSL -o /usr/local/bin/yq \
         "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
       chmod 0755 /usr/local/bin/yq
+  # docker buildx (mobyproject) — the official CLI-plugin binary from GitHub releases (the
+  # `docker.io` apt package ships no buildx). Installed system-wide so every user's `docker`
+  # finds it. Required so hosted-agent image builds use BuildKit and push OCI media types
+  # (the legacy builder only emits Docker schema2, which the private Foundry rejects).
+  - - bash
+    - -c
+    - |
+      set -euxo pipefail
+      install -d -m 0755 /usr/local/lib/docker/cli-plugins
+      curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx \
+        "https://github.com/docker/buildx/releases/download/v0.19.3/buildx-v0.19.3.linux-amd64"
+      chmod 0755 /usr/local/lib/docker/cli-plugins/docker-buildx
