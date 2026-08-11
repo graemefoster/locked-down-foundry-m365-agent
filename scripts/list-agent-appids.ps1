@@ -211,12 +211,14 @@ if ($resolveMode) {
   $srcAgentCount = @(@($srcPolicy.servers) | ForEach-Object { $_.agents } | Where-Object { $_ }).Count
   $serverCount   = @($resolvedServers).Count
   if ($grantedCount -eq 0 -and $srcAgentCount -gt 0) {
-    # The source policy DOES list agents but NONE resolved -> this is a failure (agents not seeded
-    # yet, or the endpoint unreachable), NOT an intentional lockdown. Refuse to emit a deny-all
-    # policy that would revoke ALL access; throwing leaves any previously-applied APIM policy
-    # intact. (If the source policy is intentionally emptied, $srcAgentCount is 0 and we correctly
-    # emit the empty deny-all policy so access CAN be revoked on purpose.)
-    throw "[resolve] Source policy '$ResolvePolicyPath' lists $srcAgentCount agent(s) but NONE resolved against the live project at '$FoundryProjectEndpoint'. Refusing to emit a deny-all policy — ensure the agents are seeded and the endpoint is reachable."
+    # The source policy lists agents but NONE resolved. Reaching this point means enumeration
+    # against the live project SUCCEEDED (Get-AgentIdentityRows uses bare Invoke-RestMethod, which
+    # throws on an unreachable/erroring endpoint — so a transient connectivity failure fails EARLIER
+    # and never gets here). Therefore this is authoritative ground truth: the listed agents are not
+    # seeded / have no runtime identity yet. An identity-less agent cannot mint an AgenticIdentity
+    # token, so denying it changes nothing functional. Emit the deny-all policy and complete so the
+    # env is actively locked down; re-run this step once the agents are seeded to grant access.
+    Write-Host "::warning::[resolve] Source policy '$ResolvePolicyPath' lists $srcAgentCount agent(s) but NONE have a live identity in the project at '$FoundryProjectEndpoint'. Emitting a deny-all MCP policy (locked down). Re-run this workflow after the agents are seeded to grant access."
   }
 
   $resolved = [ordered]@{
