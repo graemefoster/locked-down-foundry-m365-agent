@@ -94,7 +94,7 @@ jobs:
       # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable).
       # We build locally rather than with `az acr build` because ACR Tasks run in a
       # Microsoft-managed environment that can't reach a publicNetworkAccess=Disabled registry.
-      - name: Build and push the agent image (docker + private ACR)
+      - name: Build and push the agent image (buildx OCI + private ACR)
         id: image
         shell: pwsh
         env:
@@ -125,12 +125,40 @@ jobs:
           az acr login --name $env:ACR_NAME --output none
           if ($LASTEXITCODE -ne 0) { throw "az acr login failed for '$($env:ACR_NAME)' (is the private endpoint reachable + Docker running?)." }
 
-          Write-Host "Building '$imageRef' from context '$($env:CONTEXT)'."
-          docker build --tag $imageRef --file $dockerfilePath $env:CONTEXT
-          if ($LASTEXITCODE -ne 0) { throw "docker build failed for '$imageRef'." }
+          # Build + push with buildx using the docker-container (BuildKit) driver and
+          # oci-mediatypes=true so the pushed manifest uses OCI layer media types
+          # (application/vnd.oci.image.layer.v1.tar+gzip). The default `docker` driver emits
+          # DOCKER schema2 layers (application/vnd.docker.image.rootfs.diff.tar.gzip), which
+          # Foundry's server-side image build (containers/image) rejects with
+          # "ImageBuildFailed (400): unsupported MIME type for compression ...". See
+          # docs/known-issues.md.
+          #
+          # NOTE: the docker-container driver runs BuildKit inside a container, so the FIRST
+          # build on a fresh runner pulls the `moby/buildkit` image. In a locked-down VNet this
+          # egress must be reachable (Docker Hub / a mirror); if it is blocked, use the code
+          # (source-zip) deploy path instead, which never touches ACR.
+          $builderName = "ocibuilder"
+          docker buildx inspect $builderName *> $null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Creating buildx builder '$builderName' (docker-container driver)."
+            docker buildx create --name $builderName --driver docker-container --use
+            if ($LASTEXITCODE -ne 0) { throw "docker buildx create failed for '$builderName'." }
+          }
+          else {
+            docker buildx use $builderName
+            if ($LASTEXITCODE -ne 0) { throw "docker buildx use failed for '$builderName'." }
+          }
 
-          docker push $imageRef
-          if ($LASTEXITCODE -ne 0) { throw "docker push failed for '$imageRef'." }
+          Write-Host "Building + pushing '$imageRef' (OCI media types) from context '$($env:CONTEXT)'."
+          docker buildx build `
+            --builder $builderName `
+            --push `
+            --provenance=false `
+            --output "type=image,name=$imageRef,oci-mediatypes=true" `
+            --tag $imageRef `
+            --file $dockerfilePath `
+            $env:CONTEXT
+          if ($LASTEXITCODE -ne 0) { throw "docker buildx build/push failed for '$imageRef'." }
 
           "image-ref=$imageRef" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Pushed image: $imageRef"
