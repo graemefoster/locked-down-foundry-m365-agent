@@ -261,7 +261,7 @@
         );
       }
 
-      function Message({ m }) {
+      function Message({ m, onImgLoad }) {
         const isUser = m.role === "user";
         return (
           <div style={{ display: "flex", gap: 12, padding: "0.85rem 0" }}>
@@ -273,7 +273,7 @@
               {m.images && m.images.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: m.text ? 8 : 0 }}>
                   {m.images.map((src, i) => (
-                    <img key={i} src={src} alt="pasted"
+                    <img key={i} src={src} alt="pasted" onLoad={onImgLoad}
                       style={{ maxWidth: 260, maxHeight: 200, borderRadius: 10, border: "1px solid var(--cp-border)" }} />
                   ))}
                 </div>
@@ -348,6 +348,11 @@
         const videoRef = useRef(null);
         const textareaRef = useRef(null);
 
+        const scrollToBottom = useCallback(() => {
+          const el = scrollRef.current;
+          if (el) el.scrollTop = el.scrollHeight;
+        }, []);
+
         useEffect(() => {
           const el = textareaRef.current;
           if (!el) return;
@@ -356,8 +361,8 @@
         }, [text]);
 
         useEffect(() => {
-          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }, [messages]);
+          scrollToBottom();
+        }, [messages, scrollToBottom]);
 
         const openApp = useCallback(() => {
           const u = (cfg && cfg.appUrl) || "http://localhost:8080";
@@ -534,7 +539,7 @@
                   <p style={{ fontSize: "0.85rem" }}>Paste screenshots directly into the box, or use the image button.</p>
                 </div>
               )}
-              {messages.map((m, i) => <Message key={i} m={m} />)}
+              {messages.map((m, i) => <Message key={i} m={m} onImgLoad={scrollToBottom} />)}
             </div>
 
             {error && (
