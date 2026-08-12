@@ -1,6 +1,10 @@
 object: agent.version
 name: support-case-agent
 description: Hosted support-case agent (code / dotnet_10), served through the model gateway.
+# Declares the agent as drivable by Azure Voice Live. Without this flag a Voice Live session
+# bound to the agent connects and accepts a turn but returns an empty response (output=0).
+metadata:
+  voiceLiveCompatible: "true"
 # CODE deploy variant of agents/support-case-agent/agent.yaml. Instead of a prebuilt container
 # image, Foundry receives the `dotnet publish` output as a zip (code_configuration) and runs it on
 # its managed runtime. This path never pulls from an ACR, so it is unaffected by the private-ACR

@@ -157,9 +157,12 @@ jobs:
             echo "::error::Manifest '$MANIFEST' has no 'name'."
             exit 1
           fi
-          # Strictly the { name, description, definition } object (the Foundry code-deploy metadata
-          # part); drop manifest-only fields such as `object`.
-          yq -o=json '{"name": .name, "description": .description, "definition": .definition}' "$MANIFEST" > metadata.json
+          # Strictly the { name, description, definition, metadata } object (the Foundry code-deploy
+          # metadata part); drop manifest-only fields such as `object`. `metadata` carries the
+          # agent's manifest metadata block (e.g. voiceLiveCompatible) through to Foundry. Building
+          # the flat object then dropping null-valued keys omits `metadata` entirely when the
+          # manifest has none, so we never POST a null metadata.
+          yq -o=json '{"name": .name, "description": .description, "definition": .definition, "metadata": .metadata} | with_entries(select(.value != null))' "$MANIFEST" > metadata.json
 
           if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' metadata.json; then
             if [ -z "$VAR_ENDPOINT" ]; then
