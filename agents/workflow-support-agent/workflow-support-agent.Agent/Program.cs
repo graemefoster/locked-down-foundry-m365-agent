@@ -11,6 +11,11 @@ using Azure.AI.AgentServer.Responses;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
+// ActivitySource that the Foundry AgentHost telemetry pipeline (AddAgentHostTelemetry) listens to
+// and exports to Application Insights. Instrumentation must emit onto this exact source to be
+// exported; it matches Microsoft.Agents.AI.Foundry.Hosting's internal ResponsesSourceName.
+const string TelemetrySource = "Azure.AI.AgentServer.Responses";
+
 var projectEndpoint = new Uri(Environment.GetEnvironmentVariable("FOUNDRY_PROJECT_ENDPOINT")
     ?? throw new InvalidOperationException("FOUNDRY_PROJECT_ENDPOINT environment variable is not set."));
 
@@ -20,22 +25,38 @@ var deployment = Environment.GetEnvironmentVariable("AZURE_AI_MODEL_DEPLOYMENT_N
 var credential = new DefaultAzureCredential();
 var projectClient = new AIProjectClient(projectEndpoint, credential);
 
+// Instrument the reasoner's model calls with OpenTelemetry so they reach Application Insights.
+// The AgentHost telemetry pipeline (AddAgentHostTelemetry, wired by AgentHost.Build() below)
+// exports only the fixed TelemetrySource, and AgentFrameworkResponseHandler auto-instruments the
+// HOSTED agent it resolves - but the reasoner is invoked in-process via InProcessReasonerAgentProvider
+// and is never seen by that handler, so without this its gen_ai spans (prompt, response, tokens,
+// tool calls) never leave the process. Emitting onto TelemetrySource routes them through the same
+// exporter. EnableSensitiveData (prompts + responses) is opt-in via OTEL_ENABLE_SENSITIVE_DATA so a
+// locked-down deployment does not log conversation content by default.
+var enableSensitiveTelemetry = string.Equals(
+    Environment.GetEnvironmentVariable("OTEL_ENABLE_SENSITIVE_DATA"), "true", StringComparison.OrdinalIgnoreCase);
+
 // --- The reasoning helper the declarative workflow delegates to ------------------------------
 // Built in-process from the embedded runbook (the same projectClient.AsAIAgent(...) pattern
 // support-case-agent uses for its single prompt agent). It is NOT persisted as a separate Foundry
 // agent - the custom provider below routes the workflow's InvokeAzureAgent steps straight to it, so
 // this stays one self-contained deployable.
 var reasonerInstructions = LoadEmbeddedResource("Instructions.md");
-var reasoner = projectClient.AsAIAgent(new ChatClientAgentOptions
-{
-    Name = "workflow_support_reasoner",
-    Description = "Reasoning helper invoked by the workflow-support-agent declarative workflow.",
-    ChatOptions = new ChatOptions
+var reasoner = projectClient.AsAIAgent(
+    new ChatClientAgentOptions
     {
-        Instructions = reasonerInstructions,
-        ModelId = deployment
-    }
-});
+        Name = "workflow_support_reasoner",
+        Description = "Reasoning helper invoked by the workflow-support-agent declarative workflow.",
+        ChatOptions = new ChatOptions
+        {
+            Instructions = reasonerInstructions,
+            ModelId = deployment
+        }
+    },
+    clientFactory: chatClient => chatClient
+        .AsBuilder()
+        .UseOpenTelemetry(sourceName: TelemetrySource, configure: cfg => cfg.EnableSensitiveData = enableSensitiveTelemetry)
+        .Build());
 
 // --- Build the declarative workflow and expose it as an AIAgent ------------------------------
 IConfiguration configuration = new ConfigurationBuilder()
