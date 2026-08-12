@@ -1,0 +1,244 @@
+#
+# workflow-support-agent — GraemeCRM access triage, expressed as a DECLARATIVE workflow.
+#
+# This is the declarative (YAML) equivalent of support-case-agent's Prompt.md. Instead of handing a
+# single system prompt to one chat agent, the workflow OWNS the triage structure: it paces the
+# phases, injects the exact checkpoint instructions (SendActivity), collects user turns (Question),
+# branches on reported status (ConditionGroup / GotoAction), and delegates the per-phase reasoning +
+# screenshot interpretation to a reasoning agent (InvokeAzureAgent) named
+# `workflow_support_reasoner`, which the host app seeds in-process at startup (see Program.cs /
+# Instructions.md).
+#
+# Schema notes (Microsoft.Agents.AI.Workflows.Declarative rc5):
+#   * SendActivity.activity is a STRING template; interpolate variables with {Local.Var}.
+#   * Question uses property/prompt/entity; prompt.text is a sequence of strings.
+#   * Branching is ConditionGroup (conditions[].condition + elseActions); there is no `If`.
+#     Use GotoAction (actionId) to skip ahead. PowerFx expressions start with `=`.
+#   * InvokeAzureAgent input.messages takes a PowerFx UserMessage(...); output.autoSend streams
+#     the agent reply straight to the user.
+# See https://learn.microsoft.com/agent-framework/workflows/declarative?pivots=programming-language-csharp
+#
+kind: Workflow
+trigger:
+  kind: OnConversationStart
+  id: workflow_support_agent
+  actions:
+
+    # --- Intro + redaction safety reminder ---------------------------------------------------
+    - kind: SendActivity
+      id: intro
+      displayName: Introduce the triage and remind about redaction
+      activity: |-
+        I can help you get access to **GraemeCRM**. We'll go through a few quick checks together.
+
+        Before sharing any screenshot, please redact passwords, access tokens, recovery codes and
+        API keys. Leave the signed-in account, application name, role name and status visible when
+        those details are needed for validation.
+
+    # --- Phase 1: establish the symptom ------------------------------------------------------
+    - kind: Question
+      id: ask_symptom
+      displayName: Establish the symptom
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.Symptom
+      prompt:
+        kind: Message
+        text:
+          - What happens when you try to start GraemeCRM? Please paste the exact error text if you have it.
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: InvokeAzureAgent
+      id: handle_symptom
+      displayName: Acknowledge symptom and direct account verification
+      conversationId: =System.ConversationId
+      agent:
+        name: workflow_support_reasoner
+      input:
+        messages: =UserMessage(Concat("Phase: establish the symptom. The user reported: ", Local.Symptom, ". Acknowledge the symptom without over-diagnosing, then explain that the first check is whether the signed-in account has the AccessGraemeCRM role, and ask them to open https://graeidentity.localtest.me, sign in, open the account menu, and share a screenshot of the GraeIdentity header showing the signed-in account."))
+      output:
+        autoSend: true
+
+    # --- Phase 2: verify the account --------------------------------------------------------
+    - kind: Question
+      id: ask_account
+      displayName: Collect account evidence
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.AccountEvidence
+      prompt:
+        kind: Message
+        text:
+          - Share the GraeIdentity header screenshot (or describe the signed-in account), and confirm it is the same account you use for GraemeCRM.
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: InvokeAzureAgent
+      id: verify_account
+      displayName: Validate the signed-in account
+      conversationId: =System.ConversationId
+      agent:
+        name: workflow_support_reasoner
+      input:
+        messages: =UserMessage(Concat("Phase: verify the account. The user provided: ", Local.AccountEvidence, ". Validate that a signed-in account is visible and is the correct GraemeCRM account. If it is the wrong account, guide them to sign out and back in. Otherwise, ask them to open My Access > Application Access > GraemeCRM and share a screenshot including the application name and the Assigned Roles section."))
+      output:
+        autoSend: true
+
+    # --- Phase 3: check the current role assignment -----------------------------------------
+    - kind: Question
+      id: ask_role_status
+      displayName: Capture reported role status
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.RoleStatus
+      prompt:
+        kind: Message
+        text:
+          - "Looking at Assigned Roles for GraemeCRM, what is the status of AccessGraemeCRM? Reply with one of: Active, Pending, Missing, or Other."
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: ConditionGroup
+      id: route_role_status
+      displayName: Branch on the reported role status
+      conditions:
+        - id: role_active
+          condition: =Lower(Local.RoleStatus) = "active"
+          actions:
+            - kind: SendActivity
+              id: role_active_msg
+              activity: AccessGraemeCRM is already Active. Please retry GraemeCRM — no new request is needed.
+            - kind: GotoAction
+              id: goto_confirm_from_active
+              actionId: ask_resolved
+        - id: role_pending
+          condition: =Lower(Local.RoleStatus) = "pending"
+          actions:
+            - kind: SendActivity
+              id: role_pending_msg
+              activity: A request for AccessGraemeCRM has already been submitted and is Pending approval. It must be approved before GraemeCRM will work.
+            - kind: GotoAction
+              id: goto_confirm_from_pending
+              actionId: ask_resolved
+      elseActions:
+        - kind: InvokeAzureAgent
+          id: explain_role_gap
+          displayName: Explain the role gap before requesting
+          conversationId: =System.ConversationId
+          agent:
+            name: workflow_support_reasoner
+          input:
+            messages: =UserMessage(Concat("Phase: check role assignment. The user reports AccessGraemeCRM status is '", Local.RoleStatus, "'. Briefly explain what that status means and that we now need to request the AccessGraemeCRM role."))
+          output:
+            autoSend: true
+
+    # --- Phase 4: request AccessGraemeCRM (only reached when no active/pending role) ----------
+    - kind: SendActivity
+      id: request_instructions
+      displayName: Guide the access request
+      activity: |-
+        Let's request access. In the GraemeCRM application page:
+        1. Open **Available Roles**.
+        2. Find **AccessGraemeCRM** and select **Request access**.
+        3. In **Business justification**, enter a brief work-related reason.
+        4. Before submitting, share a screenshot showing GraemeCRM, AccessGraemeCRM, the
+           signed-in account and the completed Business justification.
+
+    - kind: Question
+      id: ask_presubmit
+      displayName: Collect pre-submit evidence
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.PreSubmitEvidence
+      prompt:
+        kind: Message
+        text:
+          - Share the pre-submit screenshot (or describe the request form). I'll help you check it before you submit.
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: InvokeAzureAgent
+      id: validate_presubmit
+      displayName: Validate the request before submission
+      conversationId: =System.ConversationId
+      agent:
+        name: workflow_support_reasoner
+      input:
+        messages: =UserMessage(Concat("Phase: request AccessGraemeCRM. The user provided the pre-submit details: ", Local.PreSubmitEvidence, ". Verify GraemeCRM, AccessGraemeCRM, the signed-in account and a sensible non-fabricated Business justification are all present and consistent. Call out any mismatch. If it all checks out, tell them to select Submit request and report the resulting Request status."))
+      output:
+        autoSend: true
+
+    - kind: Question
+      id: ask_outcome
+      displayName: Capture the request outcome
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.RequestOutcome
+      prompt:
+        kind: Message
+        text:
+          - "After selecting Submit request, what does Request status show? Reply with one of: Approved, Pending, or Denied."
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: ConditionGroup
+      id: route_outcome
+      displayName: Branch on the request outcome
+      conditions:
+        - id: outcome_approved
+          condition: =Lower(Local.RequestOutcome) = "approved"
+          actions:
+            - kind: SendActivity
+              id: outcome_approved_msg
+              activity: Your request was Approved. Please sign out of GraemeCRM, sign back in, and try to start it again.
+        - id: outcome_denied
+          condition: =Lower(Local.RequestOutcome) = "denied"
+          actions:
+            - kind: SendActivity
+              id: outcome_denied_msg
+              activity: Your request was Denied. Please review any visible decision reason. This PoC cannot override the decision.
+      elseActions:
+        - kind: SendActivity
+          id: outcome_pending_msg
+          activity: Your request was submitted and is Pending approval. It must be approved before GraemeCRM will work; I can't promise an approval time or name an approver unless that's shown in the UI.
+
+    # --- Phase 5: confirm resolution --------------------------------------------------------
+    - kind: Question
+      id: ask_resolved
+      displayName: Confirm whether GraemeCRM now starts
+      alwaysPrompt: true
+      autoSend: false
+      property: Local.Resolved
+      prompt:
+        kind: Message
+        text:
+          - "Does GraemeCRM start successfully now? Reply Yes or No."
+      entity:
+        kind: StringPrebuiltEntity
+
+    - kind: ConditionGroup
+      id: resolution
+      displayName: Close out or escalate
+      conditions:
+        - id: resolved_yes
+          condition: =Lower(Local.Resolved) = "yes"
+          actions:
+            - kind: SendActivity
+              id: resolved_msg
+              activity: Great — GraemeCRM access is working. This case is resolved. Reach out again if anything else comes up.
+      elseActions:
+        - kind: InvokeAzureAgent
+          id: escalate_summary
+          displayName: Summarize evidence and hand off
+          conversationId: =System.ConversationId
+          agent:
+            name: workflow_support_reasoner
+          input:
+            messages: =UserMessage(Concat("Phase: confirm resolution. GraemeCRM still does not start. Summarize the evidence collected across this conversation: the account identifier, the AccessGraemeCRM role state, and the exact GraemeCRM error (reported earlier as: ", Local.Symptom, "). Explain that supported access triage is complete and the remaining issue needs application-support investigation. Do not invent further technical fixes."))
+          output:
+            autoSend: true
+
+    - kind: EndConversation
+      id: end
+      displayName: End the triage conversation

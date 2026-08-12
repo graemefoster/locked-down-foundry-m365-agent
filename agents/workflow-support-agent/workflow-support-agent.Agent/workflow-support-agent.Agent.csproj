@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>3f6c1a90-8a4e-4b2d-9e77-2a1c5d0b7e11</UserSecretsId>
+  </PropertyGroup>
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);NU1903;NU1605;OPENAI001;MAAI001</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Microsoft.Agents.AI.Foundry.Hosting" Version="1.17.0-preview.260804.1" />
+    <!-- Declarative-workflow authoring (YAML -> Workflow) + the ResponseAgentProvider base we extend
+         to resolve the workflow's InvokeAzureAgent step against an in-process agent. We deliberately
+         do NOT reference the .AzureAI companion: its AsAIAgent overload was built against an older
+         Azure.AI.Projects and would shadow the Foundry one this app hosts with. -->
+    <PackageReference Include="Microsoft.Agents.AI.Workflows.Declarative" Version="1.0.0-rc5" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The declarative workflow is loaded from disk at startup (DeclarativeWorkflowBuilder.Build
+         takes a file path under AppContext.BaseDirectory), so it must sit next to the DLL. -->
+    <Content Include="workflow.yaml" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Reasoning-agent instructions are embedded and read as a string when the app seeds its
+         helper agent version in the project. -->
+    <EmbeddedResource Include="Instructions.md" LogicalName="Instructions.md" />
+  </ItemGroup>
+</Project>
