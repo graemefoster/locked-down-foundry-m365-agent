@@ -346,6 +346,14 @@
         const scrollRef = useRef(null);
         const fileRef = useRef(null);
         const videoRef = useRef(null);
+        const textareaRef = useRef(null);
+
+        useEffect(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.style.height = "auto";
+          el.style.height = Math.min(el.scrollHeight, 200) + "px";
+        }, [text]);
 
         useEffect(() => {
           if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -578,13 +586,14 @@
                 onChange={(e) => { addImages(e.target.files); e.target.value = ""; }} />
               <button className="icon-btn" title="Attach image" onClick={() => fileRef.current?.click()}>🖼</button>
               <textarea
+                ref={textareaRef}
                 rows={1}
                 value={text}
                 placeholder="Message the agent…  (paste a screenshot, Enter to send, Shift+Enter for newline)"
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={onKeyDown}
                 onPaste={onPaste}
-                style={{ minHeight: 42, maxHeight: 160, overflowY: "auto" }}
+                style={{ minHeight: 42, maxHeight: 200, overflowY: "auto" }}
               />
               <button className="btn btn-primary" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={send}>
                 {busy ? <span className="spin">◠</span> : "Send"}
