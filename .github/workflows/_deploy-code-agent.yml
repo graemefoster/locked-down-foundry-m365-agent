@@ -49,6 +49,11 @@ on:
         type: string
         required: false
         default: "build"
+      entry-dll:
+        description: "Name of the entry-point DLL expected in the publish output (agent-code.yaml code_configuration.entry_point)."
+        type: string
+        required: false
+        default: "support-case-agent.Agent.dll"
       publish-to-teams:
         description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
         type: boolean
@@ -97,6 +102,7 @@ jobs:
           CONTEXT:    ${{ inputs.build-context }}
           DOCKERFILE: ${{ inputs.dockerfile }}
           TARGET:     ${{ inputs.build-target }}
+          ENTRY_DLL:  ${{ inputs.entry-dll }}
         run: |
           $dockerfilePath = Join-Path $env:CONTEXT $env:DOCKERFILE
           if (-not (Test-Path $dockerfilePath)) { throw "Dockerfile not found at '$dockerfilePath'." }
@@ -116,8 +122,8 @@ jobs:
           } finally {
             docker rm -f $cid | Out-Null
           }
-          if (-not (Test-Path (Join-Path $publishDir 'support-case-agent.Agent.dll'))) {
-            throw "Publish output missing the agent DLL - check the build stage output path (/app)."
+          if (-not (Test-Path (Join-Path $publishDir $env:ENTRY_DLL))) {
+            throw "Publish output missing the agent DLL '$($env:ENTRY_DLL)' - check the build stage output path (/app)."
           }
 
           # Zip with the binaries at the archive ROOT (Foundry's code_configuration expects the
@@ -151,8 +157,8 @@ jobs:
             echo "::error::Manifest '$MANIFEST' has no 'name'."
             exit 1
           fi
-          # Strictly the { name, description, definition } object (the Foundry code-upsert contract);
-          # drop manifest-only fields such as `object`.
+          # Strictly the { name, description, definition } object (the Foundry code-deploy metadata
+          # part); drop manifest-only fields such as `object`.
           yq -o=json '{"name": .name, "description": .description, "definition": .definition}' "$MANIFEST" > metadata.json
 
           if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' metadata.json; then

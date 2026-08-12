@@ -7,9 +7,12 @@
   runs it on its managed dotnet runtime. This path never touches an ACR, so it sidesteps the
   private-ACR provisioning issue that blocks the image variant in the locked-down environment.
 
-  It create-or-updates the agent with a single multipart POST to /agents/{name} (the Foundry code
-  upsert endpoint): a brand-new agent is created at version 1, an existing agent gets a new version.
-  It does NOT route traffic - that stays publish-agent.ps1's job (called after this by the workflow).
+  It create-or-updates the agent with a single multipart POST: a brand-new agent is created via
+  POST /agents (name carried in the metadata part, version 1), and an existing agent gets a new
+  version via POST /agents/{name}/versions. (Foundry has no upsert endpoint - POST /agents/{name}
+  404s for an agent that does not yet exist - so this mirrors the JSON path in create-agent.ps1,
+  choosing the URL from a by-name existence check.) It does NOT route traffic - that stays
+  publish-agent.ps1's job (called after this by the workflow).
 
   The multipart body has two parts, matching the Foundry code-deploy contract:
     * metadata : application/json - the { name, definition, description } object (from agent.yaml)
@@ -48,6 +51,19 @@ Write-Host "[deploy-code-agent] Zip     : $ZipPath ($([math]::Round($zipInfo.Len
 $token = Get-FoundryToken
 Write-Host '[deploy-code-agent] Token acquired.'
 
+# Foundry has NO create-or-update endpoint: POST /agents/{name} 404s for a brand-new agent
+# ("Agent doesn't exist"). Mirror the JSON path (create-agent.ps1) instead — a by-name lookup
+# decides between CREATE (POST /agents, name carried in the metadata part) and a new VERSION
+# (POST /agents/{name}/versions). An explicit 404 from Get-AgentByName means "absent".
+$existingAgent = Get-AgentByName -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion -Name $name
+if ($null -ne $existingAgent) {
+  $uri = "$FoundryProjectEndpoint/agents/$name/versions`?api-version=$ApiVersion"
+  Write-Host "[deploy-code-agent] Agent '$name' exists - uploading a new version."
+} else {
+  $uri = "$FoundryProjectEndpoint/agents`?api-version=$ApiVersion"
+  Write-Host "[deploy-code-agent] Agent '$name' does not exist - creating."
+}
+
 # Build the multipart body with explicit per-part Content-Types (Invoke-RestMethod -Form cannot set
 # the metadata part to application/json), using System.Net.Http (built into PowerShell 7).
 $client  = [System.Net.Http.HttpClient]::new()
@@ -64,7 +80,6 @@ $zipPart  = [System.Net.Http.ByteArrayContent]::new($zipBytes)
 $zipPart.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::new('application/zip')
 $content.Add($zipPart, 'code', 'agent.zip')
 
-$uri = "$FoundryProjectEndpoint/agents/$name`?api-version=$ApiVersion"
 $req = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $uri)
 $req.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $token)
 $req.Headers.Add('Foundry-Features', 'HostedAgents=V1Preview')
