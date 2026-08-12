@@ -74,9 +74,52 @@ Two calls, matching the agent's OpenAI-protocol surface:
 Text goes in as `{ type:"input_text", text }`; pasted/attached images go in as
 `{ type:"input_image", image_url:"data:image/…;base64,…" }`.
 
-## Roadmap note (voice)
+## Voice (hosted agent + Voice Live TTS) — receive-only
 
-The proxy is compatible with a future WebRTC voice path: the backend mints the
-ephemeral realtime session token, and the browser opens the WebRTC peer
-connection directly to the realtime endpoint (media never flows through the
-proxy).
+Click **🔊 Voice** to give the chat a spoken voice, then **⏹ End voice** to stop. It's
+**receive-only**: your microphone is never opened. You keep typing/pasting **text +
+screenshots** as normal — the **hosted agent** (Responses API) always answers as the brain,
+its reply streams into the thread as text, and while voice is on that reply is **also spoken
+aloud** as **neural audio** by a separate **Azure Voice Live** session acting as a pure
+text-to-speech narrator.
+
+Why the split? A Voice Live session *bound* to a Foundry hosted agent returned empty
+responses / threw inside the agent's own model call in this environment. So we keep the two
+concerns separate: the hosted agent reasons (proven, reliable), and a **raw realtime voice**
+(`VOICE_MODEL`, e.g. `gpt-realtime`) just reads the agent's words. The Voice Live session is
+told via `session.instructions` to speak the user item **verbatim**, so it narrates rather
+than answering.
+
+How it works:
+
+- The hosted agent replies over `POST /api/message` (OpenAI Responses SSE) exactly as in
+  text mode. When voice is live, the streamed reply is buffered and split into **sentences**;
+  each sentence is enqueued to the Voice Live session as an `input_text` item + `response.create`.
+- A **serialized pump** speaks one sentence at a time — the next chunk is sent only after the
+  previous `response.done`, so audio plays in order without overlapping responses.
+- The browser owns the `RTCPeerConnection`. There's **no mic track** — instead a **synthetic
+  silent audio track** (WebAudio oscillator at zero gain) is added so RTP keeps flowing and
+  Voice Live doesn't idle-stop the session. The voice plays via `<audio autoplay>`.
+- The [Voice Live WebRTC][vl-webrtc] signalling endpoint needs the Entra token in the
+  `Authorization` header, which browsers can't set on a WebSocket. So the browser hands its
+  SDP offer to the proxy (`POST /api/voice/connect`), which opens the authenticated upstream
+  socket, does the `rtc.call.sdp.create → rtc.call.sdp.created` exchange, returns the answer,
+  and **holds the socket**. Audio is peer-to-peer; the control channel is bridged (below).
+- **Control channel = WS bridge.** Azure Voice Live consumes client events on the upstream
+  **WebSocket**, not the WebRTC data channel. The proxy bridges it: the browser **POSTs**
+  client events (`/api/voice/send`) and receives server events over **SSE**
+  (`GET /api/voice/events`). On going live the browser sends `session.update` (English voice
+  `en-US-Ava:DragonHDLatestNeural`, `turn_detection: null` since there's no mic, plus the
+  verbatim TTS instructions).
+
+Config (Settings panel or env): `VOICE_PROJECT_ID`, `VOICE_MODEL` (the realtime TTS voice
+model), `VOICE_API_VERSION`. The Entra token uses the same `https://ai.azure.com/.default`
+scope as chat.
+
+> **Prerequisites / caveats.** Voice Live is a **public preview** feature on **global-standard**
+> deployments — a public/global endpoint, *not* inside a private VNet, so run this from a host
+> with normal public egress. Requires the `Cognitive Services User` + `Foundry User` roles on
+> the resource.
+
+[vl-webrtc]: https://learn.microsoft.com/azure/ai-services/speech-service/voice-live-webrtc
+[vl-image]: https://github.com/Azure/azure-rest-api-specs/blob/main/specification/ai/data-plane/VoiceLive/items.tsp#L65
