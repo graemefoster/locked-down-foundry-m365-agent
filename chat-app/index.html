@@ -357,7 +357,12 @@
 
         const openApp = useCallback(() => {
           const u = (cfg && cfg.appUrl) || "http://localhost:8080";
-          window.open(u, "_blank", "noopener");
+          const w = Math.min(1280, Math.round(window.screen.availWidth * 0.6));
+          const h = Math.min(900, Math.round(window.screen.availHeight * 0.85));
+          const left = Math.round((window.screen.availWidth - w) / 2);
+          const top = Math.round((window.screen.availHeight - h) / 2);
+          const features = `popup=yes,noopener,width=${w},height=${h},left=${left},top=${top}`;
+          window.open(u, "graeapp", features);
         }, [cfg]);
 
         const startShare = useCallback(async () => {
