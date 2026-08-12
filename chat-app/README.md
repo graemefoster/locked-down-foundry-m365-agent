@@ -40,10 +40,26 @@ Defaults are baked in (the `support-case-agent` values). Override with env vars:
 | `AGENT_NAME` | `support-case-agent` |
 | `AGENT_ID` | `b40ce693-2df5-4cd6-bc2b-7bc0d03d87d1` (the `agent_ids` GUID) |
 | `CHAT_USERNAME` | `admin@M365CPI15529713.onmicrosoft.com` |
+| `APP_URL` | `http://localhost:8080` (the app the "Open app" button opens / you screenshot) |
 | `PORT` | `5173` |
 
-You can also edit all four in the UI (**⚙ Settings**); those overrides are stored
+You can also edit all five in the UI (**⚙ Settings**); those overrides are stored
 in `localStorage` and sent with each request.
+
+## Screenshot capture (for the walkthrough)
+
+A browser tab can't silently screenshot another tab, so this uses the Screen
+Capture API:
+
+1. **🗔 Open app** — opens `APP_URL` (e.g. the GraeIdentity mock) in a new tab.
+2. **🖥 Share for capture** — the browser prompts you once; pick that app's tab
+   or window. The share stays live (a green "sharing" badge shows).
+3. **📸 Capture screenshot** — grabs the current frame and attaches it to your
+   next message. Capture as many as you like without re-prompting; **Stop** ends
+   the share.
+
+Captured frames flow through the same `input_image` pipeline as pasted/attached
+images.
 
 ## How it works
 

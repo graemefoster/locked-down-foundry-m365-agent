@@ -317,6 +317,7 @@
               {field("agentName", "Agent name (path)", "support-case-agent")}
               {field("agentId", "agent_ids (identity GUID)")}
               {field("username", "username")}
+              {field("appUrl", "App URL (\"Open app\" button)", "http://localhost:8080")}
               <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                 <button className="btn btn-primary" onClick={() => { onSave(draft); onClose(); }}>Save</button>
                 <button className="btn" onClick={onClose}>Cancel</button>
@@ -341,12 +342,64 @@
         const [busy, setBusy] = useState(false);
         const [error, setError] = useState(null);
         const [showSettings, setShowSettings] = useState(false);
+        const [shareStream, setShareStream] = useState(null);
         const scrollRef = useRef(null);
         const fileRef = useRef(null);
+        const videoRef = useRef(null);
 
         useEffect(() => {
           if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }, [messages]);
+
+        const addDataUrl = useCallback((dataUrl) => {
+          setAttachments((a) => [...a, { id: Math.random().toString(36).slice(2), dataUrl }]);
+        }, []);
+
+        const openApp = useCallback(() => {
+          const u = (cfg && cfg.appUrl) || "http://localhost:8080";
+          window.open(u, "_blank", "noopener");
+        }, [cfg]);
+
+        const startShare = useCallback(async () => {
+          setError(null);
+          try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+              video: { frameRate: 5 },
+              audio: false,
+            });
+            setShareStream(stream);
+            const v = videoRef.current;
+            if (v) {
+              v.srcObject = stream;
+              await v.play().catch(() => {});
+            }
+            stream.getVideoTracks()[0].addEventListener("ended", () => {
+              setShareStream(null);
+              if (videoRef.current) videoRef.current.srcObject = null;
+            });
+          } catch (e) {
+            setError("Screen share was cancelled or failed: " + (e.message || e));
+          }
+        }, []);
+
+        const stopShare = useCallback(() => {
+          if (shareStream) shareStream.getTracks().forEach((t) => t.stop());
+          setShareStream(null);
+          if (videoRef.current) videoRef.current.srcObject = null;
+        }, [shareStream]);
+
+        const capture = useCallback(() => {
+          const v = videoRef.current;
+          if (!shareStream || !v || !v.videoWidth) {
+            setError('Click "Share for capture" first, then pick the app tab/window.');
+            return;
+          }
+          const c = document.createElement("canvas");
+          c.width = v.videoWidth;
+          c.height = v.videoHeight;
+          c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
+          addDataUrl(c.toDataURL("image/png"));
+        }, [shareStream, addDataUrl]);
 
         const addImages = useCallback((files) => {
           const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -478,6 +531,27 @@
               }}>{error}</div>
             )}
 
+            <div style={{
+              display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap",
+              padding: "0.5rem 1rem 0", fontSize: "0.85rem",
+            }}>
+              <button className="btn" onClick={openApp}>🗔 Open app</button>
+              {!shareStream ? (
+                <button className="btn" onClick={startShare}>🖥 Share for capture</button>
+              ) : (
+                <>
+                  <button className="btn btn-primary" onClick={capture}>📸 Capture screenshot</button>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "var(--cp-success)", fontWeight: 700 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--cp-success)" }} /> sharing
+                  </span>
+                  <button className="btn" onClick={stopShare}>Stop</button>
+                </>
+              )}
+              <span style={{ color: "var(--cp-text-muted)" }}>
+                {shareStream ? "Captures attach to your next message." : "Share the app tab once, then capture as many shots as you like."}
+              </span>
+            </div>
+
             {attachments.length > 0 && (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 1rem 0.4rem" }}>
                 {attachments.map((a) => (
@@ -520,6 +594,8 @@
                 onNewConversation={newConversation}
               />
             )}
+
+            <video ref={videoRef} muted playsInline style={{ display: "none" }} />
           </div>
         );
       }

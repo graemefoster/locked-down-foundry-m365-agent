@@ -35,6 +35,7 @@ const DEFAULTS = {
   agentName: process.env.AGENT_NAME || "support-case-agent",
   agentId: process.env.AGENT_ID || "b40ce693-2df5-4cd6-bc2b-7bc0d03d87d1",
   username: process.env.CHAT_USERNAME || "admin@M365CPI15529713.onmicrosoft.com",
+  appUrl: process.env.APP_URL || "http://localhost:8080",
 };
 
 const CONVERSATIONS_API_VERSION = "2025-11-15-preview";
