@@ -359,10 +359,6 @@
           if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }, [messages]);
 
-        const addDataUrl = useCallback((dataUrl) => {
-          setAttachments((a) => [...a, { id: Math.random().toString(36).slice(2), dataUrl }]);
-        }, []);
-
         const openApp = useCallback(() => {
           const u = (cfg && cfg.appUrl) || "http://localhost:8080";
           const w = Math.min(1280, Math.round(window.screen.availWidth * 0.6));
@@ -401,7 +397,7 @@
           if (videoRef.current) videoRef.current.srcObject = null;
         }, [shareStream]);
 
-        const capture = useCallback(() => {
+        function capture() {
           const v = videoRef.current;
           if (!shareStream || !v || !v.videoWidth) {
             setError('Click "Share for capture" first, then pick the app tab/window.');
@@ -411,8 +407,11 @@
           c.width = v.videoWidth;
           c.height = v.videoHeight;
           c.getContext("2d").drawImage(v, 0, 0, c.width, c.height);
-          addDataUrl(c.toDataURL("image/png"));
-        }, [shareStream, addDataUrl]);
+          const dataUrl = c.toDataURL("image/png");
+          const caption = text.trim();
+          if (caption) setText("");
+          send({ text: caption, images: [dataUrl] });
+        }
 
         const addImages = useCallback((files) => {
           const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
@@ -450,12 +449,12 @@
           return id;
         }
 
-        async function send() {
+        async function send(override) {
           if (busy) return;
-          const trimmed = text.trim();
-          if (!trimmed && attachments.length === 0) return;
+          const trimmed = override && typeof override.text === "string" ? override.text.trim() : text.trim();
+          const imgs = override && override.images ? override.images : attachments.map((a) => a.dataUrl);
+          if (!trimmed && imgs.length === 0) return;
           setError(null);
-          const imgs = attachments.map((a) => a.dataUrl);
           const userMsg = { role: "user", text: trimmed, images: imgs };
           const content = [];
           if (trimmed) content.push({ type: "input_text", text: trimmed });
@@ -463,8 +462,10 @@
           const input = [{ type: "message", role: "user", content }];
 
           setMessages((m) => [...m, userMsg, { role: "assistant", text: "", streaming: true }]);
-          setText("");
-          setAttachments([]);
+          if (!override) {
+            setText("");
+            setAttachments([]);
+          }
           setBusy(true);
           try {
             const conv = await ensureConversation();
@@ -561,20 +562,25 @@
                 </>
               )}
               <span style={{ color: "var(--cp-text-muted)" }}>
-                {shareStream ? "Captures attach to your next message." : "Share the app tab once, then capture as many shots as you like."}
+                {shareStream ? "Capture sends the screenshot as a message." : "Share the app window once, then capture screenshots straight into the chat."}
               </span>
             </div>
 
             {attachments.length > 0 && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 1rem 0.4rem" }}>
+              <div style={{
+                display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center",
+                margin: "0.5rem 1rem 0", padding: "0.5rem 0.6rem",
+                border: "1px solid var(--cp-border)", borderRadius: 12, background: "var(--cp-surface-soft)",
+              }}>
                 {attachments.map((a) => (
                   <div key={a.id} style={{ position: "relative" }}>
                     <img src={a.dataUrl} alt="attach"
-                      style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8, border: "1px solid var(--cp-border)" }} />
+                      style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 8, border: "1px solid var(--cp-border)", display: "block" }} />
                     <button onClick={() => setAttachments((x) => x.filter((y) => y.id !== a.id))}
                       style={{
-                        position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
-                        border: "none", background: "var(--cp-danger)", color: "#fff", fontSize: "0.7rem", lineHeight: 1,
+                        position: "absolute", top: -7, right: -7, width: 20, height: 20, borderRadius: "50%",
+                        border: "1px solid var(--cp-surface)", background: "var(--cp-danger)", color: "#fff",
+                        fontSize: "0.7rem", lineHeight: 1, display: "flex", alignItems: "center", justifyContent: "center",
                       }}>✕</button>
                   </div>
                 ))}
@@ -595,7 +601,7 @@
                 onPaste={onPaste}
                 style={{ minHeight: 42, maxHeight: 200, overflowY: "auto" }}
               />
-              <button className="btn btn-primary" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={send}>
+              <button className="btn btn-primary" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={() => send()}>
                 {busy ? <span className="spin">◠</span> : "Send"}
               </button>
             </div>
