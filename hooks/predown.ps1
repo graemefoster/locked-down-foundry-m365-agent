@@ -196,17 +196,43 @@ function Get-CapabilityHostIds {
   return @($parsed.value | Where-Object { $_ } | ForEach-Object { $_.id })
 }
 
+# How long to wait for a capability-host delete to reach a terminal state before giving up
+# on the wait and letting azd proceed. The delete keeps running server-side after we stop
+# waiting; azd down deletes the whole resource group anyway, so a still-in-flight host is fine.
+$capHostDeleteTimeout = [TimeSpan]::FromMinutes(5)
+
 function Remove-CapabilityHosts {
   param([string[]]$Ids, [string]$Scope)
   foreach ($id in $Ids) {
     Write-Host "[predown] Deleting $Scope capability host: $id"
-    # `az resource delete` polls the long-running delete to completion, which is required:
-    # project-scope hosts must be fully gone before account-scope deletion.
-    az resource delete --ids $id --api-version $apiVersion --output none
+    # Kick off the delete asynchronously so a slow/stuck long-running operation can't hang the
+    # hook (and thus `azd down`) indefinitely - `az resource delete` without --no-wait polls the
+    # LRO to completion with no client-side timeout.
+    az resource delete --ids $id --api-version $apiVersion --no-wait --output none
     if ($LASTEXITCODE -ne 0) {
-      throw "[predown] Failed to delete $Scope capability host (az resource delete exit $LASTEXITCODE): $id"
+      throw "[predown] Failed to start delete of $Scope capability host (az resource delete exit $LASTEXITCODE): $id"
     }
-    Write-Host "[predown] Deleted: $id"
+
+    # Wait up to $capHostDeleteTimeout for the host to actually disappear (project-scope hosts
+    # should be gone before we move on to account scope). On timeout, warn and continue rather
+    # than blocking teardown.
+    $deadline = (Get-Date).Add($capHostDeleteTimeout)
+    $deleted = $false
+    while ((Get-Date) -lt $deadline) {
+      $probe = Invoke-ArmRest -Method GET -Url "https://management.azure.com${id}?api-version=$apiVersion"
+      if ($probe.StatusCode -eq 404 -or ($probe.StatusCode -ge 400 -and $probe.Content -match '(?i)ResourceNotFound|NotFound|was not found')) {
+        $deleted = $true
+        break
+      }
+      Start-Sleep -Seconds 15
+    }
+
+    if ($deleted) {
+      Write-Host "[predown] Deleted: $id"
+    }
+    else {
+      Write-Warning "[predown] $Scope capability host delete still in progress after $($capHostDeleteTimeout.TotalMinutes) min; continuing without waiting. It will finish server-side (azd down deletes the resource group regardless): $id"
+    }
   }
 }
 

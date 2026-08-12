@@ -9,19 +9,22 @@
   so at rest NOTHING may reach Kudu over the public path. The MCP app is additionally fully
   private (publicNetworkAccess: 'Disabled') + private-endpointed.
 
-  Open  (predeploy):  MCP -> enable public access; BOTH -> add an SCM Allow rule for the deployer IP.
-  Close (postdeploy): BOTH -> remove that SCM rule; MCP -> re-disable public access.
+  Open  (predeploy):  MCP -> enable public access; BOTH -> flip the SCM default action to Allow
+                      (open to all) for the deploy window.
+  Close (postdeploy): BOTH -> flip the SCM default action back to Deny; MCP -> re-disable public
+                      access.
+
+  Why open-to-all rather than an IP allow-rule? Deployers frequently sit behind a rotating
+  corporate NAT (their egress IP changes mid-session), so pinning a single deployer IP is
+  brittle. Opening the SCM site for the (short) deploy window and re-locking immediately
+  afterwards is robust to a changing egress IP. Kudu still enforces authentication, and the
+  window is only open while azd is actively zip-deploying.
 
   Env (azd surfaces Bicep outputs as env vars verbatim; AZURE_* are azd built-ins):
       AZURE_RESOURCE_GROUP   - the resource group (Bicep output).
       MCP_WEBAPP_NAME        - the private MCP web app name (Bicep output).
       TEAMS_YARP_WEBAPP_NAME - the public YARP web app name (Bicep output).
-      DEPLOYER_PUBLIC_IP     - optional; the deployer's IP/CIDR (recorded by the preprovision hook).
 #>
-
-# The single SCM allow rule the hooks add/remove. Deterministic name so open is idempotent and
-# close can delete by name.
-$script:ScmDeployRuleName = 'azd-scm-deploy'
 
 function Get-RequiredEnv {
   param([string]$Name)
@@ -39,22 +42,36 @@ function Get-OptionalEnv {
   return $value.Trim().Trim('"')
 }
 
-# Resolve the deployer's public IP as a CIDR the App Service access-restriction API accepts.
-# Prefer the value the preprovision hook already recorded (DEPLOYER_PUBLIC_IP); otherwise auto-
-# detect via api.ipify.org. A bare IPv4/IPv6 is normalised to /32 (or /128).
-function Get-DeployerIpCidr {
-  $ip = Get-OptionalEnv 'DEPLOYER_PUBLIC_IP'
-  if ([string]::IsNullOrWhiteSpace($ip)) {
+# Run an `az` command with retries. The Azure CLI occasionally dies on a transient network blip
+# (e.g. 'Connection aborted / ConnectionResetError(54)') that a simple retry clears. Retries on a
+# non-zero exit code up to $MaxAttempts with a short backoff; throws only if every attempt fails.
+#   -ReturnOutput : capture and return the command's stdout (for `... --query ... -o tsv` reads).
+function Invoke-AzWithRetry {
+  param(
+    [Parameter(Mandatory)] [scriptblock]$Script,
+    [string]$Description = 'az command',
+    [switch]$ReturnOutput,
+    [int]$MaxAttempts = 4,
+    [int]$DelaySeconds = 5
+  )
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $global:LASTEXITCODE = 0
+    $output = $null
     try {
-      $ip = (Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 5).ToString().Trim()
+      if ($ReturnOutput) { $output = & $Script 2>$null } else { & $Script }
     }
     catch {
-      throw "Could not determine the deployer's public IP (DEPLOYER_PUBLIC_IP not set and api.ipify.org unreachable). Set it with 'azd env set DEPLOYER_PUBLIC_IP <ip/cidr>' and retry."
+      # A thrown terminating error (rare for az) is treated like a failed attempt.
+      $global:LASTEXITCODE = 1
+    }
+    if ($LASTEXITCODE -eq 0) { return $output }
+
+    if ($attempt -lt $MaxAttempts) {
+      Write-Host "[retry] $Description failed (attempt $attempt/$MaxAttempts, exit $LASTEXITCODE); retrying in ${DelaySeconds}s..."
+      Start-Sleep -Seconds $DelaySeconds
     }
   }
-  if ($ip -match '/') { return $ip }
-  if ($ip -match ':') { return "$ip/128" }
-  return "$ip/32"
+  throw "Failed to $Description after $MaxAttempts attempts."
 }
 
 # Toggle a web app's site-level publicNetworkAccess ('Enabled' / 'Disabled') via a merge update.
@@ -64,50 +81,62 @@ function Set-WebAppPublicNetworkAccess {
     [string]$Name,
     [ValidateSet('Enabled', 'Disabled')] [string]$State
   )
-  $id = az webapp show -g $ResourceGroup -n $Name --query id -o tsv
-  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($id)) {
+  $id = Invoke-AzWithRetry -Description "resolve web app '$Name'" -ReturnOutput -Script {
+    az webapp show -g $ResourceGroup -n $Name --query id -o tsv
+  }
+  if ([string]::IsNullOrWhiteSpace($id)) {
     throw "Failed to resolve web app '$Name' in resource group '$ResourceGroup'."
   }
-  az resource update --ids $id --set properties.publicNetworkAccess=$State --output none
-  if ($LASTEXITCODE -ne 0) { throw "Failed to set publicNetworkAccess=$State on '$Name'." }
+  Invoke-AzWithRetry -Description "set publicNetworkAccess=$State on '$Name'" -Script {
+    az resource update --ids $id --set properties.publicNetworkAccess=$State --output none
+  }
   Write-Host "[$Name] publicNetworkAccess = $State"
 }
 
-# Add the temporary deployer-IP Allow rule to the SCM site. Idempotent: an existing rule of the
-# same name is removed first so re-runs don't error on a duplicate.
-function Open-ScmForDeployer {
+# Set a web app's SCM (Kudu) IP-restriction default action ('Allow' opens it to everyone; 'Deny'
+# re-locks it to deny-by-default). Applied to the site's web config.
+function Set-ScmDefaultAction {
   param(
     [string]$ResourceGroup,
     [string]$Name,
-    [string]$IpCidr
+    [ValidateSet('Allow', 'Deny')] [string]$Action
   )
-  az webapp config access-restriction remove -g $ResourceGroup -n $Name `
-    --rule-name $script:ScmDeployRuleName --scm-site true --output none 2>$null
-
-  az webapp config access-restriction add -g $ResourceGroup -n $Name `
-    --rule-name $script:ScmDeployRuleName --action Allow --priority 100 `
-    --ip-address $IpCidr --scm-site true --output none
-  if ($LASTEXITCODE -ne 0) { throw "Failed to add the SCM deploy allow-rule to '$Name'." }
-  Write-Host "[$Name] SCM site opened for $IpCidr (rule '$($script:ScmDeployRuleName)')."
-
-  # App Service access-restriction changes are NOT immediate - they take ~30-90s to reach the Kudu
-  # worker. If azd POSTs the zip before the new Allow rule is live, Kudu answers 403 Ip Forbidden
-  # and the deploy fails. Poll the SCM site (from the SAME host/egress azd will deploy from) until
-  # it stops returning 403, so we only hand off once the rule is genuinely in effect.
-  Wait-ScmDeployerAllowed -Name $Name
+  $id = Invoke-AzWithRetry -Description "resolve web app '$Name'" -ReturnOutput -Script {
+    az webapp show -g $ResourceGroup -n $Name --query id -o tsv
+  }
+  if ([string]::IsNullOrWhiteSpace($id)) {
+    throw "Failed to resolve web app '$Name' in resource group '$ResourceGroup'."
+  }
+  Invoke-AzWithRetry -Description "set SCM default action=$Action on '$Name'" -Script {
+    az resource update --ids "$id/config/web" `
+      --set properties.scmIpSecurityRestrictionsDefaultAction=$Action --output none
+  }
+  Write-Host "[$Name] SCM default action = $Action"
 }
 
-# Poll the SCM (Kudu) site until the deployer-IP Allow rule is actually in effect. A 403 means the
-# rule has not propagated yet; ANY other status (401 auth-challenge, 200, etc.) means the IP is now
-# allowed. Runs on the azd host, so its egress matches the one azd's zipdeploy will use.
-function Wait-ScmDeployerAllowed {
+# Open the SCM site to all (default action Allow) for the deploy window, then wait until Kudu is
+# actually reachable so azd doesn't zip-deploy into a not-yet-propagated 403.
+function Open-ScmSite {
+  param(
+    [string]$ResourceGroup,
+    [string]$Name
+  )
+  Set-ScmDefaultAction -ResourceGroup $ResourceGroup -Name $Name -Action 'Allow'
+  Write-Host "[$Name] SCM site opened (default action Allow — open to all for the deploy window)."
+  Wait-ScmReachable -Name $Name
+}
+
+# Poll the SCM (Kudu) site until the open is actually in effect. A 403 means the default-action
+# change has not propagated yet; ANY other status (401 auth-challenge, 200, etc.) means Kudu is now
+# reachable. Runs on the azd host, so its egress matches the one azd's zipdeploy will use.
+function Wait-ScmReachable {
   param(
     [string]$Name,
     [int]$TimeoutSeconds = 150
   )
   $uri      = "https://$Name.scm.azurewebsites.net/"
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-  Write-Host "[$Name] Waiting for the SCM allow rule to take effect ($uri)..."
+  Write-Host "[$Name] Waiting for the SCM open to take effect ($uri)..."
   while ((Get-Date) -lt $deadline) {
     $code = 0
     try {
@@ -120,22 +149,24 @@ function Wait-ScmDeployerAllowed {
       if ($_.Exception.Response) { try { $code = [int]$_.Exception.Response.StatusCode } catch { } }
     }
     if ($code -ne 0 -and $code -ne 403) {
-      Write-Host "[$Name] SCM reachable (HTTP $code) - allow rule is live."
+      Write-Host "[$Name] SCM reachable (HTTP $code) - open is live."
       return
     }
     Start-Sleep -Seconds 5
   }
-  Write-Host "[$Name] WARNING: SCM still returned 403 after ${TimeoutSeconds}s. The zip-deploy may fail; if so, just re-run 'azd deploy' (the rule is already in place, only propagation was slow)."
+  Write-Host "[$Name] WARNING: SCM still returned 403 after ${TimeoutSeconds}s. The zip-deploy may fail; if so, just re-run 'azd deploy' (the site is already open, only propagation was slow)."
 }
 
-# Remove the temporary deployer-IP Allow rule, re-locking the SCM site (deny-by-default). Missing
-# rule is not an error (already closed).
-function Close-ScmForDeployer {
+# Re-lock the SCM site (default action Deny). Idempotent — safe to call when already locked. Also
+# removes any lingering 'azd-scm-deploy' IP allow-rule left by the older IP-pinned hook, so a
+# migration from that approach doesn't leave a stale per-IP hole open.
+function Close-ScmSite {
   param(
     [string]$ResourceGroup,
     [string]$Name
   )
   az webapp config access-restriction remove -g $ResourceGroup -n $Name `
-    --rule-name $script:ScmDeployRuleName --scm-site true --output none 2>$null
-  Write-Host "[$Name] SCM deploy allow-rule removed (SCM re-locked to deny-by-default)."
+    --rule-name 'azd-scm-deploy' --scm-site true --output none 2>$null
+  Set-ScmDefaultAction -ResourceGroup $ResourceGroup -Name $Name -Action 'Deny'
+  Write-Host "[$Name] SCM re-locked to deny-by-default."
 }

@@ -13,8 +13,16 @@ param agentSubnetName string = 'agent-subnet'
 @description('The name of the Private Endpoint subnet')
 param peSubnetName string = 'pe-subnet'
 
-@description('Next hop IP address for the firewall (for UDR)')
+@description('Next hop IP address for the firewall (for UDR). Empty when deployFirewall=false.')
 param firewallPrivateIp string
+
+@description('''
+Deploy the 0.0.0.0/0 force-tunnel UDR (and the agent-subnet firewall NSG allow) pointing at
+the Azure Firewall. When false (firewall opt-out tier), no route table is created; the agent
+subnet keeps its deny-by-default service-tag NSG allows and reaches those destinations via
+Azure default outbound instead of the firewall — losing L7/SNI inspection, not connectivity.
+''')
+param deployFirewall bool
 
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
@@ -67,7 +75,7 @@ var azureDnsVirtualIp = '168.63.129.16'
 // gateway spoke) is force-tunnelled through the Azure Firewall so the flow is symmetric
 // (APIM force-tunnels the forward path too). Scoped to the apim-subnet /24; all other
 // pe-subnet traffic (including intra-VNet agent<->PE) stays on system routes.
-resource peRouteTable 'Microsoft.Network/routeTables@2022-11-01' = if (!empty(apimSubnetCidr)) {
+resource peRouteTable 'Microsoft.Network/routeTables@2022-11-01' = if (!empty(apimSubnetCidr) && deployFirewall) {
   name: '${vnetName}-pe-rt'
   location: location
   properties: {
@@ -84,7 +92,7 @@ resource peRouteTable 'Microsoft.Network/routeTables@2022-11-01' = if (!empty(ap
   }
 }
 
-resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
+resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = if (deployFirewall) {
   name: '${vnetName}-rt'
   location: location
   properties: {
@@ -296,20 +304,6 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
         }
       }
       {
-        name: 'Allow-Firewall-Outbound'
-        properties: {
-          priority: 130
-          access: 'Allow'
-          direction: 'Outbound'
-          protocol: 'Tcp'
-          sourceAddressPrefix: agentSubnet
-          sourcePortRange: '*'
-          destinationAddressPrefix: '${firewallPrivateIp}/32'
-          destinationPortRange: '443'
-          description: 'Azure Firewall private IP — the UDR next hop for internet-bound (0.0.0.0/0) egress, HTTPS only. Single-host scoped.'
-        }
-      }
-      {
         name: 'Allow-AzureActiveDirectory-Outbound'
         properties: {
           priority: 140
@@ -475,7 +469,22 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           description: 'HTTPS to App Service spoke PE subnet (MCP web app). Force-tunnelled via firewall (UDR) but NSG sees the real PE IP, so allow required.'
         }
       }
-    ])
+    ], deployFirewall ? [
+      {
+        name: 'Allow-Firewall-Outbound'
+        properties: {
+          priority: 130
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: agentSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: '${firewallPrivateIp}/32'
+          destinationPortRange: '443'
+          description: 'Azure Firewall private IP — the UDR next hop for internet-bound (0.0.0.0/0) egress, HTTPS only. Single-host scoped. Only present when deployFirewall=true.'
+        }
+      }
+    ] : [])
   }
 }
 
@@ -506,9 +515,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
               }
             }
           ]
-          routeTable: {
-            id: routeTable.id
-          }
+          routeTable: deployFirewall ? { id: routeTable!.id } : null
           networkSecurityGroup: {
             id: agentNsg.id
           }
@@ -521,16 +528,14 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           // Teams inbound path: honor the return-path UDR for PE traffic so APIM<->Foundry PE
           // routing is symmetric through the firewall. No-op when apimSubnetCidr is empty.
           privateEndpointNetworkPolicies: empty(apimSubnetCidr) ? null : 'Enabled'
-          routeTable: empty(apimSubnetCidr) ? null : { id: peRouteTable.id }
+          routeTable: (!empty(apimSubnetCidr) && deployFirewall) ? { id: peRouteTable!.id } : null
         }
       }
       {
         name: 'VirtualMachines'
         properties: {
           addressPrefix: vmSubnet
-          routeTable: {
-            id: routeTable.id
-          }
+          routeTable: deployFirewall ? { id: routeTable!.id } : null
           networkSecurityGroup: {
             id: networkSecurityGroup.id
           }
@@ -551,9 +556,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
               }
             }
           ]
-          routeTable: {
-            id: routeTable.id
-          }
+          routeTable: deployFirewall ? { id: routeTable!.id } : null
           networkSecurityGroup: {
             id: deploymentScriptsNsg.id
           }
@@ -570,5 +573,5 @@ output peSubnetId string = '${virtualNetwork.id}/subnets/${peSubnetName}'
 output vmSubnetName string = 'VirtualMachines'
 output agentSubnetName string = agentSubnetName
 output peSubnetName string = peSubnetName
-output routeTableName string = routeTable.name
+output routeTableName string = deployFirewall ? routeTable!.name : ''
 output deploymentScriptsSubnetId string = '${virtualNetwork.id}/subnets/DeploymentScripts'

@@ -30,6 +30,9 @@ param modelGatewayApimSubnetCidr string
 param modelGatewaySpokeAddressPrefix string
 param firewallUnrestrictedSourceCidrs array
 
+@description('Deploy the Azure Firewall + force-tunnel UDRs (deny-by-default egress tier). False = opt-out.')
+param deployFirewall bool
+
 module observability 'observability.bicep' = {
   name: 'stage00-observability-${uniqueSuffix}'
   params: {
@@ -57,6 +60,7 @@ module networking 'networking.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
     firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
+    deployFirewall: deployFirewall
     logAnalyticsId: observability.outputs.logAnalyticsId
     logAnalyticsCustomerId: observability.outputs.logAnalyticsCustomerId
   }
