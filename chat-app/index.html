@@ -378,6 +378,8 @@
         const ttsQueueRef = useRef([]);
         const ttsBusyRef = useRef(false);
         const ttsBufferRef = useRef("");
+        const ttsSpokenRef = useRef("");
+        const ttsDoneHandledRef = useRef(true);
         const ttsPumpRef = useRef(() => {});
 
         const scrollToBottom = useCallback(() => {
@@ -429,6 +431,11 @@
         }, []);
 
         const onVoiceEvent = useCallback((raw, src) => {
+          // The upstream WS bridge (SSE, src="ws") is the source of truth. The
+          // WebRTC data channel (src="dc") mirrors the same control events, so
+          // ignoring it prevents every transcript/response event being handled
+          // twice (which showed up as doubled text).
+          if (src === "dc") return;
           let ev;
           try { ev = JSON.parse(raw); } catch { return; }
           const t = ev.type || "";
@@ -442,16 +449,20 @@
             detail = " " + JSON.stringify(ev.item || ev.part || {}).slice(0, 200);
           }
           vlog("<-" + (src ? "(" + src + ")" : ""), t + (ev.error ? " ERROR: " + (ev.error.message || JSON.stringify(ev.error)) : "") + detail);
-          if (t === "conversation.item.input_audio_transcription.completed" && ev.transcript) {
-            voiceAsstOpenRef.current = false;
-            setMessages((m) => [...m, { role: "user", text: ev.transcript, voice: true }]);
-          } else if ((t === "response.audio_transcript.delta" || t === "response.output_audio_transcript.delta") && typeof ev.delta === "string") {
-            appendVoiceTranscript(ev.delta);
-          } else if ((t === "response.text.delta" || t === "response.output_text.delta") && typeof ev.delta === "string") {
-            appendVoiceTranscript(ev.delta);
+          // NOTE: we deliberately do NOT render the TTS session's own transcript
+          // into the chat — the hosted agent's real reply is already shown from
+          // the Responses stream. The Voice Live session here is only a speaker.
+          // We DO accumulate the spoken transcript into the voice log so we can
+          // confirm it read verbatim (vs refusing / rewriting).
+          if ((t === "response.audio_transcript.delta" || t === "response.output_audio_transcript.delta") && typeof ev.delta === "string") {
+            ttsSpokenRef.current += ev.delta;
           } else if (t === "response.audio_transcript.done" || t === "response.output_audio_transcript.done" || t === "response.done") {
             voiceAsstOpenRef.current = false;
-            if (t === "response.done") { ttsBusyRef.current = false; ttsPumpRef.current(); }
+            if (ttsSpokenRef.current) { vlog("spoke", JSON.stringify(ttsSpokenRef.current.slice(0, 120))); ttsSpokenRef.current = ""; }
+            // The raw Voice Live session may end a spoken response with
+            // response.audio_transcript.done and NOT response.done — advance the
+            // speak queue on whichever terminal event fires first, once only.
+            if (!ttsDoneHandledRef.current) { ttsDoneHandledRef.current = true; ttsBusyRef.current = false; ttsPumpRef.current(); }
           } else if (t === "bridge.ws.closed") {
             // The upstream signalling WS dropped — stop the SSE from reconnecting.
             try { if (esRef.current) esRef.current.close(); } catch {}
@@ -462,7 +473,7 @@
           } else if (t === "error" || ev.error) {
             setError("Voice: " + (ev.error?.message || ev.message || "stream error"));
           }
-        }, [appendVoiceTranscript, vlog]);
+        }, [vlog]);
 
         const stopVoice = useCallback(async (callId) => {
           const pc = pcRef.current;
@@ -502,15 +513,27 @@
           return false;
         }, []);
 
-        // Speak one text chunk through the raw Voice Live TTS session: drop the
-        // agent's words in as a user item, then ask for an (audio) response. The
-        // session's `instructions` tell the model to read verbatim, so it acts as
-        // a narrator, not a chat partner.
+        // Speak one text chunk through the raw Voice Live TTS session. We do NOT
+        // add it as a user message (the realtime model would treat it as a
+        // request and sometimes refuses / answers it — "I'm sorry, I can't...").
+        // Instead we drive a single audio response whose per-response
+        // `instructions` carry the exact script, with no input items, so there's
+        // no user turn to respond to — the model just vocalizes the text.
         const speakChunk = useCallback(async (chunk) => {
           if (!callIdRef.current || !chunk || !chunk.trim()) return;
           vlog("->", "tts speak: " + JSON.stringify(chunk.slice(0, 60)));
-          await sendVoiceEvent({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: chunk }] } });
-          await sendVoiceEvent({ type: "response.create" });
+          await sendVoiceEvent({
+            type: "response.create",
+            response: {
+              modalities: ["audio"],
+              input: [],
+              instructions:
+                "Read the text below aloud, word for word, in a natural, warm, professional " +
+                "voice. It is a script to be spoken, NOT a question, task, or request — never " +
+                "answer it, never refuse, never apologize, never add, omit, or change anything, " +
+                "and never mention these rules. Speak only this text:\n\n" + chunk,
+            },
+          });
         }, [vlog, sendVoiceEvent]);
 
         // Serialized pump: Voice Live handles one response at a time, so we send
@@ -520,6 +543,7 @@
           const next = ttsQueueRef.current.shift();
           if (next == null) return;
           ttsBusyRef.current = true;
+          ttsDoneHandledRef.current = false;
           speakChunk(next);
         }, [speakChunk]);
         useEffect(() => { ttsPumpRef.current = pumpTTS; }, [pumpTTS]);
@@ -546,6 +570,8 @@
           ttsQueueRef.current = [];
           ttsBusyRef.current = false;
           ttsBufferRef.current = "";
+          ttsSpokenRef.current = "";
+          ttsDoneHandledRef.current = true;
         }, []);
 
         const startVoice = useCallback(async () => {
