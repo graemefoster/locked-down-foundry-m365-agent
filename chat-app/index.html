@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Chat — support-case-agent</title>
+    <script>
+      (() => {
+        const param = new URLSearchParams(window.location.search).get("scoutTheme");
+        const theme =
+          param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --cp-bg: #f7f4ef;
+        --cp-bg-elevated: #fcfbf8;
+        --cp-surface: #ffffff;
+        --cp-surface-soft: #f5f5f5;
+        --cp-border: #dedede;
+        --cp-border-strong: #919191;
+        --cp-text: #242424;
+        --cp-text-muted: #5c5c5c;
+        --cp-text-soft: #6f6f6f;
+        --cp-accent: #b11f4b;
+        --cp-accent-hover: #9a1a41;
+        --cp-accent-soft: rgba(177, 31, 75, 0.08);
+        --cp-accent-fg: #ffffff;
+        --cp-success: #16a34a;
+        --cp-danger: #dc2626;
+        --cp-warning: #f59e0b;
+        --cp-link: #0078d4;
+        --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+      }
+      html[data-theme="dark"] {
+        color-scheme: dark;
+        --cp-bg: #3d3b3a;
+        --cp-bg-elevated: #343231;
+        --cp-surface: #292929;
+        --cp-surface-soft: #2e2e2e;
+        --cp-border: #474747;
+        --cp-border-strong: #5f5f5f;
+        --cp-text: #dedede;
+        --cp-text-muted: #919191;
+        --cp-text-soft: #b0b0b0;
+        --cp-accent: #fd8ea1;
+        --cp-accent-hover: #fb7b91;
+        --cp-accent-soft: rgba(253, 142, 161, 0.14);
+        --cp-accent-fg: #1a1a1a;
+        --cp-success: #4ade80;
+        --cp-danger: #f87171;
+        --cp-warning: #fbbf24;
+        --cp-link: #4da6ff;
+        --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+      }
+
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; }
+      body {
+        margin: 0;
+        background: var(--cp-bg);
+        color: var(--cp-text);
+        font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      button { font-family: inherit; cursor: pointer; }
+      .btn {
+        border-radius: 0.625rem;
+        border: 1px solid var(--cp-border);
+        background: var(--cp-surface);
+        color: var(--cp-text);
+        padding: 0.5rem 0.9rem;
+        font-size: 0.88rem;
+        font-weight: 600;
+      }
+      .btn:hover { background: var(--cp-surface-soft); }
+      .btn-primary { background: var(--cp-accent); color: var(--cp-accent-fg); border-color: var(--cp-accent); }
+      .btn-primary:hover { background: var(--cp-accent-hover); border-color: var(--cp-accent-hover); }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      .icon-btn {
+        border: 1px solid var(--cp-border);
+        background: var(--cp-surface);
+        color: var(--cp-text);
+        border-radius: 0.625rem;
+        width: 38px; height: 38px;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: 1.05rem;
+      }
+      .icon-btn:hover { background: var(--cp-surface-soft); }
+      input, textarea {
+        font-family: inherit;
+        width: 100%;
+        border-radius: 0.625rem;
+        border: 1px solid var(--cp-border);
+        background: var(--cp-surface);
+        color: var(--cp-text);
+        padding: 0.55rem 0.7rem;
+        font-size: 0.92rem;
+      }
+      textarea { resize: none; }
+      input:focus, textarea:focus { outline: 2px solid var(--cp-accent); border-color: var(--cp-accent); }
+      .msg-content p { margin: 0 0 0.5rem; }
+      .msg-content p:last-child { margin-bottom: 0; }
+      .spin { animation: spin 0.9s linear infinite; display: inline-block; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .dot { animation: blink 1.2s infinite; }
+      @keyframes blink { 0%,100%{opacity:.2} 50%{opacity:1} }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel" data-presets="react">
+      const { useState, useEffect, useRef, useCallback } = React;
+      const LS_CFG = "agentchat-config-v1";
+
+      function useConfig() {
+        const [cfg, setCfg] = useState(null);
+        useEffect(() => {
+          const saved = (() => {
+            try { return JSON.parse(localStorage.getItem(LS_CFG)); } catch { return null; }
+          })();
+          if (saved) { setCfg(saved); return; }
+          fetch("/api/config")
+            .then((r) => r.json())
+            .then((d) => setCfg(d))
+            .catch(() => setCfg({ baseUrl: "", agentName: "", agentId: "", username: "" }));
+        }, []);
+        const save = (next) => {
+          setCfg(next);
+          localStorage.setItem(LS_CFG, JSON.stringify(next));
+        };
+        return [cfg, save];
+      }
+
+      // Parse an OpenAI-responses SSE stream, invoking onDelta(text) as tokens arrive.
+      async function streamMessage({ cfg, conversation, input, onDelta, signal }) {
+        const resp = await fetch("/api/message", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...cfg, conversation, input }),
+          signal,
+        });
+        if (!resp.ok || !resp.body) {
+          const t = await resp.text();
+          throw new Error(`message failed (HTTP ${resp.status}): ${t}`);
+        }
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let fullText = "";
+        const handleEvent = (raw) => {
+          const dataLines = raw
+            .split("\n")
+            .filter((l) => l.startsWith("data:"))
+            .map((l) => l.slice(5).trim());
+          if (!dataLines.length) return;
+          const dataStr = dataLines.join("\n");
+          if (dataStr === "[DONE]") return;
+          let obj;
+          try { obj = JSON.parse(dataStr); } catch { return; }
+          const type = obj.type || "";
+          if (type === "response.output_text.delta" && typeof obj.delta === "string") {
+            fullText += obj.delta;
+            onDelta(obj.delta);
+          } else if (typeof obj.delta === "string" && type.endsWith(".delta")) {
+            fullText += obj.delta;
+            onDelta(obj.delta);
+          } else if (type === "response.completed" && !fullText && obj.response) {
+            // Fallback: pull final text if no deltas were streamed.
+            const out = (obj.response.output || [])
+              .flatMap((o) => o.content || [])
+              .filter((c) => c.type === "output_text" && c.text)
+              .map((c) => c.text)
+              .join("");
+            if (out) { fullText = out; onDelta(out); }
+          } else if (type === "error" || obj.error) {
+            throw new Error(obj.error?.message || obj.message || "stream error");
+          }
+        };
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const chunk = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            handleEvent(chunk);
+          }
+        }
+        if (buffer.trim()) handleEvent(buffer);
+        return fullText;
+      }
+
+      function Avatar({ role }) {
+        const isUser = role === "user";
+        return (
+          <div style={{
+            width: 30, height: 30, borderRadius: "50%", flexShrink: 0,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontWeight: 800, fontSize: "0.72rem",
+            background: isUser ? "var(--cp-surface-soft)" : "var(--cp-accent-soft)",
+            color: isUser ? "var(--cp-text-muted)" : "var(--cp-accent)",
+          }}>{isUser ? "You" : "AI"}</div>
+        );
+      }
+
+      function Message({ m }) {
+        const isUser = m.role === "user";
+        return (
+          <div style={{ display: "flex", gap: 12, padding: "0.85rem 0" }}>
+            <Avatar role={m.role} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: "0.82rem", marginBottom: 4 }}>
+                {isUser ? "You" : "support-case-agent"}
+              </div>
+              {m.images && m.images.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: m.text ? 8 : 0 }}>
+                  {m.images.map((src, i) => (
+                    <img key={i} src={src} alt="pasted"
+                      style={{ maxWidth: 260, maxHeight: 200, borderRadius: 10, border: "1px solid var(--cp-border)" }} />
+                  ))}
+                </div>
+              )}
+              <div className="msg-content" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "0.95rem" }}>
+                {m.text}
+                {m.streaming && <span className="dot"> ▍</span>}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      function SettingsPanel({ cfg, onSave, onClose, onNewConversation }) {
+        const [draft, setDraft] = useState(cfg);
+        const field = (key, label, ph) => (
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: "0.8rem", fontWeight: 600, display: "block", marginBottom: 4 }}>{label}</label>
+            <input value={draft[key] || ""} placeholder={ph || ""}
+              onChange={(e) => setDraft({ ...draft, [key]: e.target.value })} />
+          </div>
+        );
+        return (
+          <div style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 50,
+            display: "flex", justifyContent: "flex-end",
+          }} onMouseDown={onClose}>
+            <div onMouseDown={(e) => e.stopPropagation()} style={{
+              width: 420, maxWidth: "92vw", height: "100%", overflowY: "auto",
+              background: "var(--cp-surface)", borderLeft: "1px solid var(--cp-border)", padding: "1.5rem",
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0 }}>Settings</h3>
+                <button className="icon-btn" onClick={onClose}>✕</button>
+              </div>
+              {field("baseUrl", "Foundry project base URL", "https://<acct>.services.ai.azure.com/api/projects/<project>")}
+              {field("agentName", "Agent name (path)", "support-case-agent")}
+              {field("agentId", "agent_ids (identity GUID)")}
+              {field("username", "username")}
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button className="btn btn-primary" onClick={() => { onSave(draft); onClose(); }}>Save</button>
+                <button className="btn" onClick={onClose}>Cancel</button>
+              </div>
+              <hr style={{ margin: "20px 0", border: "none", borderTop: "1px solid var(--cp-border)" }} />
+              <button className="btn" onClick={() => { onNewConversation(); onClose(); }}>Start new conversation</button>
+              <p style={{ fontSize: "0.78rem", color: "var(--cp-text-muted)", marginTop: 10 }}>
+                The proxy authenticates with <code>az account get-access-token --resource https://ai.azure.com</code>.
+                Make sure you are <code>az login</code>-ed.
+              </p>
+            </div>
+          </div>
+        );
+      }
+
+      function App() {
+        const [cfg, saveCfg] = useConfig();
+        const [messages, setMessages] = useState([]);
+        const [text, setText] = useState("");
+        const [attachments, setAttachments] = useState([]); // [{id, dataUrl}]
+        const [conversation, setConversation] = useState(null);
+        const [busy, setBusy] = useState(false);
+        const [error, setError] = useState(null);
+        const [showSettings, setShowSettings] = useState(false);
+        const scrollRef = useRef(null);
+        const fileRef = useRef(null);
+
+        useEffect(() => {
+          if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        }, [messages]);
+
+        const addImages = useCallback((files) => {
+          const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+          imgs.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              setAttachments((a) => [...a, { id: Math.random().toString(36).slice(2), dataUrl: reader.result }]);
+            };
+            reader.readAsDataURL(file);
+          });
+        }, []);
+
+        const onPaste = useCallback((e) => {
+          const items = e.clipboardData?.items || [];
+          const files = [];
+          for (const it of items) if (it.kind === "file" && it.type.startsWith("image/")) {
+            const f = it.getAsFile();
+            if (f) files.push(f);
+          }
+          if (files.length) { e.preventDefault(); addImages(files); }
+        }, [addImages]);
+
+        async function ensureConversation() {
+          if (conversation) return conversation;
+          const r = await fetch("/api/conversation", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...cfg, topic: "New chat" }),
+          });
+          const data = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`create conversation failed (HTTP ${r.status}): ${JSON.stringify(data)}`);
+          const id = data.conversation || data.id || data.conversation_id;
+          if (!id) throw new Error("no conversation id in response: " + JSON.stringify(data));
+          setConversation(id);
+          return id;
+        }
+
+        async function send() {
+          if (busy) return;
+          const trimmed = text.trim();
+          if (!trimmed && attachments.length === 0) return;
+          setError(null);
+          const imgs = attachments.map((a) => a.dataUrl);
+          const userMsg = { role: "user", text: trimmed, images: imgs };
+          const content = [];
+          if (trimmed) content.push({ type: "input_text", text: trimmed });
+          imgs.forEach((src) => content.push({ type: "input_image", image_url: src }));
+          const input = [{ type: "message", role: "user", content }];
+
+          setMessages((m) => [...m, userMsg, { role: "assistant", text: "", streaming: true }]);
+          setText("");
+          setAttachments([]);
+          setBusy(true);
+          try {
+            const conv = await ensureConversation();
+            await streamMessage({
+              cfg,
+              conversation: conv,
+              input,
+              onDelta: (d) => {
+                setMessages((m) => {
+                  const copy = m.slice();
+                  const last = copy[copy.length - 1];
+                  copy[copy.length - 1] = { ...last, text: last.text + d };
+                  return copy;
+                });
+              },
+            });
+          } catch (e) {
+            setError(String(e.message || e));
+          } finally {
+            setBusy(false);
+            setMessages((m) => {
+              const copy = m.slice();
+              const last = copy[copy.length - 1];
+              if (last && last.role === "assistant") copy[copy.length - 1] = { ...last, streaming: false };
+              return copy;
+            });
+          }
+        }
+
+        function onKeyDown(e) {
+          if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+        }
+
+        function newConversation() {
+          setConversation(null);
+          setMessages([]);
+          setError(null);
+        }
+
+        if (!cfg) {
+          return <div style={{ padding: 40, color: "var(--cp-text-muted)" }}>Loading…</div>;
+        }
+
+        return (
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", maxWidth: 820, margin: "0 auto" }}>
+            <header style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "0.8rem 1rem", borderBottom: "1px solid var(--cp-border)", background: "var(--cp-bg-elevated)",
+            }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: "1.05rem" }}>Agent Chat</div>
+                <div style={{ fontSize: "0.76rem", color: "var(--cp-text-muted)" }}>
+                  {cfg.agentName}{conversation ? ` · ${conversation.slice(0, 18)}…` : " · no conversation yet"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn" onClick={newConversation}>New chat</button>
+                <button className="icon-btn" title="Settings" onClick={() => setShowSettings(true)}>⚙</button>
+              </div>
+            </header>
+
+            <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "0.5rem 1rem" }}>
+              {messages.length === 0 && (
+                <div style={{ color: "var(--cp-text-muted)", padding: "2rem 0", textAlign: "center" }}>
+                  <p>Start chatting with <strong>{cfg.agentName}</strong>.</p>
+                  <p style={{ fontSize: "0.85rem" }}>Paste screenshots directly into the box, or use the image button.</p>
+                </div>
+              )}
+              {messages.map((m, i) => <Message key={i} m={m} />)}
+            </div>
+
+            {error && (
+              <div style={{
+                margin: "0 1rem 0.5rem", padding: "0.6rem 0.8rem", borderRadius: 10,
+                background: "rgba(220,38,38,0.1)", color: "var(--cp-danger)", fontSize: "0.85rem",
+                border: "1px solid var(--cp-danger)", whiteSpace: "pre-wrap", wordBreak: "break-word",
+              }}>{error}</div>
+            )}
+
+            {attachments.length > 0 && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 1rem 0.4rem" }}>
+                {attachments.map((a) => (
+                  <div key={a.id} style={{ position: "relative" }}>
+                    <img src={a.dataUrl} alt="attach"
+                      style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8, border: "1px solid var(--cp-border)" }} />
+                    <button onClick={() => setAttachments((x) => x.filter((y) => y.id !== a.id))}
+                      style={{
+                        position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                        border: "none", background: "var(--cp-danger)", color: "#fff", fontSize: "0.7rem", lineHeight: 1,
+                      }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", padding: "0.6rem 1rem 1rem" }}>
+              <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: "none" }}
+                onChange={(e) => { addImages(e.target.files); e.target.value = ""; }} />
+              <button className="icon-btn" title="Attach image" onClick={() => fileRef.current?.click()}>🖼</button>
+              <textarea
+                rows={1}
+                value={text}
+                placeholder="Message the agent…  (paste a screenshot, Enter to send, Shift+Enter for newline)"
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={onKeyDown}
+                onPaste={onPaste}
+                style={{ minHeight: 42, maxHeight: 160, overflowY: "auto" }}
+              />
+              <button className="btn btn-primary" disabled={busy || (!text.trim() && attachments.length === 0)} onClick={send}>
+                {busy ? <span className="spin">◠</span> : "Send"}
+              </button>
+            </div>
+
+            {showSettings && (
+              <SettingsPanel
+                cfg={cfg}
+                onSave={saveCfg}
+                onClose={() => setShowSettings(false)}
+                onNewConversation={newConversation}
+              />
+            )}
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
