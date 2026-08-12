@@ -15,6 +15,8 @@
     <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+    <script src="https://unpkg.com/marked@12.0.2/marked.min.js"></script>
+    <script src="https://unpkg.com/dompurify@3.1.6/dist/purify.min.js"></script>
     <style>
       :root {
         color-scheme: light;
@@ -106,6 +108,43 @@
       input:focus, textarea:focus { outline: 2px solid var(--cp-accent); border-color: var(--cp-accent); }
       .msg-content p { margin: 0 0 0.5rem; }
       .msg-content p:last-child { margin-bottom: 0; }
+      .md :first-child { margin-top: 0; }
+      .md :last-child { margin-bottom: 0; }
+      .md p { margin: 0 0 0.6rem; line-height: 1.55; }
+      .md h1, .md h2, .md h3, .md h4 { margin: 1rem 0 0.5rem; line-height: 1.3; }
+      .md h1 { font-size: 1.3rem; }
+      .md h2 { font-size: 1.15rem; }
+      .md h3 { font-size: 1.02rem; }
+      .md ul, .md ol { margin: 0 0 0.6rem; padding-left: 1.4rem; }
+      .md li { margin: 0.15rem 0; }
+      .md a { color: var(--cp-link); }
+      .md code {
+        font-family: Consolas, "Courier New", Courier, monospace;
+        font-size: 0.86em;
+        background: var(--cp-surface-soft);
+        border: 1px solid var(--cp-border);
+        border-radius: 5px;
+        padding: 0.08em 0.35em;
+      }
+      .md pre {
+        background: var(--cp-surface-soft);
+        border: 1px solid var(--cp-border);
+        border-radius: 10px;
+        padding: 0.75rem 0.9rem;
+        overflow-x: auto;
+        margin: 0 0 0.6rem;
+      }
+      .md pre code { background: none; border: none; padding: 0; font-size: 0.85rem; }
+      .md blockquote {
+        margin: 0 0 0.6rem;
+        padding: 0.2rem 0.9rem;
+        border-left: 3px solid var(--cp-border-strong);
+        color: var(--cp-text-muted);
+      }
+      .md table { border-collapse: collapse; margin: 0 0 0.6rem; font-size: 0.9rem; }
+      .md th, .md td { border: 1px solid var(--cp-border); padding: 0.35rem 0.6rem; text-align: left; }
+      .md th { background: var(--cp-surface-soft); }
+      .md hr { border: none; border-top: 1px solid var(--cp-border); margin: 0.8rem 0; }
       .spin { animation: spin 0.9s linear infinite; display: inline-block; }
       @keyframes spin { to { transform: rotate(360deg); } }
       .dot { animation: blink 1.2s infinite; }
@@ -117,6 +156,18 @@
     <script type="text/babel" data-presets="react">
       const { useState, useEffect, useRef, useCallback } = React;
       const LS_CFG = "agentchat-config-v1";
+
+      if (window.marked) {
+        marked.setOptions({ breaks: true, gfm: true });
+      }
+      function renderMarkdown(text) {
+        try {
+          const html = window.marked ? marked.parse(text || "") : (text || "");
+          return window.DOMPurify ? DOMPurify.sanitize(html) : html;
+        } catch {
+          return text || "";
+        }
+      }
 
       function useConfig() {
         const [cfg, setCfg] = useState(null);
@@ -227,8 +278,12 @@
                   ))}
                 </div>
               )}
-              <div className="msg-content" style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, fontSize: "0.95rem" }}>
-                {m.text}
+              <div className="msg-content" style={{ lineHeight: 1.5, fontSize: "0.95rem" }}>
+                {isUser ? (
+                  <span style={{ whiteSpace: "pre-wrap" }}>{m.text}</span>
+                ) : (
+                  <span className="md" dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }} />
+                )}
                 {m.streaming && <span className="dot"> ▍</span>}
               </div>
             </div>
