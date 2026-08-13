@@ -62,12 +62,6 @@ param cosmosDBDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
-@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp), the BYO data plane (Cosmos, AI Search, Storage) and the YARP edge keep their private endpoints but ALSO allow public network access.')
-param deployFirewall bool
-
-@description('Deploy the STANDARD agent tier (BYO Cosmos/Storage/Search + their private endpoints, CMK, KV-crypto RBAC). False = BASIC tier: none of the BYO data plane is deployed.')
-param deployStandardAgent bool
-
 module dataResources 'data-resources.bicep' = {
   name: 'stage10-data-resources-${uniqueSuffix}'
   params: {
@@ -82,8 +76,6 @@ module dataResources 'data-resources.bicep' = {
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
-    deployStandardAgent: deployStandardAgent
     logAnalyticsId: logAnalyticsId
     appServiceDelegatedSubnetId: appServiceDelegatedSubnetId
   }
@@ -93,7 +85,6 @@ module privateEndpoints 'private-endpoints.bicep' = {
   name: 'stage10-private-endpoints-${uniqueSuffix}'
   params: {
     uniqueSuffix: uniqueSuffix
-    deployStandardAgent: deployStandardAgent
     aiSearchName: dataResources.outputs.aiSearchName
     storageName: dataResources.outputs.azureStorageName
     cosmosDBName: dataResources.outputs.cosmosDBName
@@ -133,11 +124,11 @@ module modelGateway 'model-gateway-platform.bicep' = {
   ]
 }
 
-// ==================== Storage CMK (STANDARD tier only) ====================
+// ==================== Storage CMK ====================
 // Grant the Storage + Search service identities the Key Vault Crypto Service Encryption
 // User role, THEN re-PUT the Storage account with customer-managed-key encryption (the KV
 // data-plane role must be effective first). The account CMK re-PUT lives in stage 13.
-module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignment.bicep' = if (deployStandardAgent) {
+module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignment.bicep' = {
   name: 'keyvault-storage-search-rbac-${uniqueSuffix}-deployment'
   params: {
     keyVaultName: dataResources.outputs.keyVaultName
@@ -146,7 +137,7 @@ module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-a
   }
 }
 
-module storageEncryption 'encryption/storage-encryption.bicep' = if (deployStandardAgent) {
+module storageEncryption 'encryption/storage-encryption.bicep' = {
   name: 'storage-encryption-${uniqueSuffix}-deployment'
   params: {
     storageName: dataResources.outputs.azureStorageName
@@ -154,7 +145,6 @@ module storageEncryption 'encryption/storage-encryption.bicep' = if (deployStand
     keyVaultUri: dataResources.outputs.keyVaultUri
     keyVaultKeyName: dataResources.outputs.keyName
     skuName: storageSkuName
-    deployFirewall: deployFirewall
   }
   dependsOn: [
     keyVaultStorageSearchRoleAssignments

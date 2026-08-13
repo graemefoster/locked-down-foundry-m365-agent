@@ -50,9 +50,6 @@ param modelGatewayApimSubnetCidr string
 param foundryPeSubnetCidr string
 param appServicePeSubnetCidr string
 
-@description('When false (firewall opt-out tier), the cross-spoke firewall rule collection is skipped — no firewall policy exists to attach it to.')
-param deployFirewall bool
-
 // ---- Teams / M365 publish ----
 param teamsBotAppIds array
 
@@ -187,9 +184,7 @@ module apimFoundryAgentLimits './model-gateway/apim-foundry-agent-limits.bicep' 
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
 // private endpoint exists (APIM forbids 'Disabled' at create time). Runs after the PE
 // and after the API/policy children so it never races their creation.
-// Skipped in the firewall opt-out on-ramp tier — APIM keeps its private endpoint but ALSO
-// stays publicly reachable (created 'Enabled').
-module apimLockdown './model-gateway/apim-lockdown.bicep' = if (deployFirewall) {
+module apimLockdown './model-gateway/apim-lockdown.bicep' = {
   name: 'model-gateway-apim-lockdown-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -211,7 +206,7 @@ module apimLockdown './model-gateway/apim-lockdown.bicep' = if (deployFirewall) 
 // PUT before this second rule-collection-group PUT lands on the same policy. This avoids
 // the transient "faulted referenced firewalls" fault Basic-tier firewalls hit when two
 // rule-collection-group PUTs arrive back-to-back.
-module gatewayFirewallRules './model-gateway/gateway-firewall-rules.bicep' = if (deployFirewall) {
+module gatewayFirewallRules './model-gateway/gateway-firewall-rules.bicep' = {
   name: 'gateway-fwall-rules-${uniqueSuffix}-deployment'
   params: {
     firewallPolicyName: firewallPolicyName

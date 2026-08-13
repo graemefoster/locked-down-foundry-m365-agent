@@ -9,11 +9,7 @@ private endpoint.
 
 param uniqueSuffix string
 
-@description('Deploy the STANDARD tier BYO stores private endpoints (Search/Storage/Cosmos). False = BASIC tier: only the always-on ACR + Key Vault PEs.')
-param deployStandardAgent bool
-
-// Dependent-resource names (from the data-resources slice). The trio names are empty in the
-// BASIC tier (no BYO stores); their PEs are gated off inside the inner module.
+// Dependent-resource names (from the data-resources slice).
 param aiSearchName string
 param storageName string
 param cosmosDBName string
@@ -31,10 +27,22 @@ param cosmosDBDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
+// Existing data-plane resources (declared for the dependsOn ordering preserved from main).
+resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
+  name: storageName
+}
+
+resource aiSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
+  name: aiSearchName
+}
+
+resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = {
+  name: cosmosDBName
+}
+
 module privateEndpointAndDNS './network/private-endpoint-and-dns.bicep' = {
   name: '${uniqueSuffix}-private-endpoint'
   params: {
-    deployStandardAgent: deployStandardAgent
     aiSearchName: aiSearchName
     storageName: storageName
     cosmosDBName: cosmosDBName
@@ -53,4 +61,9 @@ module privateEndpointAndDNS './network/private-endpoint-and-dns.bicep' = {
     acrName: acrName
     keyVaultName: keyVaultName
   }
+  dependsOn: [
+    aiSearch
+    storage
+    cosmosDB
+  ]
 }

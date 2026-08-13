@@ -59,26 +59,6 @@ param enableRaiGuardrailPolicy bool = true
 @description('Deploy a deliberately NON-COMPLIANT model (weak custom RAI policy) to demonstrate the guardrail flagging it. Off by default.')
 param enableNonCompliantModelDemo bool = false
 
-@description('''
-Deploy the Azure Firewall and force-tunnel all spoke egress (0.0.0.0/0 UDRs) through it —
-the deny-by-default egress-inspection tier (Level 1 network lockdown). Set to false for the
-"private endpoints only" on-ramp tier: no firewall, no UDRs; spokes use Azure default outbound
-and the deny-by-default NSGs still stand. NO DEFAULT — azd always prompts so the security
-tier is an explicit, conscious choice. See docs/NETWORKING.md.
-''')
-param deployFirewall bool
-
-@description('''
-Deploy the STANDARD agent tier: bring-your-own agent state stores (CosmosDB threads, Storage
-files, AI Search vectors) wired to the project via an Agents capability host on the PROJECT.
-Set to false for the BASIC agent tier — no Cosmos/Storage/Search at all; the account-scope
-capability host runs the Agents service on Microsoft-managed stores. Basic is a much faster,
-still-locked-down demo (drops the whole BYO data plane + its private endpoints). The
-account-scope capability host is deployed in BOTH tiers. NO DEFAULT — azd always prompts so the
-agent tier is an explicit, conscious choice. See docs/NETWORKING.md.
-''')
-param deployStandardAgent bool
-
 // ==================== MODEL GATEWAY ====================
 // The enterprise model gateway is always deployed: an APIM Standard v2 instance + a "real"
 // provider AI Foundry in a NEW spoke, advertised to the primary Foundry project as an
@@ -258,17 +238,6 @@ var apimGatewayUrl = 'https://${apimName}.azure-api.net'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
 
-// Firewall opt-out on-ramp tier only: stamp SecurityControl=Ignore at the RESOURCE GROUP so
-// the MCAPS StorageAccount_PublicNetwork_Modify (and sibling public-network) governance
-// policies don't force the now-public data plane back to private. Existing RG tags (e.g. azd's
-// azd-env-name) are preserved via union — a tags/'default' PUT is authoritative for the whole set.
-resource rgSecurityControlTag 'Microsoft.Resources/tags@2021-04-01' = if (!deployFirewall) {
-  name: 'default'
-  properties: {
-    tags: union(resourceGroup().tags, { SecurityControl: 'Ignore' })
-  }
-}
-
 // ==================== STAGE 00 — FOUNDATION ====================
 // The substrate (zero dependencies): networking (hub + 3 spokes, firewall, DNS resolver,
 // peerings, flow logs) + observability sink (Log Analytics + App Insights).
@@ -292,7 +261,6 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
     firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
-    deployFirewall: deployFirewall
   }
 }
 
@@ -321,8 +289,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
-    deployStandardAgent: deployStandardAgent
     storageSkuName: storageSkuName
     providerAccountName: providerAccountName
     apimName: apimName
@@ -377,7 +343,6 @@ module stage13 'stages/13-foundry/13-foundry.bicep' = {
     keyVaultUri: stage10.outputs.keyVaultUri
     keyName: stage10.outputs.keyName
     keyUriWithVersion: stage10.outputs.keyUriWithVersion
-    deployFirewall: deployFirewall
   }
 }
 
@@ -394,7 +359,6 @@ module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
     projectDescription: projectDescription
     displayName: displayName
     projectCapHost: projectCapHost
-    deployStandardAgent: deployStandardAgent
     accountName: stage13.outputs.aiAccountName
     aiSearchName: stage10.outputs.aiSearchName
     aiSearchServiceResourceGroupName: stage10.outputs.aiSearchServiceResourceGroupName
@@ -465,7 +429,6 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     foundryPeSubnetCidr: foundryPeSubnetCidr
     appServicePeSubnetCidr: appServicePeSubnetCidr
-    deployFirewall: deployFirewall
     teamsBotAppIds: teamsBotAppIds
     enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
     enableNonCompliantModelDemo: enableNonCompliantModelDemo

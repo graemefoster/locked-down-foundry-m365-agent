@@ -5,7 +5,6 @@ name: agent
 description: |
     A conversational agent hosted by Foundry using the Microsoft Agents Framework.
 metadata:
-    voiceLiveCompatible: "true"
     tags:
         - MAF
         - Responses Protocol

@@ -33,22 +33,16 @@ param azureStorageResourceGroupName string
 
 param logAnalyticsWorkspaceId string
 
-@description('Deploy the STANDARD tier BYO connections (Cosmos/Storage/Search) on the project. False = BASIC tier: project has no BYO connections (Microsoft-managed stores via the account capability host).')
-param deployStandardAgent bool
-
-// These BYO stores only exist in the STANDARD tier. In BASIC their names are empty, so we
-// fall back to a placeholder to keep the (cross-scope) existing declarations valid — they are
-// never dereferenced because the connections that use them are gated on deployStandardAgent.
 resource searchService 'Microsoft.Search/searchServices@2024-06-01-preview' existing = {
-  name: !empty(aiSearchName) ? aiSearchName : 'placeholder'
+  name: aiSearchName
   scope: resourceGroup(aiSearchServiceSubscriptionId, aiSearchServiceResourceGroupName)
 }
 resource cosmosDBAccount 'Microsoft.DocumentDB/databaseAccounts@2024-12-01-preview' existing = {
-  name: !empty(cosmosDBName) ? cosmosDBName : 'placeholder'
+  name: cosmosDBName
   scope: resourceGroup(cosmosDBSubscriptionId, cosmosDBResourceGroupName)
 }
 resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
-  name: !empty(azureStorageName) ? azureStorageName : 'placeholder'
+  name: azureStorageName
   scope: resourceGroup(azureStorageSubscriptionId, azureStorageResourceGroupName)
 }
 
@@ -71,7 +65,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
-  resource project_connection_cosmosdb_account 'connections@2025-04-01-preview' = if (deployStandardAgent) {
+  resource project_connection_cosmosdb_account 'connections@2025-04-01-preview' = {
     name: cosmosDBName
     properties: {
       category: 'CosmosDB'
@@ -87,7 +81,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
-  resource project_connection_azure_storage 'connections@2025-04-01-preview' = if (deployStandardAgent) {
+  resource project_connection_azure_storage 'connections@2025-04-01-preview' = {
     name: azureStorageName
     properties: {
       category: 'AzureStorageAccount'
@@ -103,7 +97,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
-  resource project_connection_azureai_search 'connections@2025-04-01-preview' = if (deployStandardAgent) {
+  resource project_connection_azureai_search 'connections@2025-04-01-preview' = {
     name: aiSearchName
     properties: {
       category: 'CognitiveSearch'

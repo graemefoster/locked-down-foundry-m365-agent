@@ -36,16 +36,8 @@ module keyVault './resources/keyvault.bicep' = {
   }
 }
 
-// Create agent dependent resources. YARP proxy (App Service) is ALWAYS deployed. The BYO
-// agent-state stores (Storage, CosmosDB, AI Search) are the STANDARD tier only — gated by
-// deployStandardAgent; the BASIC tier runs on Microsoft-managed stores (account capability host).
-@description('Deploy the Azure Firewall egress tier. When false, the BYO data plane + YARP edge additionally allow public network access (private endpoints retained).')
-param deployFirewall bool
-
-@description('Deploy the STANDARD agent tier (BYO Cosmos/Storage/Search). False = BASIC tier (no BYO stores).')
-param deployStandardAgent bool
-
-module aiDependencies './resources/standard-dependent-resources.bicep' = if (deployStandardAgent) {
+// Create agent dependent resources (Storage, CosmosDB, AI Search, App Service)
+module aiDependencies './resources/standard-dependent-resources.bicep' = {
   name: 'dependencies-${uniqueSuffix}-deployment'
   params: {
     location: location
@@ -54,24 +46,15 @@ module aiDependencies './resources/standard-dependent-resources.bicep' = if (dep
     cosmosDBName: cosmosDBName
 
     logAnalyticsId: logAnalyticsId
-    deployFirewall: deployFirewall
-  }
-}
+    appServicePlanName: appServicePlanName
 
-// YARP reverse proxy (public Teams/M365 ingress) — always deployed, independent of the agent tier.
-module appService './gateway/app-service.bicep' = {
-  name: 'appServiceDeployment'
-  params: {
-    location: location
-    logAnalyticsId: logAnalyticsId
-    aspName: appServicePlanName
     appInsightsName: appInsightsName
     appServiceDelegationSubnetId: appServiceDelegatedSubnetId
 
     //wire up the YARP proxy
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
+
   }
 }
 
@@ -93,19 +76,17 @@ output keyUriWithVersion string = keyVault.outputs.keyUriWithVersion
 // Container registry
 output acrName string = acr.outputs.acrName
 
-// BYO agent-state stores — empty in the BASIC tier (not deployed).
-output azureStorageName string = deployStandardAgent ? aiDependencies!.outputs.azureStorageName : ''
-output azureStorageSubscriptionId string = deployStandardAgent ? aiDependencies!.outputs.azureStorageSubscriptionId : ''
-output azureStorageResourceGroupName string = deployStandardAgent ? aiDependencies!.outputs.azureStorageResourceGroupName : ''
-output aiSearchName string = deployStandardAgent ? aiDependencies!.outputs.aiSearchName : ''
-output aiSearchServiceResourceGroupName string = deployStandardAgent ? aiDependencies!.outputs.aiSearchServiceResourceGroupName : ''
-output aiSearchServiceSubscriptionId string = deployStandardAgent ? aiDependencies!.outputs.aiSearchServiceSubscriptionId : ''
-output cosmosDBName string = deployStandardAgent ? aiDependencies!.outputs.cosmosDBName : ''
-output cosmosDBSubscriptionId string = deployStandardAgent ? aiDependencies!.outputs.cosmosDBSubscriptionId : ''
-output cosmosDBResourceGroupName string = deployStandardAgent ? aiDependencies!.outputs.cosmosDBResourceGroupName : ''
-output storagePrincipalId string = deployStandardAgent ? aiDependencies!.outputs.storagePrincipalId : ''
-output aiSearchPrincipalId string = deployStandardAgent ? aiDependencies!.outputs.aiSearchPrincipalId : ''
-
-// YARP (always deployed)
-output yarpWebAppName string = appService.outputs.yarpWebAppName
-output yarpWebAppFqdn string = appService.outputs.yarpWebAppFqdn
+// Dependent resources
+output azureStorageName string = aiDependencies.outputs.azureStorageName
+output azureStorageSubscriptionId string = aiDependencies.outputs.azureStorageSubscriptionId
+output azureStorageResourceGroupName string = aiDependencies.outputs.azureStorageResourceGroupName
+output aiSearchName string = aiDependencies.outputs.aiSearchName
+output aiSearchServiceResourceGroupName string = aiDependencies.outputs.aiSearchServiceResourceGroupName
+output aiSearchServiceSubscriptionId string = aiDependencies.outputs.aiSearchServiceSubscriptionId
+output cosmosDBName string = aiDependencies.outputs.cosmosDBName
+output cosmosDBSubscriptionId string = aiDependencies.outputs.cosmosDBSubscriptionId
+output cosmosDBResourceGroupName string = aiDependencies.outputs.cosmosDBResourceGroupName
+output storagePrincipalId string = aiDependencies.outputs.storagePrincipalId
+output aiSearchPrincipalId string = aiDependencies.outputs.aiSearchPrincipalId
+output yarpWebAppName string = aiDependencies.outputs.yarpWebAppName
+output yarpWebAppFqdn string = aiDependencies.outputs.yarpWebAppFqdn

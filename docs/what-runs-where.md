@@ -30,10 +30,10 @@ Services' public SCM access-restrictions (control plane) so a host-side zip-depl
 |---|---|---|---|---|
 | `preprovision.ps1` | before `azd provision` | azd host | none (writes azd env) | Interactive first-run prompts (`DEPLOY_WINDOWS_VM`, `GITHUB_RUNNER_REPO_URL`); idempotent, no-ops in CI. |
 | `postprovision.ps1` | after `azd provision` | azd host | `gh` auth | Pushes the Bicep outputs the workflows consume into GitHub Actions **repo variables** via `gh variable set` (so the deploy workflows just work). Best-effort. |
-| `predeploy.ps1` | before `azd deploy` | azd host | `az` (yours) | **Opens** the deny-by-default SCM (Kudu) sites of the MCP + YARP web apps (flips their SCM default action to Allow — open to all for the deploy window, robust to a rotating corporate egress IP) so azd can zip-deploy their code (MCP also flips `publicNetworkAccess` to Enabled). Dot-sources `appservice-scm-common.ps1`. |
-| `postdeploy.ps1` | after `azd deploy` | azd host | `az` (yours) | **Re-locks** those SCM sites (SCM default action back to Deny; re-disables public access on the private MCP app). Best-effort — re-run `azd hooks run postdeploy` if a deploy failure left it open. |
+| `predeploy.ps1` | before `azd deploy` | azd host | `az` (yours) | **Opens** the deny-by-default SCM (Kudu) sites of the MCP + YARP web apps for your public IP so azd can zip-deploy their code (MCP also flips `publicNetworkAccess` to Enabled). Dot-sources `appservice-scm-common.ps1`. |
+| `postdeploy.ps1` | after `azd deploy` | azd host | `az` (yours) | **Re-locks** those SCM sites (removes the temporary allow rule; re-disables public access on the private MCP app). Best-effort — re-run `azd hooks run postdeploy` if a deploy failure left it open. |
 | `predown.ps1` | before `azd down` | azd host | `az` (yours) + `gh` | **Phase 0:** deregister the self-hosted runner **host-side** via `gh api` (delete by name `<vmName>-vnet`) — no PAT, no VM round-trip. **Phase 1/2:** delete Foundry capability hosts (ARM control plane) so the account/project can be torn down. |
-| `appservice-scm-common.ps1` | *(dot-sourced by predeploy/postdeploy)* | azd host | `az` (yours) | Shared helpers to open (default action Allow, then wait for Kudu to be reachable) and re-lock (default action Deny) a web app's SCM site + toggle `publicNetworkAccess`. |
+| `appservice-scm-common.ps1` | *(dot-sourced by predeploy/postdeploy)* | azd host | `az` (yours) | Shared helpers to resolve the deployer IP and open/close a web app's SCM access restriction + `publicNetworkAccess`. |
 
 `bot-service.bicep` also lives in `hooks/` (deployed by the Teams-publish path); it is IaC, not a
 hook script.

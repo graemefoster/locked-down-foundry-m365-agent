@@ -11,9 +11,6 @@ The Foundry (AI Services) account PE lives with the account in stage 13
 */
 
 // Resource names and identifiers
-@description('Deploy the STANDARD tier BYO stores private endpoints. False = only ACR + Key Vault PEs.')
-param deployStandardAgent bool
-
 @description('Name of the AI Search service')
 param aiSearchName string
 @description('Name of the storage account')
@@ -74,7 +71,7 @@ resource foundryPeSubnet 'Microsoft.Network/virtualNetworks/subnets@2024-05-01' 
 
 /* -------------------------------------------- Data-resource PEs (in Foundry Spoke) -------------------------------------------- */
 
-resource aiSearchPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (deployStandardAgent) {
+resource aiSearchPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
   name: '${aiSearchName}-private-endpoint'
   location: resourceGroup().location
   properties: {
@@ -91,7 +88,7 @@ resource aiSearchPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01'
   }
 }
 
-resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (deployStandardAgent) {
+resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
   name: '${storageName}-private-endpoint'
   location: resourceGroup().location
   properties: {
@@ -108,7 +105,7 @@ resource storagePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' 
   }
 }
 
-resource cosmosDBPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = if (deployStandardAgent) {
+resource cosmosDBPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
   name: '${cosmosDBName}-private-endpoint'
   location: resourceGroup().location
   properties: {
@@ -162,7 +159,7 @@ resource acrPrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = {
 /* -------------------------------------------- App Service PEs (in App Service Spoke) -------------------------------------------- */
 
 // ---- DNS Zone Groups ----
-resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (deployStandardAgent) {
+resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: aiSearchPrivateEndpoint
   name: '${aiSearchName}-dns-group'
   properties: {
@@ -171,7 +168,7 @@ resource aiSearchDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGrou
     ]
   }
 }
-resource storageDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (deployStandardAgent) {
+resource storageDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: storagePrivateEndpoint
   name: '${storageName}-dns-group'
   properties: {
@@ -180,7 +177,7 @@ resource storageDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroup
     ]
   }
 }
-resource cosmosDBDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = if (deployStandardAgent) {
+resource cosmosDBDnsGroup 'Microsoft.Network/privateEndpoints/privateDnsZoneGroups@2024-05-01' = {
   parent: cosmosDBPrivateEndpoint
   name: '${cosmosDBName}-dns-group'
   properties: {
