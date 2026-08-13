@@ -155,14 +155,16 @@ resource flowLogsBlobContributor 'Microsoft.Authorization/roleAssignments@2022-0
 }
 
 // VNet flow logs live under the regional Network Watcher in NetworkWatcherRG.
+// Target the whole VNet (not the agent subnet): the agent subnet is delegated to
+// Microsoft.App/environments and delegated subnets produce no flow-log records.
 module agentFlowLogs './network/agent-flow-logs.bicep' = {
   name: 'agent-flow-logs-${uniqueSuffix}-deployment'
   scope: resourceGroup('NetworkWatcherRG')
   params: {
     location: location
-    targetSubnetId: foundrySpokeVnet.outputs.agentSubnetId
+    targetResourceId: foundrySpokeVnet.outputs.virtualNetworkId
     flowLogsStorageId: flowLogsStorage.id
-    flowLogName: '${uniqueSuffix}-agent-subnet-flowlog'
+    flowLogName: '${uniqueSuffix}-agent-vnet-flowlog'
     flowLogsIdentityId: flowLogsIdentity.id
     workspaceResourceId: logAnalyticsId
     workspaceGuid: logAnalyticsCustomerId

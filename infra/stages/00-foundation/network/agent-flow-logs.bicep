@@ -1,11 +1,17 @@
 /*
   ==========================================================================
-  Agent-subnet VNet flow logs (+ Traffic Analytics).
+  Foundry spoke VNet flow logs (+ Traffic Analytics).
   ==========================================================================
   NSG flow logs are retired (no new logs can be created after 2025-06-30, full
   retirement 2027-09-30), so this uses the successor VNet flow logs to track
-  what the locked-down agent subnet is actually sending/dropping — invaluable
+  what the locked-down foundry spoke is actually sending/dropping — invaluable
   for spotting over-blocking after the deny-by-default switch.
+
+  IMPORTANT: the flow log targets the whole VNet, NOT the agent subnet. The
+  agent subnet is delegated to Microsoft.App/environments (Foundry agent
+  injection), and flow logs on that delegated subnet produce zero records.
+  Targeting the VNet captures the non-delegated subnets (private endpoints,
+  VMs, deployment scripts), which is where the observable agent traffic lands.
 
   The flow log resource is a child of the regional Network Watcher, which Azure
   auto-provisions as NetworkWatcher_<region> in the NetworkWatcherRG resource
@@ -22,8 +28,8 @@
 @description('Azure region (used to resolve the regional Network Watcher name).')
 param location string
 
-@description('Resource id of the target subnet (the locked-down agent subnet) to capture flow logs for.')
-param targetSubnetId string
+@description('Resource id of the target resource (the foundry spoke VNet) to capture flow logs for. Targets the VNet rather than the agent subnet, which is delegated to Microsoft.App/environments and produces no flow-log records.')
+param targetResourceId string
 
 @description('Resource id of the storage account that will hold the raw flow logs.')
 param flowLogsStorageId string
@@ -62,7 +68,7 @@ resource flowLog 'Microsoft.Network/networkWatchers/flowLogs@2023-11-01' = {
     }
   }
   properties: {
-    targetResourceId: targetSubnetId
+    targetResourceId: targetResourceId
     storageId: flowLogsStorageId
     enabled: true
     retentionPolicy: {
