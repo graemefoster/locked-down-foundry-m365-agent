@@ -1,15 +1,15 @@
-name: Nightly eval — test-agent-one (VNet self-hosted)
+name: Nightly eval — teams-agent (VNet self-hosted)
 
 # ---------------------------------------------------------------------------
-# Offline evaluation of the Foundry agent (agents/test-agent-one/agent.yaml)
+# Offline evaluation of the Foundry agent (agents/teams-agent/agent.yaml)
 # using the Microsoft "Azure AI Agent Evaluation" GitHub Action:
 #   https://learn.microsoft.com/azure/foundry/how-to/evaluation-github-action
 #   https://github.com/microsoft/ai-agent-evals
 #
-# The action invokes the agent with the queries in agents/test-agent-one/eval-data.json,
+# The action invokes the agent with the queries in agents/teams-agent/eval-data.json,
 # runs the listed evaluators, and writes a scored report to the run summary.
 #
-# Why self-hosted / in-VNet (same reasoning as deploy-test-agent-one.yml):
+# Why self-hosted / in-VNet (same reasoning as deploy-teams-agent.yml):
 #   The Foundry project endpoint is PRIVATE, so the eval action can only reach it from
 #   the in-VNet self-hosted runner. Auth is free there: the action uses
 #   DefaultAzureCredential, which picks up the VM's SYSTEM-ASSIGNED managed identity via
@@ -99,7 +99,7 @@ jobs:
             throw "Repo variable AZURE_AI_MODEL_DEPLOYMENT_NAME is not set (the postprovision hook syncs it; or run 'azd env refresh')."
           }
 
-          $dataPath = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DATA_PATH)) { $env:INPUT_DATA_PATH } else { 'agents/test-agent-one/eval-data.json' }
+          $dataPath = if (-not [string]::IsNullOrWhiteSpace($env:INPUT_DATA_PATH)) { $env:INPUT_DATA_PATH } else { 'agents/teams-agent/eval-data.json' }
           if (-not (Test-Path -LiteralPath $dataPath)) { throw "Eval data file not found: $dataPath" }
 
           $apiVersion = '2025-11-15-preview'
@@ -118,7 +118,7 @@ jobs:
             $token = Get-FoundryToken
             $versions = @(Get-AgentVersionsDescending -Token $token -Endpoint $endpoint -ApiVersion $apiVersion -Name $agentName)
             if ($versions.Count -eq 0) {
-              throw "No versions found for agent '$agentName' at $endpoint. Deploy it first (deploy-test-agent-one.yml)."
+              throw "No versions found for agent '$agentName' at $endpoint. Deploy it first (deploy-teams-agent.yml)."
             }
             $latest = $versions[0]
             # Default: evaluate ONLY the latest version (single-agent). We deliberately do NOT
@@ -146,6 +146,24 @@ jobs:
           "agent-ids=$agentIds"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "baseline=$baseline"     | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           "data-path=$dataPath"    | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      # Workaround for an upstream packaging bug: microsoft/ai-agent-evals@v3-beta installs
+      # azure-ai-projects>=2.0.0, whose _patch.py imports `httpx` unconditionally, but that
+      # package's metadata does NOT declare httpx as a dependency (confirmed absent from
+      # requires_dist through 2.4.0). So the action's own `pip install` never pulls httpx and
+      # action.py crashes on import with `ModuleNotFoundError: No module named 'httpx'`.
+      # Pre-install httpx into the SAME Python 3.10 the action's own setup-python step reuses
+      # (self-hosted tool cache is shared across steps), so it's present when action.py runs.
+      - name: Set up Python 3.10 (matches ai-agent-evals)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Pre-install httpx (missing transitive dep of azure-ai-projects)
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install httpx
 
       # Runs the agent against the dataset and posts a scored report to the run summary.
       # DefaultAzureCredential authenticates as the VM's system-assigned managed identity.
