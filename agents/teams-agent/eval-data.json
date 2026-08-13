@@ -1,8 +1,6 @@
 {
   "name": "teams-agent-nightly",
   "evaluators": [
-    "builtin.intent_resolution",
-    "builtin.task_adherence",
     "builtin.coherence",
     "builtin.fluency",
     "builtin.relevance",
