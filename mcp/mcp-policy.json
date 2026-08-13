@@ -7,7 +7,7 @@
       "agents": [
         {
           "name": "teams-agent",
-          "requestsPerMinute": 60
+          "requestsPerMinute": 50000
         }
       ]
     }
