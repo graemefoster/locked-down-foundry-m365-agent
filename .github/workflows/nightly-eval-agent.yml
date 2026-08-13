@@ -9,7 +9,7 @@ name: Nightly eval — test-agent-one (VNet self-hosted)
 # The action invokes the agent with the queries in agents/test-agent-one/eval-data.json,
 # runs the listed evaluators, and writes a scored report to the run summary.
 #
-# Why self-hosted / in-VNet (same reasoning as deploy-teams-agent.yml):
+# Why self-hosted / in-VNet (same reasoning as deploy-test-agent-one.yml):
 #   The Foundry project endpoint is PRIVATE, so the eval action can only reach it from
 #   the in-VNet self-hosted runner. Auth is free there: the action uses
 #   DefaultAzureCredential, which picks up the VM's SYSTEM-ASSIGNED managed identity via
@@ -54,13 +54,13 @@ on:
       dataPath:
         description: "Path to the eval data file"
         required: false
-        default: "agents/test-agent-one/eval-data.json"
+        default: "agents/teams-agent/eval-data.json"
 
 permissions:
   contents: read
 
 env:
-  MANIFEST_PATH: agents/test-agent-one/agent.yaml
+  MANIFEST_PATH: agents/teams-agent/agent.yaml
 
 jobs:
   # Single job on the PRIVATE endpoint runner: resolve config, then run the eval action.
