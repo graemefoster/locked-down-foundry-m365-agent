@@ -29,6 +29,9 @@ param projectDescription string
 param displayName string
 param projectCapHost string
 
+@description('Deploy the STANDARD agent tier: BYO connections + project capability host + BYO data-plane RBAC. False = BASIC tier: project only (agents run on the account capability host + Microsoft-managed stores).')
+param deployStandardAgent bool
+
 // Foundry account (from stage 13).
 param accountName string
 
@@ -50,16 +53,18 @@ param keyVaultName string
 param logAnalyticsId string
 
 // Existing data-plane resources (declared for the dependsOn ordering preserved from stage 10).
+// Only referenced by STANDARD-tier modules; fall back to a placeholder name in BASIC so the
+// declarations stay valid when the trio names are empty.
 resource storage 'Microsoft.Storage/storageAccounts@2022-05-01' existing = {
-  name: azureStorageName
+  name: !empty(azureStorageName) ? azureStorageName : 'placeholder'
 }
 
 resource aiSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
-  name: aiSearchName
+  name: !empty(aiSearchName) ? aiSearchName : 'placeholder'
 }
 
 resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = {
-  name: cosmosDBName
+  name: !empty(cosmosDBName) ? cosmosDBName : 'placeholder'
 }
 
 /*
@@ -88,15 +93,12 @@ module aiProject './foundry/foundry-project.bicep' = {
     accountName: accountName
 
     logAnalyticsWorkspaceId: logAnalyticsId
+    deployStandardAgent: deployStandardAgent
   }
-  dependsOn: [
-    cosmosDB
-    aiSearch
-    storage
-  ]
+  dependsOn: []
 }
 
-module formatProjectWorkspaceId './foundry/format-project-workspace-id.bicep' = {
+module formatProjectWorkspaceId './foundry/format-project-workspace-id.bicep' = if (deployStandardAgent) {
   name: 'format-project-workspace-id-${uniqueSuffix}-deployment'
   params: {
     projectWorkspaceId: aiProject.outputs.projectWorkspaceId
@@ -108,7 +110,7 @@ module formatProjectWorkspaceId './foundry/format-project-workspace-id.bicep' = 
 /*
   Assigns the project SMI the storage blob data contributor role on the storage account
 */
-module storageAccountRoleAssignment './rbac/storage-account-role-assignment.bicep' = {
+module storageAccountRoleAssignment './rbac/storage-account-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'storage-ra-${uniqueSuffix}-deployment'
   params: {
     azureStorageName: azureStorageName
@@ -154,7 +156,7 @@ module foundryProjectRoleAssignment './rbac/foundry-project-role-assignment.bice
 }
 
 // The Cosmos DB Operator role must be assigned before the caphost is created
-module cosmosAccountRoleAssignments './rbac/cosmos-account-role-assignment.bicep' = {
+module cosmosAccountRoleAssignments './rbac/cosmos-account-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'cosmos-account-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosDBName: cosmosDBName
@@ -166,7 +168,7 @@ module cosmosAccountRoleAssignments './rbac/cosmos-account-role-assignment.bicep
 }
 
 // This role can be assigned before or after the caphost is created
-module aiSearchRoleAssignments './rbac/ai-search-role-assignment.bicep' = {
+module aiSearchRoleAssignments './rbac/ai-search-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'ai-search-ra-${uniqueSuffix}-deployment'
   params: {
     aiSearchName: aiSearchName
@@ -190,7 +192,7 @@ module keyVaultProjectRoleAssignment './rbac/keyvault-project-role-assignment.bi
 // ==================== Capability host + post-caphost container-scope RBAC ====================
 
 // This module creates the capability host for the project and account
-module addProjectCapabilityHost './foundry/add-project-capability-host.bicep' = {
+module addProjectCapabilityHost './foundry/add-project-capability-host.bicep' = if (deployStandardAgent) {
   name: 'capabilityHost-configuration-${uniqueSuffix}-deployment'
   params: {
     accountName: accountName
@@ -211,12 +213,12 @@ module addProjectCapabilityHost './foundry/add-project-capability-host.bicep' = 
 }
 
 // The Storage Blob Data Owner role must be assigned after the caphost is created
-module storageContainersRoleAssignment './rbac/storage-container-role-assignment.bicep' = {
+module storageContainersRoleAssignment './rbac/storage-container-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'storage-containers-ra-${uniqueSuffix}-deployment'
   params: {
     aiProjectPrincipalId: aiProject.outputs.projectPrincipalId
     storageName: azureStorageName
-    workspaceId: formatProjectWorkspaceId.outputs.projectWorkspaceIdGuid
+    workspaceId: formatProjectWorkspaceId!.outputs.projectWorkspaceIdGuid
   }
   dependsOn: [
     addProjectCapabilityHost
@@ -224,11 +226,11 @@ module storageContainersRoleAssignment './rbac/storage-container-role-assignment
 }
 
 // The Cosmos Built-In Data Contributor role must be assigned after the caphost is created
-module cosmosContainerRoleAssignments './rbac/cosmos-container-role-assignment.bicep' = {
+module cosmosContainerRoleAssignments './rbac/cosmos-container-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'cosmos-container-ra-${uniqueSuffix}-deployment'
   params: {
     cosmosAccountName: cosmosDBName
-    projectWorkspaceId: formatProjectWorkspaceId.outputs.projectWorkspaceIdGuid
+    projectWorkspaceId: formatProjectWorkspaceId!.outputs.projectWorkspaceIdGuid
     projectPrincipalId: aiProject.outputs.projectPrincipalId
   }
   dependsOn: [

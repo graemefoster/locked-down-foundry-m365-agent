@@ -1,4 +1,6 @@
-// Creates Azure dependent resources for Azure AI Agent Service standard agent setup
+// Creates the bring-your-own agent-state stores for the Azure AI Agent Service STANDARD tier:
+// CosmosDB (threads), AI Search (vectors) and Storage (files). Gated as a unit by
+// deployStandardAgent in the caller — the BASIC tier deploys none of this.
 
 @description('Azure region of the deployment')
 param location string
@@ -13,15 +15,12 @@ param azureStorageName string
 param cosmosDBName string
 
 param logAnalyticsId string
-param appServicePlanName string
-param appInsightsName string
-param appServiceDelegationSubnetId string
 
-@description('APIM gateway base URL the YARP proxy forwards Teams traffic to.')
-param apimGatewayUrl string = ''
+@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp), Cosmos, AI Search and Storage keep their private endpoints but ALSO allow public network access so folks can peek inside the BYO data plane.')
+param deployFirewall bool
 
-@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
-param deployerPublicIp string = ''
+// Firewall tier = private-endpoint-only; opt-out on-ramp = public access ALSO enabled (PEs stay).
+var dataPlanePublicNetworkAccess = deployFirewall ? 'Disabled' : 'Enabled'
 
 // CosmosDB creation
 
@@ -38,7 +37,7 @@ resource cosmosDB 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {
     disableLocalAuth: true
     enableAutomaticFailover: false
     enableMultipleWriteLocations: false
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: dataPlanePublicNetworkAccess
     networkAclBypass: 'AzureServices'
     enableFreeTier: false
     ipRules: [
@@ -96,7 +95,7 @@ resource aiSearch 'Microsoft.Search/searchServices@2025-05-01' = {
     }
     hostingMode: 'Default'
     partitionCount: 1
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: dataPlanePublicNetworkAccess
     replicaCount: 1
     semanticSearch: 'disabled'
     networkRuleSet: {
@@ -133,16 +132,22 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   location: location
   kind: 'StorageV2'
   sku: sku
+  // In the firewall opt-out tier the account goes public; the SecurityControl=Ignore tag
+  // exempts it from the MCAPS StorageAccount_PublicNetwork_Modify policy that would otherwise
+  // force publicNetworkAccess=Disabled straight back. No tag in the firewall tier (stays private).
+  tags: deployFirewall ? {} : { SecurityControl: 'Ignore' }
   identity: {
     type: 'SystemAssigned'
   }
   properties: {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: dataPlanePublicNetworkAccess
     networkAcls: {
       bypass: 'AzureServices'
-      defaultAction: 'Deny'
+      // Opt-out on-ramp: allow so folks can peek at the BYO data plane (still AAD-only —
+      // allowBlobPublicAccess + allowSharedKeyAccess stay false). Firewall tier: deny.
+      defaultAction: deployFirewall ? 'Deny' : 'Allow'
     }
     allowSharedKeyAccess: false
   }
@@ -215,21 +220,6 @@ resource queueSetting 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview'
   }
 }
 
-module appService '../gateway/app-service.bicep' = {
-  name: 'appServiceDeployment'
-  params: {
-    location: location
-    logAnalyticsId: logAnalyticsId
-    aspName: appServicePlanName
-    appInsightsName: appInsightsName
-    appServiceDelegationSubnetId: appServiceDelegationSubnetId
-
-    //wire up the YARP proxy
-    apimGatewayUrl: apimGatewayUrl
-    deployerPublicIp: deployerPublicIp
-  }
-}
-
 output aiSearchName string = aiSearch.name
 output aiSearchID string = aiSearch.id
 output aiSearchServiceResourceGroupName string = resourceGroup().name
@@ -244,11 +234,6 @@ output cosmosDBName string = cosmosDB.name
 output cosmosDBId string = cosmosDB.id
 output cosmosDBResourceGroupName string = resourceGroup().name
 output cosmosDBSubscriptionId string = subscription().subscriptionId
-// output keyvaultId string = keyVault.id
-
-output appServicePlanId string = appService.outputs.aspId
-output yarpWebAppName string = appService.outputs.yarpWebAppName
-output yarpWebAppFqdn string = appService.outputs.yarpWebAppFqdn
 
 output storagePrincipalId string = storage.identity.principalId
 output aiSearchPrincipalId string = aiSearch.identity.principalId

@@ -24,6 +24,9 @@ param restrictOutboundNetworkAccess bool
 @description('Allowed outbound FQDNs (only enforced when restrictOutboundNetworkAccess is true). Shared with the identity module.')
 param allowedFqdnList array
 
+@description('Public network access on the Foundry account data plane (Disabled = firewall tier, Enabled = firewall opt-out on-ramp). Shared with the identity module so both full-PUT declarations agree.')
+param publicNetworkAccess string = 'Disabled'
+
 resource existingAccount 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
   name: accountName
 }
@@ -50,7 +53,7 @@ resource accountUpdate 'Microsoft.CognitiveServices/accounts@2025-04-01-preview'
     }
     allowProjectManagement: true
     customSubDomainName: accountName
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: publicNetworkAccess
     disableLocalAuth: false
     restrictOutboundNetworkAccess: restrictOutboundNetworkAccess
     // allowedFqdnList only applies when restrictOutboundNetworkAccess is true. Egress is left

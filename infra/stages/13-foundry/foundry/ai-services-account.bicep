@@ -30,6 +30,9 @@ param restrictOutboundNetworkAccess bool
 @description('Allowed outbound FQDNs (only enforced when restrictOutboundNetworkAccess is true). Shared with the CMK encryption module.')
 param allowedFqdnList array
 
+@description('Public network access on the Foundry account data plane. Disabled = private-endpoint-only (firewall tier); Enabled = reachable publicly (firewall opt-out on-ramp, PE still present). Shared with the CMK encryption module so both full-PUT declarations agree.')
+param publicNetworkAccess string = 'Disabled'
+
 @secure()
 param appInsightsConnectionString string
 param appInsightsResourceId string
@@ -54,7 +57,7 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
       ipRules: []
       bypass: 'AzureServices'
     }
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: publicNetworkAccess
 
     networkInjections: ((networkInjection == 'true')
       ? [

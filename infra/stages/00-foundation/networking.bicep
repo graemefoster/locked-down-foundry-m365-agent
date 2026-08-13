@@ -24,6 +24,13 @@ param modelGatewayApimSubnetCidr string
 param modelGatewaySpokeAddressPrefix string
 param firewallUnrestrictedSourceCidrs array
 
+@description('''
+Deploy the Azure Firewall + force-tunnel UDRs (deny-by-default egress inspection tier). When
+false, the firewall and all 0.0.0.0/0 route tables are skipped; spokes fall back to Azure
+default outbound and the deny-by-default NSGs remain in force. Opt-out on-ramp tier.
+''')
+param deployFirewall bool
+
 // From the observability slice.
 param logAnalyticsId string
 param logAnalyticsCustomerId string
@@ -37,8 +44,8 @@ module hubNetwork './network/network-agent-vnet.bicep' = {
   }
 }
 
-// Step 2: Deploy Firewall into Hub VNet
-module firewall './network/firewall.bicep' = {
+// Step 2: Deploy Firewall into Hub VNet (opt-out via deployFirewall=false)
+module firewall './network/firewall.bicep' = if (deployFirewall) {
   name: 'stage00-networking-${uniqueSuffix}-fwall'
   params: {
     firewallPipName: '${uniqueSuffix}-fwall-pip'
@@ -56,6 +63,9 @@ module firewall './network/firewall.bicep' = {
   }
 }
 
+// Firewall private IP (empty when the firewall is opted out — spokes then skip their UDRs).
+var firewallPrivateIp = deployFirewall ? firewall!.outputs.firewallPrivateIp : ''
+
 // Step 3: Deploy Foundry Spoke VNet (needs firewall IP + DNS resolver IP)
 module foundrySpokeVnet './network/foundry-spoke-vnet.bicep' = {
   name: 'foundry-spoke-${uniqueSuffix}-deployment'
@@ -64,7 +74,8 @@ module foundrySpokeVnet './network/foundry-spoke-vnet.bicep' = {
     vnetName: '${vnetName}-foundry-spoke'
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
+    firewallPrivateIp: firewallPrivateIp
+    deployFirewall: deployFirewall
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: [
       appServiceDelegatedSubnetCidr
@@ -81,7 +92,8 @@ module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
   params: {
     location: location
     vnetName: '${vnetName}-appservice-spoke'
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
+    firewallPrivateIp: firewallPrivateIp
+    deployFirewall: deployFirewall
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
   }
 }
@@ -192,7 +204,8 @@ module modelGatewaySpokeVnet './network/model-gateway-spoke-vnet.bicep' = {
     location: location
     vnetName: '${vnetName}-model-gateway-spoke'
     vnetAddressPrefix: modelGatewaySpokeAddressPrefix
-    firewallPrivateIp: firewall.outputs.firewallPrivateIp
+    firewallPrivateIp: firewallPrivateIp
+    deployFirewall: deployFirewall
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
   }
 }
@@ -204,6 +217,44 @@ module hubToModelGatewayPeering './network/vnet-peering.bicep' = {
     hubVnetName: hubNetwork.outputs.hubVnetName
     spokeVnetName: modelGatewaySpokeVnet.outputs.virtualNetworkName
     hubVnetId: hubNetwork.outputs.hubVnetId
+    spokeVnetId: modelGatewaySpokeVnet.outputs.virtualNetworkId
+  }
+}
+
+// Step 9: Spoke <-> Spoke peerings (firewall opt-out tier ONLY).
+// With the firewall present, cross-spoke traffic is force-tunnelled through the hub
+// (each spoke's 0.0.0.0/0 UDR -> firewall private IP), so the hub<->spoke peerings above
+// are sufficient. VNet peering is NON-transitive, so when deployFirewall=false there is no
+// firewall to relay between spokes and the hub<->spoke peerings alone leave the spokes
+// mutually unreachable — the agent (foundry spoke) could not reach APIM (model-gateway spoke)
+// or the MCP web app PE (app-service spoke), and the YARP edge (app-service spoke) could not
+// reach the agent. A direct full mesh between the three spokes restores that reachability.
+module foundryToAppServicePeering './network/vnet-peering.bicep' = if (!deployFirewall) {
+  name: 'foundry-appservice-peering-${uniqueSuffix}'
+  params: {
+    hubVnetName: foundrySpokeVnet.outputs.virtualNetworkName
+    spokeVnetName: appServiceSpokeVnet.outputs.virtualNetworkName
+    hubVnetId: foundrySpokeVnet.outputs.virtualNetworkId
+    spokeVnetId: appServiceSpokeVnet.outputs.virtualNetworkId
+  }
+}
+
+module foundryToModelGatewayPeering './network/vnet-peering.bicep' = if (!deployFirewall) {
+  name: 'foundry-model-gateway-peering-${uniqueSuffix}'
+  params: {
+    hubVnetName: foundrySpokeVnet.outputs.virtualNetworkName
+    spokeVnetName: modelGatewaySpokeVnet.outputs.virtualNetworkName
+    hubVnetId: foundrySpokeVnet.outputs.virtualNetworkId
+    spokeVnetId: modelGatewaySpokeVnet.outputs.virtualNetworkId
+  }
+}
+
+module appServiceToModelGatewayPeering './network/vnet-peering.bicep' = if (!deployFirewall) {
+  name: 'appservice-model-gateway-peering-${uniqueSuffix}'
+  params: {
+    hubVnetName: appServiceSpokeVnet.outputs.virtualNetworkName
+    spokeVnetName: modelGatewaySpokeVnet.outputs.virtualNetworkName
+    hubVnetId: appServiceSpokeVnet.outputs.virtualNetworkId
     spokeVnetId: modelGatewaySpokeVnet.outputs.virtualNetworkId
   }
 }
