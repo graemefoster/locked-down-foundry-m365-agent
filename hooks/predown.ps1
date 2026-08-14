@@ -186,7 +186,11 @@ function Get-CapabilityHostIds {
   }
   if ($response.StatusCode -ge 400) {
     $text = $response.Content
-    if ($text -match '(?i)ResourceNotFound|NotFound|was not found') {
+    # Treat any "not found" flavour as already-gone (idempotent no-op), regardless of the
+    # HTTP status. The parent account/project or its workspace may have been deleted out from
+    # under us (e.g. a prior partial teardown), which the data plane surfaces as HTTP 500
+    # "Workspace not found" rather than a clean 404 — that must not fail 'azd down'.
+    if ($text -match '(?i)ResourceNotFound|NotFound|was not found|Workspace not found|does not exist') {
       Write-Host "[predown] No $Scope scope found (already deleted). Nothing to enumerate."
       return @()
     }
@@ -202,7 +206,7 @@ function Remove-CapabilityHosts {
     Write-Host "[predown] Deleting $Scope capability host: $id"
     # `az resource delete` polls the long-running delete to completion, which is required:
     # project-scope hosts must be fully gone before account-scope deletion.
-    az resource delete --ids $id --api-version $apiVersion --output none
+    az resource delete --ids $id --api-version $apiVersion
     if ($LASTEXITCODE -ne 0) {
       throw "[predown] Failed to delete $Scope capability host (az resource delete exit $LASTEXITCODE): $id"
     }
