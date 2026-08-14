@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/microsoft/AgentSchema/refs/heads/main/schemas/v1.0/ContainerAgent.yaml
+
+kind: hosted
+name: agent
+description: |
+    A conversational agent hosted by Foundry using the Microsoft Agents Framework.
+metadata:
+    voiceLiveCompatible: "true"
+    tags:
+        - MAF
+        - Responses Protocol
+        - Streaming
+protocols:
+    - protocol: responses
+      version: 2.0.0
+resources:
+    cpu: "0.5"
+    memory: 1Gi
+environment_variables:
+    - name: AZURE_AI_MODEL_DEPLOYMENT_NAME
+      value: gpt-5.4
+    - name: FOUNDRY_PROJECT_ENDPOINT
+      value: "{{FOUNDRY_PROJECT_ENDPOINT}}"
+code_configuration:
+    runtime: dotnet_10
+    entry_point: support_case_agent.Agent.dll
+    dependency_resolution: bundled
+
+
+
+
