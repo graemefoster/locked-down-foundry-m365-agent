@@ -19,12 +19,25 @@ param uniqueSuffix string
 @description('Name of the platform APIM instance (stage 10) whose APIs are synced into the API Center inventory.')
 param apimName string
 
+@description('Object (principal) ID of the deployment operator to grant "Azure API Center Data Reader" on the API Center. Empty = skip the grant.')
+param deployerPrincipalId string = ''
+
+@description('Principal type of the deployment operator, used on its role assignment.')
+@allowed([
+  'User'
+  'ServicePrincipal'
+  'Group'
+])
+param deployerPrincipalType string = 'User'
+
 module apiCenter './api-center/api-center.bicep' = {
   name: 'api-center-${uniqueSuffix}'
   params: {
     location: location
     uniqueSuffix: uniqueSuffix
     apimName: apimName
+    deployerPrincipalId: deployerPrincipalId
+    deployerPrincipalType: deployerPrincipalType
   }
 }
 

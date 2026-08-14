@@ -35,9 +35,24 @@ param apimName string
 ])
 param importSpecification string = 'ondemand'
 
+@description('Object (principal) ID of the deployment operator to grant "Azure API Center Data Reader" on the API Center (so whoever runs the deployment can read/search the synced inventory and export specs). Empty = skip the grant.')
+param deployerPrincipalId string = ''
+
+@description('Principal type of the deployment operator, used on its role assignment. Interactive azd runs are Users; CI runs are ServicePrincipals.')
+@allowed([
+  'User'
+  'ServicePrincipal'
+  'Group'
+])
+param deployerPrincipalType string = 'User'
+
 // Built-in role: "API Management Service Reader Role" — the minimum role that lets the API
 // Center managed identity read and import APIs from the APIM instance.
 var apimServiceReaderRoleId = '71522526-b88f-4d52-b57f-d31fc3546d0d'
+
+// Built-in role: "Azure API Center Data Reader" — read/search the API Center inventory and
+// export API specifications (data-plane read). Granted to the deployment operator.
+var apiCenterDataReaderRoleId = 'c7244dfb-f447-457d-b2ba-3999044d1706'
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
@@ -46,6 +61,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
 resource apiCenter 'Microsoft.ApiCenter/services@2024-06-01-preview' = {
   name: 'apic-${uniqueSuffix}'
   location: location
+  sku: {name: 'Free'}
   identity: {
     type: 'SystemAssigned'
   }
@@ -59,6 +75,19 @@ resource apimReaderAssignment 'Microsoft.Authorization/roleAssignments@2022-04-0
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', apimServiceReaderRoleId)
     principalId: apiCenter.identity.principalId
     principalType: 'ServicePrincipal'
+  }
+}
+
+// Grant the deployment operator "Azure API Center Data Reader" so whoever runs the deployment
+// can read/search the synced API inventory and export specs. Skipped when no principal id is
+// supplied (e.g. a non-interactive run with no resolvable operator identity).
+resource deployerDataReaderAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  name: guid(apiCenter.id, deployerPrincipalId, apiCenterDataReaderRoleId)
+  scope: apiCenter
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', apiCenterDataReaderRoleId)
+    principalId: deployerPrincipalId
+    principalType: deployerPrincipalType
   }
 }
 

@@ -99,6 +99,17 @@ param agentCallerAudience string = ''
 @description('Optional provisioning-operator public IP (bare IPv4 or CIDR) to allow into the PUBLIC YARP edge for dev/test, in addition to the Microsoft Teams inbound ranges. Empty (default) = Teams-only. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook). Network layer only — callers still need a valid Entra token + token-limit allowlist entry.')
 param deployerPublicIp string = ''
 
+@description('Object (principal) ID of the deployment operator, granted "Azure API Center Data Reader" on the API Center so they can read/search the synced inventory. azd populates this from AZURE_PRINCIPAL_ID. Empty = skip the grant.')
+param deployerPrincipalId string = ''
+
+@description('Principal type of the deployment operator, used on its role assignment. Interactive azd runs are Users; CI/service-principal runs are ServicePrincipals.')
+@allowed([
+  'User'
+  'ServicePrincipal'
+  'Group'
+])
+param deployerPrincipalType string = 'User'
+
 // ==================== TEAMS / M365 PUBLISH ====================
 // The Teams / M365 Copilot inbound publish path is ALWAYS deployed: an APIM API that forwards
 // to the agent activityProtocol endpoint, plus the YARP proxy flipped public (IP-restricted to
@@ -336,6 +347,8 @@ module stage11 'stages/11-api-center/11-api-center.bicep' = {
     location: location
     uniqueSuffix: uniqueSuffix
     apimName: stage10.outputs.apimName
+    deployerPrincipalId: deployerPrincipalId
+    deployerPrincipalType: deployerPrincipalType
   }
 }
 

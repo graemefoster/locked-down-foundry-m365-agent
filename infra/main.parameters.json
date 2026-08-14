@@ -17,6 +17,8 @@
     "gatewayCallerAppId": { "value": "${GATEWAY_CALLER_APP_ID=}" },
     "agentCallerAudience": { "value": "${AGENT_CALLER_AUDIENCE=}" },
     "deployerPublicIp": { "value": "${DEPLOYER_PUBLIC_IP=}" },
+    "deployerPrincipalId": { "value": "${AZURE_PRINCIPAL_ID=}" },
+    "deployerPrincipalType": { "value": "${DEPLOYER_PRINCIPAL_TYPE=User}" },
     "firstProjectName": { "value": "${FIRST_PROJECT_NAME=project}" },
     "projectDescription": { "value": "${PROJECT_DESCRIPTION=A project for the AI Foundry account with network secured deployed Agent}" },
     "displayName": { "value": "${DISPLAY_NAME=project}" },
