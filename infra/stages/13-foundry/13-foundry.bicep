@@ -44,17 +44,14 @@ param keyVaultUri string
 param keyName string
 param keyUriWithVersion string
 
-@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp), the Foundry account keeps its private endpoint but ALSO allows public network access so it can be seeded/governed from outside the VNet.')
-param deployFirewall bool
-
 // Foundry account egress posture — shared by BOTH the identity (create) and encryption
 // (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
 // so both declarations must agree on these network properties or they silently drift (the
 // encryption module deploys last and wins). Define once here and pass to both.
 var foundryRestrictOutboundNetworkAccess = false
 var foundryAllowedFqdnList = []
-// Firewall tier = private-endpoint-only; opt-out on-ramp = public access ALSO enabled (PE stays).
-var foundryPublicNetworkAccess = deployFirewall ? 'Disabled' : 'Enabled'
+// Private-endpoint-only: public network access is always disabled.
+var foundryPublicNetworkAccess = 'Disabled'
 
 module aiAccount './foundry/ai-services-account.bicep' = {
   name: 'ai-${accountName}-${uniqueSuffix}-deployment'

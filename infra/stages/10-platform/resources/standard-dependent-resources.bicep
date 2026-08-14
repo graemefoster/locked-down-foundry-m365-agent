@@ -16,11 +16,8 @@ param cosmosDBName string
 
 param logAnalyticsId string
 
-@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp), Cosmos, AI Search and Storage keep their private endpoints but ALSO allow public network access so folks can peek inside the BYO data plane.')
-param deployFirewall bool
-
-// Firewall tier = private-endpoint-only; opt-out on-ramp = public access ALSO enabled (PEs stay).
-var dataPlanePublicNetworkAccess = deployFirewall ? 'Disabled' : 'Enabled'
+// Private-endpoint-only data plane: public network access is always disabled.
+var dataPlanePublicNetworkAccess = 'Disabled'
 
 // CosmosDB creation
 
@@ -132,10 +129,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   location: location
   kind: 'StorageV2'
   sku: sku
-  // In the firewall opt-out tier the account goes public; the SecurityControl=Ignore tag
-  // exempts it from the MCAPS StorageAccount_PublicNetwork_Modify policy that would otherwise
-  // force publicNetworkAccess=Disabled straight back. No tag in the firewall tier (stays private).
-  tags: deployFirewall ? {} : { SecurityControl: 'Ignore' }
+  tags: {}
   identity: {
     type: 'SystemAssigned'
   }
@@ -145,9 +139,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     publicNetworkAccess: dataPlanePublicNetworkAccess
     networkAcls: {
       bypass: 'AzureServices'
-      // Opt-out on-ramp: allow so folks can peek at the BYO data plane (still AAD-only —
-      // allowBlobPublicAccess + allowSharedKeyAccess stay false). Firewall tier: deny.
-      defaultAction: deployFirewall ? 'Deny' : 'Allow'
+      defaultAction: 'Deny'
     }
     allowSharedKeyAccess: false
   }

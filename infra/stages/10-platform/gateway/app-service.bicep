@@ -10,9 +10,6 @@ param apimGatewayUrl string = ''
 @description('Optional public IP (bare IPv4 or CIDR) of the provisioning operator to allow into the public YARP edge for dev/test, IN ADDITION to the Microsoft Teams inbound ranges. Empty (default) = Teams-only, no operator hole. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook).')
 param deployerPublicIp string = ''
 
-@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp) the YARP edge is opened to ALL callers (ipSecurityRestrictionsDefaultAction=Allow) instead of the Teams-only allow-list — auth is still enforced downstream at APIM (Entra token + token-limit allowlist).')
-param deployFirewall bool
-
 // Microsoft Teams "Required" published IP ranges — the source ranges the Bot Channel Adapter
 // uses to POST activities to the messaging endpoint. From the Microsoft 365 URLs & IP address
 // ranges list, service area "Skype" / display name "Microsoft Teams" (endpoint sets 11-12).
@@ -100,10 +97,9 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
       // azd publishes and zip-deploys it.
       linuxFxVersion: 'DOTNETCORE|10.0'
       publicNetworkAccess: yarpPublicNetworkAccess
-      // Firewall tier: deny-by-default, Teams ranges (+ optional deployer IP) only. Opt-out
-      // on-ramp: open to all callers so the sample is trivially reachable (auth still enforced
-      // at APIM downstream).
-      ipSecurityRestrictionsDefaultAction: deployFirewall ? 'Deny' : 'Allow'
+      // The YARP edge is the Teams/M365 ingress: deny-by-default, Teams ranges (+ optional
+      // deployer IP) only. Auth is also enforced at APIM downstream.
+      ipSecurityRestrictionsDefaultAction: 'Deny'
       ipSecurityRestrictions: yarpIpRestrictions
       // The MAIN site stays public (it is the Teams/M365 ingress), but the SCM (Kudu) site is
       // deny-by-default so the deploy endpoint is NOT world-reachable at rest. The predeploy hook

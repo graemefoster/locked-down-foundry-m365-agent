@@ -60,15 +60,6 @@ param enableRaiGuardrailPolicy bool = true
 param enableNonCompliantModelDemo bool = false
 
 @description('''
-Deploy the Azure Firewall and force-tunnel all spoke egress (0.0.0.0/0 UDRs) through it —
-the deny-by-default egress-inspection tier (Level 1 network lockdown). Set to false for the
-"private endpoints only" on-ramp tier: no firewall, no UDRs; spokes use Azure default outbound
-and the deny-by-default NSGs still stand. NO DEFAULT — azd always prompts so the security
-tier is an explicit, conscious choice. See docs/NETWORKING.md.
-''')
-param deployFirewall bool
-
-@description('''
 Deploy the STANDARD agent tier: bring-your-own agent state stores (CosmosDB threads, Storage
 files, AI Search vectors) wired to the project via an Agents capability host on the PROJECT.
 Set to false for the BASIC agent tier — no Cosmos/Storage/Search at all; the account-scope
@@ -258,17 +249,6 @@ var apimGatewayUrl = 'https://${apimName}.azure-api.net'
 var modelGatewayConnectionName = 'model-gateway'
 var providerBackendBaseUrl = 'https://${providerAccountName}.openai.azure.com/openai'
 
-// Firewall opt-out on-ramp tier only: stamp SecurityControl=Ignore at the RESOURCE GROUP so
-// the MCAPS StorageAccount_PublicNetwork_Modify (and sibling public-network) governance
-// policies don't force the now-public data plane back to private. Existing RG tags (e.g. azd's
-// azd-env-name) are preserved via union — a tags/'default' PUT is authoritative for the whole set.
-resource rgSecurityControlTag 'Microsoft.Resources/tags@2021-04-01' = if (!deployFirewall) {
-  name: 'default'
-  properties: {
-    tags: union(resourceGroup().tags, { SecurityControl: 'Ignore' })
-  }
-}
-
 // ==================== STAGE 00 — FOUNDATION ====================
 // The substrate (zero dependencies): networking (hub + 3 spokes, firewall, DNS resolver,
 // peerings, flow logs) + observability sink (Log Analytics + App Insights).
@@ -292,7 +272,6 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
     firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
-    deployFirewall: deployFirewall
   }
 }
 
@@ -321,7 +300,6 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
     deployStandardAgent: deployStandardAgent
     storageSkuName: storageSkuName
     providerAccountName: providerAccountName
@@ -345,6 +323,19 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
     cosmosDBDnsZoneId: stage00.outputs.cosmosDBDnsZoneId
     acrDnsZoneId: stage00.outputs.acrDnsZoneId
     keyVaultDnsZoneId: stage00.outputs.keyVaultDnsZoneId
+  }
+}
+
+// ==================== STAGE 11 — API CENTER ====================
+// A free-plan Azure API Center that continuously syncs the stage-10 APIM APIs (incl. the
+// MCP servers) into a discoverable inventory. Runs AFTER stage 10 — the APIM instance must
+// exist first (apimName is threaded from stage 10's output to order this stage).
+module stage11 'stages/11-api-center/11-api-center.bicep' = {
+  name: 'stage11-api-center-${uniqueSuffix}'
+  params: {
+    location: location
+    uniqueSuffix: uniqueSuffix
+    apimName: stage10.outputs.apimName
   }
 }
 
@@ -377,7 +368,6 @@ module stage13 'stages/13-foundry/13-foundry.bicep' = {
     keyVaultUri: stage10.outputs.keyVaultUri
     keyName: stage10.outputs.keyName
     keyUriWithVersion: stage10.outputs.keyUriWithVersion
-    deployFirewall: deployFirewall
   }
 }
 
@@ -465,7 +455,6 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     foundryPeSubnetCidr: foundryPeSubnetCidr
     appServicePeSubnetCidr: appServicePeSubnetCidr
-    deployFirewall: deployFirewall
     teamsBotAppIds: teamsBotAppIds
     enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
     enableNonCompliantModelDemo: enableNonCompliantModelDemo
@@ -627,3 +616,6 @@ output GITHUB_RUNNER_USER string = vmAdminUsername
 
 @description('Name of the private Azure Container Registry. The deploy-hosted-agent workflow runs `az acr build` against it (server-side build, no Docker daemon on the runner) and pushes the hosted-agent image the Foundry project pulls to run the agent.')
 output AZURE_CONTAINER_REGISTRY_NAME string = stage10.outputs.acrName
+
+@description('Name of the Azure API Center that inventories the platform APIs (continuously synced from APIM).')
+output AZURE_API_CENTER_NAME string = stage11.outputs.apiCenterName

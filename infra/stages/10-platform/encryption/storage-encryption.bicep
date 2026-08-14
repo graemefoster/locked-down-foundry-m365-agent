@@ -15,9 +15,6 @@ param keyVaultKeyName string
 @description('Storage account SKU name')
 param skuName string
 
-@description('Firewall opt-out tier flag — carried so the CMK re-PUT restates the same SecurityControl tag as the initial declaration (a Storage PUT must agree or the tag/network posture can drift).')
-param deployFirewall bool
-
 resource existingStorage 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
   name: storageName
 }
@@ -26,7 +23,7 @@ resource storageUpdate 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: existingStorage.name
   location: location
   kind: 'StorageV2'
-  tags: deployFirewall ? {} : { SecurityControl: 'Ignore' }
+  tags: {}
   sku: {
     name: skuName
   }

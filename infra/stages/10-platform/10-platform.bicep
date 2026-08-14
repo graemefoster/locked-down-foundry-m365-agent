@@ -62,9 +62,6 @@ param cosmosDBDnsZoneId string
 param acrDnsZoneId string
 param keyVaultDnsZoneId string
 
-@description('Deploy the Azure Firewall egress tier. When false (opt-out on-ramp), the BYO data plane (Cosmos, AI Search, Storage) and the YARP edge keep their private endpoints but ALSO allow public network access.')
-param deployFirewall bool
-
 @description('Deploy the STANDARD agent tier (BYO Cosmos/Storage/Search + their private endpoints, CMK, KV-crypto RBAC). False = BASIC tier: none of the BYO data plane is deployed.')
 param deployStandardAgent bool
 
@@ -82,7 +79,6 @@ module dataResources 'data-resources.bicep' = {
     appInsightsName: appInsightsName
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
     deployStandardAgent: deployStandardAgent
     logAnalyticsId: logAnalyticsId
     appServiceDelegatedSubnetId: appServiceDelegatedSubnetId
@@ -154,7 +150,6 @@ module storageEncryption 'encryption/storage-encryption.bicep' = if (deployStand
     keyVaultUri: dataResources.outputs.keyVaultUri
     keyVaultKeyName: dataResources.outputs.keyName
     skuName: storageSkuName
-    deployFirewall: deployFirewall
   }
   dependsOn: [
     keyVaultStorageSearchRoleAssignments

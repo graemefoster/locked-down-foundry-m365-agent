@@ -37,15 +37,8 @@ param apimSubnetName string = 'apim-subnet'
 @description('The name of the Private Endpoint subnet')
 param peSubnetName string = 'pe-subnet'
 
-@description('Next hop IP address for the firewall (for UDR). Empty when deployFirewall=false.')
+@description('Next hop IP address for the Azure Firewall (UDR next hop for spoke egress).')
 param firewallPrivateIp string
-
-@description('''
-Deploy the 0.0.0.0/0 force-tunnel UDR pointing at the Azure Firewall. When false (firewall
-opt-out tier), no route table is created and the APIM/PE subnets fall back to Azure default
-outbound. APIM v2 platform egress is still governed by the apim-subnet NSG.
-''')
-param deployFirewall bool
 
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
@@ -96,7 +89,7 @@ resource apimNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
 }
 
 // Force-tunnel all egress (and PE return traffic) via the Azure Firewall.
-resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = if (deployFirewall) {
+resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
   name: '${vnetName}-rt'
   location: location
   properties: {
@@ -143,7 +136,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           networkSecurityGroup: {
             id: apimNsg.id
           }
-          routeTable: deployFirewall ? { id: routeTable!.id } : null
+          routeTable: { id: routeTable.id }
         }
       }
       {
@@ -153,7 +146,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
           // Enabled so the UDR below is honored for private-endpoint traffic —
           // required to keep agent<->APIM routing symmetric through the firewall.
           privateEndpointNetworkPolicies: 'Enabled'
-          routeTable: deployFirewall ? { id: routeTable!.id } : null
+          routeTable: { id: routeTable.id }
         }
       }
     ]
@@ -167,4 +160,4 @@ output apimSubnetCidr string = apimSubnet
 output peSubnetId string = '${virtualNetwork.id}/subnets/${peSubnetName}'
 output peSubnetName string = peSubnetName
 output peSubnetCidr string = peSubnet
-output routeTableName string = deployFirewall ? routeTable!.name : ''
+output routeTableName string = routeTable.name

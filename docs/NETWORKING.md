@@ -29,62 +29,10 @@
 
 ---
 
-## Opting out of the firewall (on-ramp tier)
-
-The Azure Firewall + force-tunnel UDRs are the **deny-by-default egress
-inspection tier**. `deployFirewall` has **no default** — `azd up` **always
-prompts** for it, so choosing your security tier is an explicit, conscious
-decision rather than a silent default. Answer `true` for the full enterprise
-posture, or `false` for the gentler *"private endpoints only, no egress
-firewall"* on-ramp. (Non-interactively, set it with
-`azd env set DEPLOY_FIREWALL true|false` before provisioning.)
-
-With the firewall opted out:
-
-- **No** Azure Firewall, **no** `0.0.0.0/0` route tables on any spoke, and **no**
-  cross-spoke firewall rule collection (stage 30).
-- **A direct spoke-to-spoke peering mesh is added** (foundry ↔ app-service ↔
-  model-gateway). With the firewall present, cross-spoke traffic is force-tunnelled
-  through the hub via each spoke's `0.0.0.0/0` UDR, so the hub↔spoke peerings suffice.
-  VNet peering is **non-transitive**, so once the firewall (and its UDRs) is gone the
-  hub↔spoke peerings alone leave the spokes mutually unreachable — the agent could not
-  reach APIM or the MCP web app PE, and the YARP edge could not reach the agent. The
-  full mesh restores that reachability (NSGs already permit the flows by source/dest IP).
-- Every spoke falls back to **Azure default outbound**. The agent subnet keeps
-  its **deny-by-default, service-tag-only NSG** — so it still reaches only AAD,
-  ACR, Monitor, ML, DNS and the PE subnets — it just reaches them **directly**
-  instead of through the firewall. Private-endpoint reachability is unchanged.
-- **Private endpoints are retained, but public network access is ALSO enabled**
-  on the services you need to reach from outside the VNet — so you can seed and
-  govern the platform from a laptop or a GitHub-hosted runner (no in-VNet
-  self-hosted runner required). Specifically:
-  - **Foundry account** — public + PE (the key one: the Agents data plane is now
-    reachable to create/publish/govern agents from anywhere).
-  - **Cosmos DB** — public + PE, keeping the Azure-portal IP allow-list so you
-    can peek at threads in Data Explorer.
-  - **AI Search** and **Storage** — public + PE (Storage stays AAD-only:
-    `allowBlobPublicAccess`/`allowSharedKeyAccess` remain `false`).
-  - **APIM** — the phase-2 lockdown is skipped, so APIM keeps its private
-    endpoint but stays publicly reachable.
-  - **YARP edge** — opened to **all** callers (not just the Teams ranges); auth
-    is still enforced downstream at APIM (Entra token + token-limit allow-list).
-  - Key Vault and ACR **stay private** (nothing outside the VNet needs them).
-  - A `SecurityControl: Ignore` tag is stamped on the **resource group** (and the
-    Storage account) so MCAPS public-network governance policies don't force the
-    data plane back to private.
-- What you lose is the **L7/SNI inspection layer** (e.g. pinning the Agent 365
-  telemetry FQDN); the NSG remains L3/L4 only.
-
-This is a deliberately weaker exemplar — keep `deployFirewall=true` for the full
-enterprise posture. It exists so the reference implementation can demonstrate
-security **in tiers**.
-
----
-
 ## Basic vs standard agent tier (`deployStandardAgent`)
 
-A second, orthogonal tier controls the **agent state stores**. Like
-`deployFirewall`, `deployStandardAgent` has **no default** — `azd up` **always
+A second, orthogonal tier controls the **agent state stores**.
+`deployStandardAgent` has **no default** — `azd up` **always
 prompts** (or set `azd env set DEPLOY_STANDARD_AGENT true|false`).
 
 Foundry's Agents service always needs an **account-scope capability host**. The
@@ -114,9 +62,8 @@ deployed and still locked down.
 **Why:** BASIC is a much **faster** demo — it removes the two slowest chunks of
 the provision (the ~9½‑min Cosmos/Search/Storage build and a big slice of the
 ~8‑min private-endpoint block, plus the project capability-host wait) while
-staying network-locked-down. Pair it with `deployFirewall=false` for the quickest
-possible still-private on-ramp, or keep `deployStandardAgent=true` for the full
-data-sovereign reference.
+staying network-locked-down. Set `deployStandardAgent=false` for the quickest
+demo, or keep `deployStandardAgent=true` for the full data-sovereign reference.
 
 ---
 

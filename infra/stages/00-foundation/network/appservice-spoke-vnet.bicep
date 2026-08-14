@@ -7,15 +7,8 @@ param vnetName string = 'appservice-spoke-vnet'
 @description('Address space for the App Service Spoke VNet')
 param vnetAddressPrefix string = '10.1.0.0/16'
 
-@description('Next hop IP address for the firewall (for UDR). Empty when deployFirewall=false.')
+@description('Next hop IP address for the Azure Firewall (UDR next hop for spoke egress).')
 param firewallPrivateIp string
-
-@description('''
-Deploy the 0.0.0.0/0 force-tunnel UDR pointing at the Azure Firewall. When false (firewall
-opt-out tier), no route table is created and the delegated subnet falls back to Azure default
-outbound — private-endpoint reachability is unaffected.
-''')
-param deployFirewall bool
 
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
@@ -23,7 +16,7 @@ param dnsServerIp string
 var appServiceDelegatedSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 
-resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = if (deployFirewall) {
+resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
   name: '${vnetName}-rt'
   location: location
   properties: {
@@ -67,7 +60,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
               }
             }
           ]
-          routeTable: deployFirewall ? { id: routeTable!.id } : null
+          routeTable: { id: routeTable.id }
         }
       }
       {

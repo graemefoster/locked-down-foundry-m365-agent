@@ -39,9 +39,6 @@ module keyVault './resources/keyvault.bicep' = {
 // Create agent dependent resources. YARP proxy (App Service) is ALWAYS deployed. The BYO
 // agent-state stores (Storage, CosmosDB, AI Search) are the STANDARD tier only — gated by
 // deployStandardAgent; the BASIC tier runs on Microsoft-managed stores (account capability host).
-@description('Deploy the Azure Firewall egress tier. When false, the BYO data plane + YARP edge additionally allow public network access (private endpoints retained).')
-param deployFirewall bool
-
 @description('Deploy the STANDARD agent tier (BYO Cosmos/Storage/Search). False = BASIC tier (no BYO stores).')
 param deployStandardAgent bool
 
@@ -54,7 +51,6 @@ module aiDependencies './resources/standard-dependent-resources.bicep' = if (dep
     cosmosDBName: cosmosDBName
 
     logAnalyticsId: logAnalyticsId
-    deployFirewall: deployFirewall
   }
 }
 
@@ -71,7 +67,6 @@ module appService './gateway/app-service.bicep' = {
     //wire up the YARP proxy
     apimGatewayUrl: apimGatewayUrl
     deployerPublicIp: deployerPublicIp
-    deployFirewall: deployFirewall
   }
 }
 
