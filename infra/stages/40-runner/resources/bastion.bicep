@@ -39,7 +39,6 @@ resource bastion 'Microsoft.Network/bastionHosts@2024-05-01' = {
   // Browser-based Bastion access only; no native-client tunneling features are needed.
   sku: { name: 'Basic' }
   properties: {
-    scaleUnits: 2
     ipConfigurations: [
       {
         name: 'IpConf'
