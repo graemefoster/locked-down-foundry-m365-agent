@@ -300,7 +300,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           sourceAddressPrefix: bastionSubnet
           sourcePortRange: '*'
           destinationAddressPrefix: 'Internet'
-          destinationPortRange: '80'
+          destinationPortRange: '443'
           description: 'Azure Bastion certificate revocation checks.'
         }
       }
