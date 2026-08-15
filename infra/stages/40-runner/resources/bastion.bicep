@@ -8,7 +8,9 @@
       `az vm run-command` and the Actions runner registers OUTBOUND, so a CI-only
       environment (deployWindowsVm=false) skips Bastion too.
   Keeping it a separate param means you can still opt into Bastion SSH on the Linux
-  VM for troubleshooting without paying for the Windows VM.
+  VM for troubleshooting without paying for the Windows VM. The Bastion is deployed
+  into the dedicated AzureBastionSubnet so the VM subnet NSG can trust that subnet
+  instead of a broad VirtualNetwork source.
 */
 
 @description('Location for the Bastion host.')
@@ -20,14 +22,43 @@ param virtualNetworkName string
 @description('Name of the Bastion host.')
 param bastionName string = 'agent-vnet-test-bastion'
 
+resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
+  name: virtualNetworkName
+
+  resource azureBastionSubnet 'subnets' existing = {
+    name: 'AzureBastionSubnet'
+  }
+}
+
+resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: '${bastionName}-pip'
+  location: location
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
 resource bastion 'Microsoft.Network/bastionHosts@2025-01-01' = {
   name: bastionName
   location: location
-  sku: { name: 'Developer' }
+  sku: { name: 'Basic' }
   properties: {
-    virtualNetwork: {
-      id: resourceId('Microsoft.Network/virtualNetworks', virtualNetworkName)
-    }
+    ipConfigurations: [
+      {
+        name: 'IpConf'
+        properties: {
+          subnet: {
+            id: virtualNetwork::azureBastionSubnet.id
+          }
+          publicIPAddress: {
+            id: bastionPublicIp.id
+          }
+        }
+      }
+    ]
   }
 }
 
