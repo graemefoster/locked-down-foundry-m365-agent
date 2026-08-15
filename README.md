@@ -48,9 +48,9 @@ A few Foundry concepts explain *why* the design looks the way it does. Skip to
 - **Account & project.** The **account** (`Microsoft.CognitiveServices`, kind `AIServices`) is
   the top-level resource; a **project** is an isolated workspace inside it. Agents live in a
   project and share its file/thread/search storage. The project is the unit of isolation.
-- **Agents.** An agent is a model + instructions (+ optional tools). This sample deploys
-  **prompt agents** (`agents/<name>/agent.yaml`); hosted (containerized) agents are on the
-  [roadmap](./BACKLOG.md).
+- **Agents.** An agent is a model + instructions (+ optional tools), or hosted code managed by
+  Foundry. This sample includes the prompt-based `teams-agent` and a source-zip hosted
+  `support-case-agent` variant under `agents/`.
 - **BYO data plane.** Agents are stateful, and their state lives in **your own** resources:
   **Cosmos DB** (threads), **AI Search** (vectors), **Storage** (files). Locking down the agent
   means locking down all three.

@@ -72,7 +72,7 @@ demo, or keep `deployStandardAgent=true` for the full data-sovereign reference.
 | VNet | CIDR | Purpose | Lockdown |
 |------|------|---------|----------|
 | Hub | `10.0.0.0/16` | Azure Firewall + DNS Private Resolver | n/a (shared services) |
-| Foundry spoke | `10.2.0.0/16` | Agent subnet + PE subnet + dev VM | **agent subnet only** |
+| Foundry spoke | `10.2.0.0/16` | Agent subnet, PEs, deployment scripts, VMs and Bastion | **agent, VM and Bastion subnets** |
 | App Service spoke | `10.1.0.0/16` | YARP reverse proxy (App Service) | unrestricted |
 | **Model-gateway spoke** | `10.3.0.0/16` | APIM Standard v2 + provider Foundry (always deployed) | **both subnets routed via firewall** |
 
@@ -83,6 +83,8 @@ Foundry spoke subnets:
 | `agent-subnet` | `10.2.0.0/24` | Delegated to `Microsoft.App/environments` (ACA workload profile). **Locked down.** |
 | `pe-subnet` | `10.2.1.0/24` | Private endpoints (AI account, Search, Storage, Cosmos, Key Vault, ACR). |
 | `VirtualMachines` | `10.2.2.0/24` | Linux worker VM (Actions runner) and the optional Windows dev/jumpbox VM. Unrestricted egress. |
+| `DeploymentScripts` | `10.2.3.0/24` | Delegated to `Microsoft.ContainerInstance/containerGroups` for deployment script containers. |
+| `AzureBastionSubnet` | `10.2.4.0/24` | Azure Bastion host for interactive RDP/SSH access. Exists only when `deployBastion=true`. |
 
 Routing: a UDR sends `0.0.0.0/0` from the agent and VM subnets to the firewall
 private IP. DNS for both spokes points at the hub DNS Private Resolver inbound
@@ -148,6 +150,48 @@ Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](../in
 - DNS uses explicit UDP+TCP 53 rules rather than `protocol: '*'`.
 - `168.63.129.16` (the Azure DNS/wire-server virtual IP) is a hard ACA
   requirement and must never be blocked.
+
+---
+
+## VM subnet NSG (`<vnet>-vm-nsg`)
+
+Attached to `VirtualMachines`. Deny-by-default inbound; outbound is left open because egress is
+forced through the Azure Firewall by UDR.
+
+### Inbound
+
+| Prio | Name | Src | Dst | Port/Proto | Why |
+|------|------|-----|-----|------------|-----|
+| 100 | `Allow-Rdp-From-Bastion` | `AzureBastionSubnet` (`10.2.4.0/24`) | `VirtualMachines` (`10.2.2.0/24`) | 3389 / TCP | Windows dev VM RDP access from Bastion only. |
+| 110 | `Allow-Ssh-From-Bastion` | `AzureBastionSubnet` (`10.2.4.0/24`) | `VirtualMachines` (`10.2.2.0/24`) | 22 / TCP | Optional Linux worker VM SSH access from Bastion only. |
+| 4000 | `Deny-All-Inbound` | `*` | `*` | `*` | Deny all other inbound traffic to the VM subnet. |
+
+---
+
+## Bastion subnet NSG (`<vnet>-bastion-nsg`)
+
+Attached to `AzureBastionSubnet`. Deny-by-default except for the Azure Bastion platform-required
+flows and RDP/SSH to the VM subnet.
+
+### Inbound
+
+| Prio | Name | Src | Dst | Port/Proto | Why |
+|------|------|-----|-----|------------|-----|
+| 100 | `Allow-Https-Internet-Inbound` | `Internet` | `*` | 443 / TCP | Azure Bastion browser/client ingress. |
+| 110 | `Allow-GatewayManager-Inbound` | `GatewayManager` | `*` | 443 / TCP | Azure Bastion control-plane management. |
+| 120 | `Allow-LoadBalancer-Inbound` | `AzureLoadBalancer` | `*` | 443 / TCP | Azure Bastion health probes. |
+| 130 | `Allow-BastionHost-Inbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | `AzureBastionSubnet` (`10.2.4.0/24`) | 8080, 5701 / `*` | Bastion host-to-host communication. |
+| 4000 | `Deny-All-Inbound` | `*` | `*` | `*` | Deny all other inbound traffic to the Bastion subnet. |
+
+### Outbound
+
+| Prio | Name | Dst | Port/Proto | Why |
+|------|------|-----|------------|-----|
+| 100 | `Allow-SshRdp-Vnet-Outbound` | `VirtualMachines` (`10.2.2.0/24`) | 22, 3389 / TCP | Bastion sessions to VMs; scoped to the VM subnet, not the whole VNet. |
+| 110 | `Allow-AzureCloud-Outbound` | `AzureCloud` | 443 / TCP | Azure Bastion platform dependencies. |
+| 120 | `Allow-Internet-Outbound` | `Internet` | 443 / TCP | Certificate revocation checks. |
+| 130 | `Allow-BastionHost-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | 8080, 5701 / `*` | Bastion host-to-host communication. |
+| 4000 | `Deny-All-Outbound` | `*` | `*` | Deny all other outbound traffic from the Bastion subnet. |
 
 ---
 

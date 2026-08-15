@@ -163,10 +163,10 @@ param deployWindowsVm bool = false
 Deploy Azure Bastion. Bastion exists for INTERACTIVE human access: it is the only way
 to reach the Windows dev VM (RDP), so this DEFAULTS to deployWindowsVm — turn the
 Windows VM off and Bastion goes with it. The Linux worker VM needs no interactive
-path (seeding goes through `az vm run-command`, the Actions runner registers outbound),
+path (agent seeding runs on the self-hosted Actions runner, which registers outbound),
 so a CI-only environment gets neither. Deliberately NOT in main.parameters.json so the
-derived default applies; override it in a .bicepparam if you want Bastion SSH into the
-Linux VM without the Windows VM.
+derived default applies; pass deployBastion explicitly only for direct Bicep deployments
+that need Bastion SSH into the Linux VM without the Windows VM.
 ''')
 param deployBastion bool = deployWindowsVm
 

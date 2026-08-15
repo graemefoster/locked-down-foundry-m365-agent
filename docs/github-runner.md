@@ -36,7 +36,8 @@ azd env set DEPLOY_WINDOWS_VM true   # opt in to the RDP box (and the Bastion to
 `deployBastion` is deliberately **not** listed in `infra/main.parameters.json` (azd always
 supplies params it finds there, which would hardcode a value and defeat the derived
 default). If you want Bastion SSH into the Linux VM *without* the Windows VM, set
-`deployBastion: true` explicitly in a `.bicepparam` or a direct `az deployment` call.
+the Bicep `deployBastion` parameter explicitly in a direct `az deployment` call; the supported
+`azd` path intentionally exposes only `DEPLOY_WINDOWS_VM`, which brings Bastion with it.
 
 ### Dependencies on the Linux VM
 
@@ -62,8 +63,8 @@ on it**:
 
 | Control | Where |
 |---|---|
-| PR CI runs on **GitHub-hosted** runners only | `.github/workflows/ci.yml` (`runs-on: ubuntu-latest`) |
-| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent `deploy-*-agent.yml` callers + reusable `.github/workflows/_deploy-agent.yml` |
+| Any future PR CI must run on **GitHub-hosted** runners only | `runs-on: ubuntu-latest` (or equivalent GitHub-hosted labels), not the `vnet,foundry-private` labels |
+| VNet deploy has **no `pull_request` trigger** (dispatch only) | the per-agent deploy callers + reusable `.github/workflows/_deploy-agent.yml` / `_deploy-code-agent.yml` workflows |
 | VNet deploy is gated by a **required-reviewer environment** (Teams-publish / compliance jobs) | `environment: vnet-deploy` |
 | `if: github.repository == ...` guard | `_deploy-agent.yml` + each caller |
 

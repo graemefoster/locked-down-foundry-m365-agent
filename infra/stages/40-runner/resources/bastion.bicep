@@ -4,13 +4,14 @@
   Extracted from vm.bicep and gated by main.bicep's `deployBastion` param, which
   DEFAULTS to `deployWindowsVm`. Bastion is an INTERACTIVE-access concern only:
     * Windows dev VM  -> Bastion is the only way in (RDP), so it must be deployed.
-    * Linux worker VM -> needs no interactive path. Agent seeding goes through
-      `az vm run-command` and the Actions runner registers OUTBOUND, so a CI-only
-      environment (deployWindowsVm=false) skips Bastion too.
+    * Linux worker VM -> needs no interactive path. Agent seeding runs on the
+      self-hosted Actions runner, which registers OUTBOUND, so a CI-only environment
+      (deployWindowsVm=false) skips Bastion too.
   Keeping it a separate param means you can still opt into Bastion SSH on the Linux
   VM for troubleshooting without paying for the Windows VM. The Bastion is deployed
   into the dedicated AzureBastionSubnet so the VM subnet NSG can trust that subnet
-  instead of a broad VirtualNetwork source.
+  instead of a broad VirtualNetwork source; Bastion egress is also scoped back to
+  the VM subnet only.
 */
 
 @description('Location for the Bastion host.')
