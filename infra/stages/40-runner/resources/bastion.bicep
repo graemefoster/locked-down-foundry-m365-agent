@@ -16,19 +16,11 @@
 @description('Location for the Bastion host.')
 param location string = resourceGroup().location
 
-@description('Name of the VNet the Bastion is deployed into (must contain AzureBastionSubnet).')
-param virtualNetworkName string
+@description('Resource ID of the dedicated AzureBastionSubnet.')
+param bastionSubnetId string
 
 @description('Name of the Bastion host.')
 param bastionName string = 'agent-vnet-test-bastion'
-
-resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' existing = {
-  name: virtualNetworkName
-
-  resource azureBastionSubnet 'subnets' existing = {
-    name: 'AzureBastionSubnet'
-  }
-}
 
 resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   name: '${bastionName}-pip'
@@ -51,7 +43,7 @@ resource bastion 'Microsoft.Network/bastionHosts@2025-01-01' = {
         name: 'IpConf'
         properties: {
           subnet: {
-            id: virtualNetwork::azureBastionSubnet.id
+            id: bastionSubnetId
           }
           publicIPAddress: {
             id: bastionPublicIp.id

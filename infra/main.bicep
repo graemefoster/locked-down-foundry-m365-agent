@@ -497,6 +497,7 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
     location: location
     uniqueSuffix: uniqueSuffix
     foundrySpokeVnetName: stage00.outputs.foundrySpokeVnetName
+    bastionSubnetId: stage00.outputs.bastionSubnetId
     vmSubnetName: stage00.outputs.vmSubnetName
     aiAccountName: stage13.outputs.aiAccountName
     projectName: stage15.outputs.projectName

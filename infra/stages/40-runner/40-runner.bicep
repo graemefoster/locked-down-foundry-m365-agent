@@ -19,6 +19,7 @@ param uniqueSuffix string
 
 // ---- stage 00 (foundation) facts ----
 param foundrySpokeVnetName string
+param bastionSubnetId string
 param vmSubnetName string
 
 // ---- stage 10 (platform) facts ----
@@ -83,7 +84,7 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
   name: 'bastion-deployment-${uniqueSuffix}'
   params: {
     location: location
-    virtualNetworkName: foundrySpokeVnetName
+    bastionSubnetId: bastionSubnetId
   }
 }
 

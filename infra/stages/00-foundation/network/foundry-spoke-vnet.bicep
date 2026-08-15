@@ -764,3 +764,4 @@ output agentSubnetName string = agentSubnetName
 output peSubnetName string = peSubnetName
 output routeTableName string = routeTable.name
 output deploymentScriptsSubnetId string = '${virtualNetwork.id}/subnets/DeploymentScripts'
+output bastionSubnetId string = '${virtualNetwork.id}/subnets/AzureBastionSubnet'
