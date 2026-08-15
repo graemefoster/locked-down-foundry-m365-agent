@@ -57,7 +57,7 @@ var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
 var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
-var bastionSubnet = cidrSubnet(vnetAddressPrefix, 26, 16)
+var bastionSubnet = cidrSubnet(vnetAddressPrefix, 24, 4)
 
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
 // never be denied. See https://learn.microsoft.com/azure/container-apps/firewall-integration
@@ -193,7 +193,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           protocol: 'Tcp'
           sourceAddressPrefix: 'Internet'
           sourcePortRange: '*'
-          destinationAddressPrefix: bastionSubnet
+          destinationAddressPrefix: '*'
           destinationPortRange: '443'
           description: 'Azure Bastion browser/client ingress.'
         }
@@ -207,7 +207,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           protocol: 'Tcp'
           sourceAddressPrefix: 'GatewayManager'
           sourcePortRange: '*'
-          destinationAddressPrefix: bastionSubnet
+          destinationAddressPrefix: '*'
           destinationPortRange: '443'
           description: 'Azure Bastion control-plane management.'
         }
@@ -221,7 +221,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           protocol: 'Tcp'
           sourceAddressPrefix: 'AzureLoadBalancer'
           sourcePortRange: '*'
-          destinationAddressPrefix: bastionSubnet
+          destinationAddressPrefix: '*'
           destinationPortRange: '443'
           description: 'Azure Bastion health probes.'
         }
