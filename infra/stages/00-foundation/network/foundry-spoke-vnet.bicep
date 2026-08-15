@@ -260,7 +260,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
         }
       }
       {
-        name: 'Allow-SshRdp-Vnet-Outbound'
+        name: 'Allow-SshRdp-VmSubnet-Outbound'
         properties: {
           priority: 100
           access: 'Allow'
