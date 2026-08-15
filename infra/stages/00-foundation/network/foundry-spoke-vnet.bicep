@@ -57,6 +57,8 @@ var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
 var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
+// Keep Bastion and VM NSG rules paired: Bastion may egress only to vmSubnet,
+// and vmSubnet accepts RDP/SSH only from this dedicated AzureBastionSubnet CIDR.
 var bastionSubnet = cidrSubnet(vnetAddressPrefix, 24, 4)
 
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
