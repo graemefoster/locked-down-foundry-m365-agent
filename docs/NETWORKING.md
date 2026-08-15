@@ -185,13 +185,13 @@ flows and RDP/SSH to the VM subnet.
 
 ### Outbound
 
-| Prio | Name | Dst | Port/Proto | Why |
-|------|------|-----|------------|-----|
-| 100 | `Allow-SshRdp-Vnet-Outbound` | `VirtualMachines` (`10.2.2.0/24`) | 22, 3389 / TCP | Bastion sessions to VMs; scoped to the VM subnet, not the whole VNet. |
-| 110 | `Allow-AzureCloud-Outbound` | `AzureCloud` | 443 / TCP | Azure Bastion platform dependencies. |
-| 120 | `Allow-Internet-Outbound` | `Internet` | 443 / TCP | Certificate revocation checks. |
-| 130 | `Allow-BastionHost-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | 8080, 5701 / `*` | Bastion host-to-host communication. |
-| 4000 | `Deny-All-Outbound` | `*` | `*` | Deny all other outbound traffic from the Bastion subnet. |
+| Prio | Name | Src | Dst | Port/Proto | Why |
+|------|------|-----|-----|------------|-----|
+| 100 | `Allow-SshRdp-Vnet-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | `VirtualMachines` (`10.2.2.0/24`) | 22, 3389 / TCP | Bastion sessions to VMs; scoped to the VM subnet, not the whole VNet. |
+| 110 | `Allow-AzureCloud-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | `AzureCloud` | 443 / TCP | Azure Bastion platform dependencies. |
+| 120 | `Allow-Internet-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | `Internet` | 443 / TCP | Certificate revocation checks. |
+| 130 | `Allow-BastionHost-Outbound` | `AzureBastionSubnet` (`10.2.4.0/24`) | `AzureBastionSubnet` (`10.2.4.0/24`) | 8080, 5701 / `*` | Bastion host-to-host communication. |
+| 4000 | `Deny-All-Outbound` | `*` | `*` | `*` | Deny all other outbound traffic from the Bastion subnet. |
 
 ---
 
