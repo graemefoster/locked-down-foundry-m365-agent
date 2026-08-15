@@ -88,6 +88,7 @@ output agentSubnetId string = networking.outputs.agentSubnetId
 output foundrySpokeVnetName string = networking.outputs.foundrySpokeVnetName
 output foundryPeSubnetName string = networking.outputs.foundryPeSubnetName
 output vmSubnetName string = networking.outputs.vmSubnetName
+output bastionSubnetId string = networking.outputs.bastionSubnetId
 
 // App Service spoke
 output appServiceDelegatedSubnetId string = networking.outputs.appServiceDelegatedSubnetId
