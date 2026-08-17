@@ -343,6 +343,9 @@ VM and App Service spoke on their existing general egress.
 | 410 | `App-AgentAllow` / `AllowMcrFrontDoor` | agent subnet `10.2.0.0/24` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com` (443) | **Microsoft Container Registry, SNI-pinned.** Microsoft documents these MCR endpoints as Front Door-backed; the NSG needs `AzureFrontDoor.FirstParty`, but the firewall constrains it to MCR hostnames. |
 | 410 | `App-AgentAllow` / `AllowAgent365Telemetry` | agent subnet `10.2.0.0/24` | `agent365.svc.cloud.microsoft` (443) | **A365 telemetry, SNI-pinned.** The real enforcement point for the broad NSG `AzureFrontDoor.Frontend` allow — filters by TLS SNI (no TLS inspection), so agent egress to Front Door is constrained to this single hostname. |
 
+`410` is the shared priority of the `App-AgentAllow` rule collection; individual
+application rules in that collection do not have separate priorities.
+
 The agent subnet's application rules are only the MCR Front Door hostnames and
 the A365 telemetry FQDN above; all other agent L7/FQDN egress falls through to
 the implicit deny. Combined with the service-tag network rule, the agent can
