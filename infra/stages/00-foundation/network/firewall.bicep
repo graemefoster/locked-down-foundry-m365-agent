@@ -32,7 +32,6 @@ param unrestrictedSourceCidrs array
 // the two rule-collection-group PUTs on this policy.
 
 // Service tags the agent subnet is permitted to reach on 443 (network rules). No FQDNs, no wildcards.
-// MCR's Azure Front Door-backed endpoints are handled as SNI-pinned application rules below.
 var agentEgressServiceTags = [
   'AzureActiveDirectory'
   'MicrosoftContainerRegistry'
@@ -268,10 +267,9 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
         ]
       }
       // Application rules (Filter collection) — agent subnet pinned to required FQDNs.
-      // This is the REAL enforcement point for Front Door-backed dependencies: the NSG can
-      // only scope to Front Door service tags (L3/L4), but the firewall filters by TLS SNI
-      // (no TLS inspection — Foundry-compliant), so egress is constrained to the specific
-      // platform hostnames below.
+      // A365 telemetry has no service tag for the hostname the client actually reaches, so
+      // the NSG scopes to the AzureFrontDoor.Frontend tag and the firewall filters by TLS
+      // SNI (no TLS inspection — Foundry-compliant).
       {
         name: 'App-AgentAllow'
         ruleCollectionType: 'FirewallPolicyFilterRuleCollection'
@@ -280,21 +278,6 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
           type: 'Allow'
         }
         rules: [
-          {
-            ruleType: 'ApplicationRule'
-            description: 'Agent subnet: allow ONLY Microsoft Container Registry Front Door-backed endpoints over HTTPS (SNI-pinned).'
-            name: 'AllowMcrFrontDoor'
-            sourceAddresses: [
-              agentSubnetCidr
-            ]
-            protocols: [
-              { port: 443, protocolType: 'Https' }
-            ]
-            targetFqdns: [
-              'mcr.microsoft.com'
-              '*.data.mcr.microsoft.com'
-            ]
-          }
           {
             ruleType: 'ApplicationRule'
             description: 'Agent subnet: allow ONLY Agent 365 (A365) observability telemetry to agent365.svc.cloud.microsoft over HTTPS (SNI-pinned). All other agent L7/FQDN egress hits the implicit deny.'

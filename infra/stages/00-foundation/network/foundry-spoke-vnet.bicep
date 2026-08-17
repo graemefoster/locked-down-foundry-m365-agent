@@ -514,24 +514,6 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
         }
       }
       {
-        name: 'Allow-AzureFrontDoorFirstParty-Outbound'
-        properties: {
-          priority: 160
-          access: 'Allow'
-          direction: 'Outbound'
-          protocol: 'Tcp'
-          sourceAddressPrefix: agentSubnet
-          sourcePortRange: '*'
-          destinationAddressPrefix: 'AzureFrontDoor.FirstParty'
-          destinationPortRange: '443'
-          // Microsoft Container Registry documents mcr.microsoft.com and
-          // *.data.mcr.microsoft.com behind Azure Front Door. NSGs can only filter
-          // this dependency at L3/L4 with the service tag; the hub firewall then
-          // pins it to those MCR FQDNs with application rules.
-          description: 'Required dependency of MicrosoftContainerRegistry (image/AKS binary delivery over Front Door).'
-        }
-      }
-      {
         name: 'Allow-AzureMonitor-Outbound'
         properties: {
           priority: 170

@@ -13,8 +13,8 @@
 
 - The **agent subnet** is **deny-by-default** on both the NSG (subnet) and the
   Azure Firewall (egress). The NSG allows only explicit service tags/subnets;
-  Azure Firewall further narrows Front Door-backed dependencies with SNI-pinned
-  application rules. There is **no TLS inspection**.
+  Azure Firewall further narrows the A365 Front Door-backed dependency with an SNI-pinned
+  application rule. There is **no TLS inspection**.
 - The **dev VM subnet** and the **App Service spoke** remain **unrestricted** at
   the firewall — only the agent subnet is locked down.
 - Observability: firewall diagnostics land in **resource-specific tables**
@@ -134,7 +134,6 @@ Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](../in
 | 130 | `Allow-Firewall-Outbound` | firewall private IP `/32` | 443 / TCP | UDR next hop for internet-bound egress. HTTPS only, single host. |
 | 140 | `Allow-AzureActiveDirectory-Outbound` | `AzureActiveDirectory` | 443 / TCP | Managed-identity tokens + Entra ID login. |
 | 150 | `Allow-MicrosoftContainerRegistry-Outbound` | `MicrosoftContainerRegistry` | 443 / TCP | Platform/system image pulls (Microsoft Artifact Registry). |
-| 160 | `Allow-AzureFrontDoorFirstParty-Outbound` | `AzureFrontDoor.FirstParty` | 443 / TCP | Hard dependency of MCR (`mcr.microsoft.com`, `*.data.mcr.microsoft.com`) because those endpoints are Front Door-backed. The hub firewall SNI-pins this to the MCR FQDNs below. |
 | 170 | `Allow-AzureMonitor-Outbound` | `AzureMonitor` | 443 / TCP | App Insights / Azure Monitor tracing + metrics. |
 | 180 | `Allow-AzureMachineLearning-Outbound` | `AzureMachineLearning` | 443 / TCP | Foundry **evaluations** (Evaluators Catalogue). |
 | 185 | `Allow-Agent365Telemetry-Outbound` | `AzureFrontDoor.Frontend` ⚠️ | 443 / TCP | **Agent 365 (A365) observability telemetry** to `agent365.svc.cloud.microsoft`. **Over-broad — see [Known limitation](#known-limitation-agent-365-telemetry-egress) below.** |
@@ -333,22 +332,22 @@ VM and App Service spoke on their existing general egress.
 | Prio | Collection / Rule | Src | Dst | Port/Proto | Why |
 |------|-------------------|-----|-----|------------|-----|
 | 300 | `Net-UnrestrictedNonAgent` / `AllowNonAgentNonHttpOut` | dev VM `10.2.2.0/24` + App Service spoke `10.1.0.0/16` | `*` | 1-79, 81-442, 444-65535 / Any | Keep the dev VM + App Service spoke's general non-web egress (legacy behaviour). |
-| 310 | `Net-AgentAllow` / `AllowAgentServiceTagsHttps` | agent subnet `10.2.0.0/24` | `AzureActiveDirectory`, `MicrosoftContainerRegistry`, `AzureMonitor`, `AzureMachineLearning` | 443 / TCP | Approved Azure control-plane service tags on 443. MCR's Front Door-backed hostnames are handled by application rule below instead of a broad `AzureFrontDoor.FirstParty` firewall network allow. |
+| 310 | `Net-AgentAllow` / `AllowAgentServiceTagsHttps` | agent subnet `10.2.0.0/24` | `AzureActiveDirectory`, `MicrosoftContainerRegistry`, `AzureMonitor`, `AzureMachineLearning` | 443 / TCP | Approved Azure control-plane service tags on 443, including MCR via `MicrosoftContainerRegistry`. |
 
 ### Application rules
 
 | Collection prio | Collection / Rule | Src | Target FQDNs | Why |
 |-----------------|-------------------|-----|--------------|-----|
 | 400 | `App-UnrestrictedNonAgent` / `AllowNonAgentWebOut` | dev VM + App Service spoke | `*` (80/443) | Keep the dev VM + App Service spoke's general web egress. |
-| 410 | `App-AgentAllow` / `AllowMcrFrontDoor`, `AllowAgent365Telemetry` | agent subnet `10.2.0.0/24` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com`, `agent365.svc.cloud.microsoft` (443) | **SNI-pinned Front Door-backed dependencies.** MCR endpoints are constrained to Microsoft Container Registry hostnames; A365 telemetry is constrained to `agent365.svc.cloud.microsoft`. |
+| 410 | `App-AgentAllow` / `AllowAgent365Telemetry` | agent subnet `10.2.0.0/24` | `agent365.svc.cloud.microsoft` (443) | **SNI-pinned Front Door-backed A365 telemetry.** A365 has no suitable service tag for the client endpoint, so the firewall constrains it to `agent365.svc.cloud.microsoft`. |
 
 `410` is the shared priority of the `App-AgentAllow` rule collection; individual
 application rules in that collection do not have separate priorities.
 
-The agent subnet's application rules are only the MCR Front Door hostnames and
-the A365 telemetry FQDN above; all other agent L7/FQDN egress falls through to
-the implicit deny. Combined with the service-tag network rule, the agent can
-reach only the approved Azure control-plane surfaces plus those pinned FQDNs.
+The agent subnet's application rule is only the A365 telemetry FQDN above; all
+other agent L7/FQDN egress falls through to the implicit deny. Combined with the
+service-tag network rule, the agent can reach only the approved Azure control-plane
+surfaces plus that pinned FQDN.
 
 ---
 
