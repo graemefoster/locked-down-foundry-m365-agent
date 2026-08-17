@@ -12,8 +12,9 @@
 ## TL;DR
 
 - The **agent subnet** is **deny-by-default** on both the NSG (subnet) and the
-  Azure Firewall (egress). It may only talk to an explicit, **service-tag-only**
-  allow-list — **no FQDN rules, no `*.` wildcards, no TLS inspection**.
+  Azure Firewall (egress). The NSG allows only explicit service tags/subnets;
+  Azure Firewall further narrows Front Door-backed dependencies with SNI-pinned
+  application rules. There is **no TLS inspection**.
 - The **dev VM subnet** and the **App Service spoke** remain **unrestricted** at
   the firewall — only the agent subnet is locked down.
 - Observability: firewall diagnostics land in **resource-specific tables**
@@ -133,7 +134,7 @@ Defined in [`infra/stages/00-foundation/network/foundry-spoke-vnet.bicep`](../in
 | 130 | `Allow-Firewall-Outbound` | firewall private IP `/32` | 443 / TCP | UDR next hop for internet-bound egress. HTTPS only, single host. |
 | 140 | `Allow-AzureActiveDirectory-Outbound` | `AzureActiveDirectory` | 443 / TCP | Managed-identity tokens + Entra ID login. |
 | 150 | `Allow-MicrosoftContainerRegistry-Outbound` | `MicrosoftContainerRegistry` | 443 / TCP | Platform/system image pulls (Microsoft Artifact Registry). |
-| 160 | `Allow-AzureFrontDoorFirstParty-Outbound` | `AzureFrontDoor.FirstParty` | 443 / TCP | Hard dependency of MCR (image/AKS binary delivery over Front Door). |
+| 160 | `Allow-AzureFrontDoorFirstParty-Outbound` | `AzureFrontDoor.FirstParty` | 443 / TCP | Hard dependency of MCR (`mcr.microsoft.com`, `*.data.mcr.microsoft.com`) because those endpoints are Front Door-backed. The hub firewall SNI-pins this to the MCR FQDNs below. |
 | 170 | `Allow-AzureMonitor-Outbound` | `AzureMonitor` | 443 / TCP | App Insights / Azure Monitor tracing + metrics. |
 | 180 | `Allow-AzureMachineLearning-Outbound` | `AzureMachineLearning` | 443 / TCP | Foundry **evaluations** (Evaluators Catalogue). |
 | 185 | `Allow-Agent365Telemetry-Outbound` | `AzureFrontDoor.Frontend` ⚠️ | 443 / TCP | **Agent 365 (A365) observability telemetry** to `agent365.svc.cloud.microsoft`. **Over-broad — see [Known limitation](#known-limitation-agent-365-telemetry-egress) below.** |
@@ -332,19 +333,20 @@ VM and App Service spoke on their existing general egress.
 | Prio | Collection / Rule | Src | Dst | Port/Proto | Why |
 |------|-------------------|-----|-----|------------|-----|
 | 300 | `Net-UnrestrictedNonAgent` / `AllowNonAgentNonHttpOut` | dev VM `10.2.2.0/24` + App Service spoke `10.1.0.0/16` | `*` | 1-79, 81-442, 444-65535 / Any | Keep the dev VM + App Service spoke's general non-web egress (legacy behaviour). |
-| 310 | `Net-AgentAllow` / `AllowAgentServiceTagsHttps` | agent subnet `10.2.0.0/24` | `AzureActiveDirectory`, `MicrosoftContainerRegistry`, `AzureFrontDoor.FirstParty`, `AzureMonitor`, `AzureMachineLearning` | 443 / TCP | The **only** internet egress the agent is allowed. Service tags only. |
+| 310 | `Net-AgentAllow` / `AllowAgentServiceTagsHttps` | agent subnet `10.2.0.0/24` | `AzureActiveDirectory`, `MicrosoftContainerRegistry`, `AzureMonitor`, `AzureMachineLearning` | 443 / TCP | Approved Azure control-plane service tags on 443. MCR's Front Door-backed hostnames are handled by application rule below instead of a broad `AzureFrontDoor.FirstParty` firewall network allow. |
 
 ### Application rules
 
 | Prio | Collection / Rule | Src | Target FQDNs | Why |
 |------|-------------------|-----|--------------|-----|
 | 400 | `App-UnrestrictedNonAgent` / `AllowNonAgentWebOut` | dev VM + App Service spoke | `*` (80/443) | Keep the dev VM + App Service spoke's general web egress. |
+| 410 | `App-AgentAllow` / `AllowMcrFrontDoor` | agent subnet `10.2.0.0/24` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com` (443) | **Microsoft Container Registry, SNI-pinned.** Microsoft documents these MCR endpoints as Front Door-backed; the NSG needs `AzureFrontDoor.FirstParty`, but the firewall constrains it to MCR hostnames. |
 | 410 | `App-AgentAllow` / `AllowAgent365Telemetry` | agent subnet `10.2.0.0/24` | `agent365.svc.cloud.microsoft` (443) | **A365 telemetry, SNI-pinned.** The real enforcement point for the broad NSG `AzureFrontDoor.Frontend` allow — filters by TLS SNI (no TLS inspection), so agent egress to Front Door is constrained to this single hostname. |
 
-The agent subnet's only application rule is the A365 telemetry FQDN above; all
-other agent L7/FQDN egress falls through to the implicit deny. Combined with the
-service-tag network rule, the agent can reach only the approved Azure
-control-plane surfaces plus the single A365 hostname.
+The agent subnet's application rules are only the MCR Front Door hostnames and
+the A365 telemetry FQDN above; all other agent L7/FQDN egress falls through to
+the implicit deny. Combined with the service-tag network rule, the agent can
+reach only the approved Azure control-plane surfaces plus those pinned FQDNs.
 
 ---
 
