@@ -337,8 +337,8 @@ VM and App Service spoke on their existing general egress.
 
 ### Application rules
 
-| Prio | Collection / Rule | Src | Target FQDNs | Why |
-|------|-------------------|-----|--------------|-----|
+| Collection prio | Collection / Rule | Src | Target FQDNs | Why |
+|-----------------|-------------------|-----|--------------|-----|
 | 400 | `App-UnrestrictedNonAgent` / `AllowNonAgentWebOut` | dev VM + App Service spoke | `*` (80/443) | Keep the dev VM + App Service spoke's general web egress. |
 | 410 | `App-AgentAllow` / `AllowMcrFrontDoor` | agent subnet `10.2.0.0/24` | `mcr.microsoft.com`, `*.data.mcr.microsoft.com` (443) | **Microsoft Container Registry, SNI-pinned.** Microsoft documents these MCR endpoints as Front Door-backed; the NSG needs `AzureFrontDoor.FirstParty`, but the firewall constrains it to MCR hostnames. |
 | 410 | `App-AgentAllow` / `AllowAgent365Telemetry` | agent subnet `10.2.0.0/24` | `agent365.svc.cloud.microsoft` (443) | **A365 telemetry, SNI-pinned.** The real enforcement point for the broad NSG `AzureFrontDoor.Frontend` allow — filters by TLS SNI (no TLS inspection), so agent egress to Front Door is constrained to this single hostname. |
