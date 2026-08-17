@@ -35,7 +35,6 @@ param unrestrictedSourceCidrs array
 var agentEgressServiceTags = [
   'AzureActiveDirectory'
   'MicrosoftContainerRegistry'
-  'AzureFrontDoor.FirstParty'
   'AzureMonitor'
   'AzureMachineLearning'
 ]
@@ -267,11 +266,10 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
           }
         ]
       }
-      // Application rules (Filter collection) — agent subnet pinned to the exact A365 FQDN.
-      // This is the REAL enforcement point for A365 telemetry: the NSG can only scope to
-      // the broad AzureFrontDoor.Frontend service tag (L3/L4), but the firewall filters by
-      // TLS SNI (no TLS inspection — Foundry-compliant), so egress to Azure Front Door is
-      // constrained to this single hostname and nothing else. Exact FQDN, no wildcard.
+      // Application rules (Filter collection) — agent subnet pinned to required FQDNs.
+      // A365 telemetry has no service tag for the hostname the client actually reaches, so
+      // the NSG scopes to the AzureFrontDoor.Frontend tag and the firewall filters by TLS
+      // SNI (no TLS inspection — Foundry-compliant).
       {
         name: 'App-AgentAllow'
         ruleCollectionType: 'FirewallPolicyFilterRuleCollection'

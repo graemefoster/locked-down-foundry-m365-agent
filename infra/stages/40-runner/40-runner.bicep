@@ -2,8 +2,8 @@
 Stage 40 — RUNNER (VMs + seed/runner RBAC).
 
 The in-VNet compute plane, always after the platform (stage 10):
-  * linuxVmModule    - ALWAYS. The `az vm run-command` target for agent seeding AND the
-                       self-hosted GitHub Actions runner host. Holds the private-plane RBAC.
+  * linuxVmModule    - ALWAYS. The self-hosted GitHub Actions runner host for agent seeding.
+                       Holds the private-plane RBAC.
   * vmModule         - OPTIONAL Windows dev VM (deployWindowsVm), human RDP/Edge only.
   * bastionModule    - OPTIONAL (deployBastion), interactive human access only.
   * vmFoundryRole    - ALWAYS. Foundry User on the project for the Linux VM MI (seeding).
@@ -19,6 +19,7 @@ param uniqueSuffix string
 
 // ---- stage 00 (foundation) facts ----
 param foundrySpokeVnetName string
+param bastionSubnetId string
 param vmSubnetName string
 
 // ---- stage 10 (platform) facts ----
@@ -45,8 +46,8 @@ param githubRunnerLabels string
 // ==================== VMs + BASTION (in Foundry Spoke) ====================
 
 // Two boxes, one job each:
-//   * linuxVmModule   - ALWAYS deployed. The in-VNet workhorse: the `az vm run-command`
-//                       target for agent seeding AND the self-hosted Actions runner host.
+//   * linuxVmModule   - ALWAYS deployed. The in-VNet workhorse: the self-hosted Actions
+//                       runner host for agent seeding.
 //                       Linux because microsoft/ai-agent-evals is effectively Linux-only.
 //                       Holds all the private-plane RBAC (Foundry / KV / Contributor).
 //   * vmModule        - OPTIONAL Windows dev VM, human RDP + Edge inspection only, no RBAC.
@@ -83,7 +84,7 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
   name: 'bastion-deployment-${uniqueSuffix}'
   params: {
     location: location
-    virtualNetworkName: foundrySpokeVnetName
+    bastionSubnetId: bastionSubnetId
   }
 }
 

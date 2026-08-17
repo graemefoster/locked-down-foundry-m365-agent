@@ -226,6 +226,7 @@ output agentSubnetId string = foundrySpokeVnet.outputs.agentSubnetId
 output foundrySpokeVnetName string = foundrySpokeVnet.outputs.virtualNetworkName
 output foundryPeSubnetName string = foundrySpokeVnet.outputs.peSubnetName
 output vmSubnetName string = foundrySpokeVnet.outputs.vmSubnetName
+output bastionSubnetId string = foundrySpokeVnet.outputs.bastionSubnetId
 
 // App Service spoke
 output appServiceDelegatedSubnetId string = appServiceSpokeVnet.outputs.appServiceDelegatedSubnetId

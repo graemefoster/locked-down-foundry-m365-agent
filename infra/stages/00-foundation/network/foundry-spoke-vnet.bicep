@@ -57,6 +57,9 @@ var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
 var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
+// Keep Bastion and VM NSG rules paired: Bastion may egress only to vmSubnet,
+// and vmSubnet accepts RDP/SSH only from this dedicated AzureBastionSubnet CIDR.
+var bastionSubnet = cidrSubnet(vnetAddressPrefix, 24, 4)
 
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
 // never be denied. See https://learn.microsoft.com/azure/container-apps/firewall-integration
@@ -133,16 +136,203 @@ resource networkSecurityGroup 'Microsoft.Network/networkSecurityGroups@2022-05-0
   properties: {
     securityRules: [
       {
-        name: 'default-allow-3389-from-bastion'
+        name: 'Allow-Rdp-From-Bastion'
         properties: {
-          priority: 999
+          priority: 100
           access: 'Allow'
           direction: 'Inbound'
           destinationPortRange: '3389'
           protocol: 'Tcp'
-          sourceAddressPrefix: '168.63.129.16/32'
-          destinationAddressPrefix: '*'
+          sourceAddressPrefix: bastionSubnet
+          destinationAddressPrefix: vmSubnet
           sourcePortRange: '*'
+          description: 'Allow Windows VM RDP only from the dedicated Azure Bastion subnet.'
+        }
+      }
+      {
+        name: 'Allow-Ssh-From-Bastion'
+        properties: {
+          priority: 110
+          access: 'Allow'
+          direction: 'Inbound'
+          destinationPortRange: '22'
+          protocol: 'Tcp'
+          sourceAddressPrefix: bastionSubnet
+          destinationAddressPrefix: vmSubnet
+          sourcePortRange: '*'
+          description: 'Allow optional Linux VM SSH only from the dedicated Azure Bastion subnet.'
+        }
+      }
+      {
+        name: 'Deny-All-Inbound'
+        properties: {
+          priority: 4000
+          access: 'Deny'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          description: 'Deny all other inbound traffic to the VM subnet.'
+        }
+      }
+    ]
+  }
+}
+
+resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
+  name: '${vnetName}-bastion-nsg'
+  location: location
+  properties: {
+    securityRules: [
+      {
+        name: 'Allow-Https-Internet-Inbound'
+        properties: {
+          priority: 100
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'Internet'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          description: 'Azure Bastion browser/client ingress.'
+        }
+      }
+      {
+        name: 'Allow-GatewayManager-Inbound'
+        properties: {
+          priority: 110
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'GatewayManager'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          description: 'Azure Bastion control-plane management.'
+        }
+      }
+      {
+        name: 'Allow-LoadBalancer-Inbound'
+        properties: {
+          priority: 120
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: 'AzureLoadBalancer'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '443'
+          description: 'Azure Bastion health probes.'
+        }
+      }
+      {
+        name: 'Allow-BastionHost-Inbound'
+        properties: {
+          priority: 130
+          access: 'Allow'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: bastionSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: bastionSubnet
+          destinationPortRanges: [
+            '8080'
+            '5701'
+          ]
+          description: 'Azure Bastion host-to-host communication.'
+        }
+      }
+      {
+        name: 'Deny-All-Inbound'
+        properties: {
+          priority: 4000
+          access: 'Deny'
+          direction: 'Inbound'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          description: 'Deny all other inbound traffic to the Bastion subnet.'
+        }
+      }
+      {
+        name: 'Allow-SshRdp-VmSubnet-Outbound'
+        properties: {
+          priority: 100
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: bastionSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: vmSubnet
+          destinationPortRanges: [
+            '22'
+            '3389'
+          ]
+          description: 'Azure Bastion sessions to VMs.'
+        }
+      }
+      {
+        name: 'Allow-AzureCloud-Outbound'
+        properties: {
+          priority: 110
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: bastionSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'AzureCloud'
+          destinationPortRange: '443'
+          description: 'Azure Bastion platform dependencies.'
+        }
+      }
+      {
+        name: 'Allow-Internet-Outbound'
+        properties: {
+          priority: 120
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: 'Tcp'
+          sourceAddressPrefix: bastionSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: 'Internet'
+          destinationPortRange: '443'
+          description: 'Azure Bastion certificate revocation checks.'
+        }
+      }
+      {
+        name: 'Allow-BastionHost-Outbound'
+        properties: {
+          priority: 130
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: '*'
+          sourceAddressPrefix: bastionSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: bastionSubnet
+          destinationPortRanges: [
+            '8080'
+            '5701'
+          ]
+          description: 'Azure Bastion host-to-host communication.'
+        }
+      }
+      {
+        name: 'Deny-All-Outbound'
+        properties: {
+          priority: 4000
+          access: 'Deny'
+          direction: 'Outbound'
+          protocol: '*'
+          sourceAddressPrefix: '*'
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          description: 'Deny all other outbound traffic from the Bastion subnet.'
         }
       }
     ]
@@ -321,20 +511,6 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           destinationAddressPrefix: 'MicrosoftContainerRegistry'
           destinationPortRange: '443'
           description: 'Pull platform/system container images from Microsoft Artifact Registry.'
-        }
-      }
-      {
-        name: 'Allow-AzureFrontDoorFirstParty-Outbound'
-        properties: {
-          priority: 160
-          access: 'Allow'
-          direction: 'Outbound'
-          protocol: 'Tcp'
-          sourceAddressPrefix: agentSubnet
-          sourcePortRange: '*'
-          destinationAddressPrefix: 'AzureFrontDoor.FirstParty'
-          destinationPortRange: '443'
-          description: 'Required dependency of MicrosoftContainerRegistry (image/AKS binary delivery over Front Door).'
         }
       }
       {
@@ -534,6 +710,15 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
         }
       }
       {
+        name: 'AzureBastionSubnet'
+        properties: {
+          addressPrefix: bastionSubnet
+          networkSecurityGroup: {
+            id: bastionNsg.id
+          }
+        }
+      }
+      {
         // Dedicated subnet for Azure Deployment Script containers (seeding agents at
         // deploy time). Must be delegated to Microsoft.ContainerInstance/containerGroups
         // and must NOT share a subnet with private endpoints.
@@ -567,3 +752,5 @@ output agentSubnetName string = agentSubnetName
 output peSubnetName string = peSubnetName
 output routeTableName string = routeTable.name
 output deploymentScriptsSubnetId string = '${virtualNetwork.id}/subnets/DeploymentScripts'
+// Azure Bastion requires this subnet name exactly.
+output bastionSubnetId string = '${virtualNetwork.id}/subnets/AzureBastionSubnet'

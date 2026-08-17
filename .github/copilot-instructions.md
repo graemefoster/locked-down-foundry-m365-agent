@@ -9,13 +9,13 @@ endpoints, CMK encryption, RBAC). **`azd` is the only supported deployment path.
 |---|---|
 | `infra/main.bicep` | Thin deployment orchestrator — declares params + addressing vars and calls the sequential stages under `infra/stages/`. |
 | `infra/main.parameters.json` | **azd** parameter source. Maps each Bicep param to an env var with an inline default (`${VAR=default}`). |
-| `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
+| `infra/stages/<NN>-<name>/` | Sequential deployment stages (`00-foundation`, `10-platform`, `11-api-center`, `13-foundry`, `15-foundry-project`, `20-workload-mcp`, `30-governance`, `40-runner`). Each stage's Bicep modules are **localised inside it** under category subfolders (`network/`, `foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`). No shared `infra/modules/` tree — a module lives under the one stage that consumes it. |
 | `azure.yaml` | Wires `infra/`, two `services:` (the MCP Node app `mcp/agent-tools` + the YARP .NET app `apps/sample-gateway`, both `host: appservice` deployed as CODE), and the `preprovision`, `postprovision`, `predeploy`, `postdeploy` and `predown` hooks. azd provisions, syncs repo variables (`postprovision`), then deploys the two apps' code (wrapped by `predeploy`/`postdeploy`). Still no agent deploys — those stay workflow-only. |
 | `hooks/postprovision.ps1` | azd **postprovision** hook — host-side only; pushes the Bicep outputs the workflows consume into GitHub Actions repo variables via `gh variable set` (rename: `MCP_SERVER_URL` ← `MCP_GATEWAY_URL`). Best-effort (`continueOnError: true`); never touches the VNet. |
 | `hooks/predeploy.ps1` / `hooks/postdeploy.ps1` | azd **predeploy**/**postdeploy** hooks — host-side; open (then re-lock) the deny-by-default SCM sites of the MCP + YARP web apps for the deployer's public IP (MCP also toggles `publicNetworkAccess`) so azd can zip-deploy the app code. Both dot-source `hooks/appservice-scm-common.ps1`. |
 | `hooks/predown.ps1` | azd **predown** hook — deregisters the GitHub runner **host-side via `gh`** (delete by name `<vmName>-vnet`) + deletes capability hosts before teardown. |
-| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `_deploy-agent.yml` workflow) to create-or-update and publish one agent. Both dot-source `scripts/foundry-agent-common.ps1`. |
-| `agents/<name>/agent.yaml` | Per-agent manifest (`kind: prompt` — model + instructions, optionally an MCP tool). One folder per agent; model is set in the manifest, MCP `server_url` (if any) is injected at deploy time. |
+| `scripts/create-agent.ps1` / `scripts/publish-agent.ps1` | Run **on the private Linux VM** (natively via the reusable `_deploy-agent.yml` workflow) to create-or-update and publish one prompt agent. Both dot-source `scripts/foundry-agent-common.ps1`. Hosted source-zip agents use `scripts/deploy-code-agent.ps1` via `_deploy-code-agent.yml`. |
+| `agents/<name>/agent.yaml` | Per-agent manifest. Prompt agents use `definition.kind: prompt` (model + instructions, optionally an MCP tool); hosted source-zip variants use `definition.kind: hosted` with `code_configuration`. One folder per agent; environment-specific values such as MCP `server_url` are injected at deploy time. |
 
 `hooks/` and `scripts/` intentionally live at the repo root (deploy orchestration, not IaC).
 For a per-file map of what triggers each one, where it runs (azd host vs in-VNet VM) and which
@@ -33,7 +33,7 @@ azd up
 
 Post-provision (agent seeding, network governance)
  └─ in-VNet self-hosted runner workflows — run natively on the private VM:
-    * one thin per-agent workflow each (deploy-teams-agent.yml) → the reusable _deploy-agent.yml
+    * one thin per-agent workflow each (for example deploy-teams-agent.yml or deploy-support-case-agent-code.yml) → the matching reusable deploy workflow
     * deploy-agent-network.yml (Foundry token limits + YARP edge routes + MCP allowlist)
 
 azd down
@@ -62,15 +62,15 @@ azd down
 - The Foundry endpoint is **private**, so agent deploys / Teams publishing / MCP compliance run
   on the **in-VNet self-hosted GitHub Actions runner** (which IS the private Linux VM), reaching
   the endpoint directly. The runner is therefore **required** for these steps.
-- **One agent per workflow.** Each agent has a manifest (`agents/<name>/agent.yaml`) and a thin
-  caller workflow (`deploy-<name>-agent.yml`) that `uses:` the reusable
-  `.github/workflows/_deploy-agent.yml`. The reusable workflow converts the manifest with `yq`,
-  injects the MCP `server_url` if present, then runs the `create-agent` and
-  `publish-agent` composite actions; an optional `publish-teams` job publishes that single
-  agent. `deploy-agent-network.yml` applies the network governance (Foundry token limits + YARP
-  edge routes + MCP allowlist). All are `workflow_dispatch`-only, repository-guarded.
+- **One agent per workflow.** Each agent has a manifest under `agents/<name>/` and a thin caller
+  workflow (`deploy-<name>-agent.yml` or `deploy-<name>-agent-code.yml`) that `uses:` the matching
+  reusable workflow (`_deploy-agent.yml` for prompt manifests, `_deploy-code-agent.yml` for hosted
+  source-zip manifests). The reusable workflow normalizes the manifest, injects per-environment
+  values if present, then creates/updates and publishes that single agent. `deploy-agent-network.yml`
+  applies the network governance (Foundry token limits + YARP edge routes + MCP allowlist). All are
+  `workflow_dispatch`-only, repository-guarded.
 - Idempotent: an existing agent (matched by name) gets a fresh version. Add an agent by adding a
-  manifest folder + a thin caller workflow.
+  manifest folder + a thin caller workflow that targets the right reusable workflow.
 - The runner VM's managed identity holds **Foundry User** on the project (so `create-agent.ps1` /
   `publish-agent.ps1` call the Agents API via IMDS) and **Contributor** on the RG (so the Teams
   path can deploy the Bot Service). VM name is surfaced as the `GITHUB_ACTIONS_RUNNER_VM_NAME`
@@ -96,8 +96,8 @@ azd down
 - Best-effort by design: if Foundry was never provisioned it no-ops; if a real enumeration or
   delete error occurs it throws (with `continueOnError: false` this fails `azd down` early,
   which is correct — the teardown would fail anyway).
-- Caller RBAC: delete capability hosts (e.g. Cognitive Services Contributor) + invoke VM
-  run-commands (e.g. Virtual Machine Contributor) for Phase 0.
+- Caller RBAC: delete capability hosts (for example Cognitive Services Contributor) and repo admin
+  permissions for `gh` runner deregistration.
 
 ## Conventions & gotchas
 
