@@ -24,7 +24,8 @@ param vmSubnetName string
 
 // ---- stage 10 (platform) facts ----
 param aiAccountName string
-param projectName string
+param projectNameDev string
+param projectNameTest string
 param keyVaultName string
 
 // ---- VM admin ----
@@ -95,13 +96,22 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
 // on the private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows
 // dev VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
 // needs
-// Foundry User on the project so the on-VM script can acquire a token and call the
-// Agents API — that RBAC is provisioned here.
-module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
-  name: 'vm-foundry-role-${uniqueSuffix}'
+// Foundry User on BOTH projects (dev + test) so the on-VM script can acquire a token and call
+// the Agents API against either environment — that RBAC is provisioned here.
+module vmFoundryRoleDev './rbac/vm-foundry-role.bicep' = {
+  name: 'vm-foundry-role-dev-${uniqueSuffix}'
   params: {
     accountName: aiAccountName
-    projectName: projectName
+    projectName: projectNameDev
+    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
+  }
+}
+
+module vmFoundryRoleTest './rbac/vm-foundry-role.bicep' = {
+  name: 'vm-foundry-role-test-${uniqueSuffix}'
+  params: {
+    accountName: aiAccountName
+    projectName: projectNameTest
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }

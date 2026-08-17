@@ -42,8 +42,11 @@
 @description('Name of the existing APIM instance hosting the MCP API.')
 param apimName string
 
-@description('MCP server name = the APIM API name to attach the policy to (matches mcp/mcp.json and the key in mcp/mcp-policy.json.servers[]).')
+@description('MCP server name = the base APIM API name; the actual API is env-suffixed (see apiName).')
 param serverName string
+
+@description('Environment token (e.g. "dev" / "test"). The APIM MCP API this policy attaches to is `<serverName>-<env>` (matches apim-mcp-api.bicep).')
+param env string
 
 @description('Audience the MCP AgenticIdentityToken is minted for (the MCP app registration audience, e.g. api://<clientId>). Flowed in from the deployment; shared across servers for now.')
 param mcpAudience string
@@ -58,7 +61,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 
   resource mcpApi 'apis@2024-06-01-preview' existing = {
-    name: serverName
+    name: '${serverName}-${env}'
   }
 }
 

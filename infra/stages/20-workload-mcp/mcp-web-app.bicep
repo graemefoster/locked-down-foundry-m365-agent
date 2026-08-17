@@ -12,6 +12,9 @@ param appServiceDelegationSubnetId string
 param aspName string
 param logAnalyticsId string
 
+@description('Environment token (e.g. "dev" / "test") that suffixes this MCP web app + identity so dev and test get their own instances on the shared App Service plan.')
+param env string
+
 resource aspTest 'Microsoft.Web/serverfarms@2022-09-01' existing = {
   name: aspName
 }
@@ -25,18 +28,18 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
 // see builtin-auth.bicep + app-registration.bicep. The identity's clientId is surfaced to
 // EasyAuth via the magic OVERRIDE_USE_MI_FIC_ASSERTION_CLIENTID app setting below.
 resource mcpIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'id-mcp-${aspName}'
+  name: 'id-mcp-${env}-${aspName}'
   location: location
 }
 
 resource mcpWebApp 'Microsoft.Web/sites@2025-03-01' = {
-  name: 'mcp-${aspName}'
+  name: 'mcp-${env}-${aspName}'
   location: location
   kind: 'app,linux'
-  // azd maps the 'mcp' service (azure.yaml) to this web app via this tag, then builds
-  // agent-tools locally and zip-deploys it (no container image).
+  // azd maps the per-env MCP service (azure.yaml: mcp-dev / mcp-test) to this web app via this
+  // tag, then builds agent-tools locally and zip-deploys it (no container image).
   tags: {
-    'azd-service-name': 'mcp'
+    'azd-service-name': 'mcp-${env}'
   }
   identity: {
     type: 'UserAssigned'
