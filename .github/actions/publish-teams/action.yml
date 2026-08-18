@@ -18,6 +18,9 @@ inputs:
   agent-name:
     description: The agent name to publish (one Azure Bot Service).
     required: true
+  env:
+    description: Environment token (dev|test) — env-prefixes the shared-YARP bot messaging endpoint.
+    required: true
   resource-group:
     description: Resource group that holds the Bot Service and the VM.
     required: true
@@ -87,6 +90,7 @@ runs:
       env:
         FOUNDRY_ENDPOINT: ${{ inputs.foundry-endpoint }}
         AGENT_NAME:       ${{ inputs.agent-name }}
+        ENV_NAME:         ${{ inputs.env }}
         RESOURCE_GROUP:   ${{ inputs.resource-group }}
         YARP_FQDN:        ${{ inputs.yarp-fqdn }}
         TENANT_ID:        ${{ inputs.tenant-id }}
@@ -95,7 +99,7 @@ runs:
         LOG_ANALYTICS_ID: ${{ inputs.log-analytics-id }}
         PUBLISH_SCOPE:    ${{ inputs.publish-scope }}
       run: |
-        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAME','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
+        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAME','ENV_NAME','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
           if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
             throw "Publish requires '$v'. Set the corresponding repo variables (AZURE_RESOURCE_GROUP, TEAMS_YARP_FQDN, TEAMS_TENANT_ID, TEAMS_BOT_NAME, ...) from 'azd env get-values', or pass the matching action input."
           }
@@ -105,6 +109,7 @@ runs:
           -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
           -ResourceGroup            $env:RESOURCE_GROUP `
           -AgentName                $env:AGENT_NAME `
+          -Env                      $env:ENV_NAME `
           -YarpFqdn                 $env:YARP_FQDN `
           -TenantId                 $env:TENANT_ID `
           -BotName                  $env:BOT_NAME `

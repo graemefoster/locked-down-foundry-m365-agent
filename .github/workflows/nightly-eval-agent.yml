@@ -43,6 +43,12 @@ on:
     - cron: "0 16 * * *"
   workflow_dispatch:
     inputs:
+      environment:
+        description: "Which environment's project to evaluate (dev or test)."
+        type: choice
+        required: false
+        default: dev
+        options: [dev, test]
       agentIds:
         description: "Agent id(s) to evaluate as name:version, comma-separated. Default: latest version only (single-agent). Pass two ids to force a comparison (unsupported in Private BYO workspaces — see header)."
         required: false
@@ -67,6 +73,9 @@ jobs:
   evaluate:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
+    # Resolve per-env variables (AZURE_AI_PROJECT_ENDPOINT is now a GitHub Environment variable).
+    # Defaults to dev for the nightly schedule (which supplies no inputs).
+    environment: ${{ inputs.environment || 'dev' }}
     steps:
       - uses: actions/checkout@v5
 
