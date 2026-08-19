@@ -59,10 +59,48 @@ public sealed class CopilotSessionManager(
         if (_startTask is null)
         {
             logger.LogDebug("Starting Copilot client. ContentRootPath={ContentRootPath}", environment.ContentRootPath);
+            EnsureCopilotCliExecutable();
         }
 
         _startTask ??= _client.StartAsync(cancellationToken);
         await _startTask;
+    }
+
+    // The bundled Copilot CLI ships under runtimes/<rid>/native/copilot. The CODE deploy zip is
+    // produced with PowerShell Compress-Archive, whose ZIP format drops Unix permission bits, so
+    // Foundry extracts the binary without its execute flag and the SDK fails to launch it with
+    // "Permission denied". Restore the execute bit at startup (no-op on Windows / if not found).
+    private void EnsureCopilotCliExecutable()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string runtimesDirectory = Path.Combine(environment.ContentRootPath, "runtimes");
+        if (!Directory.Exists(runtimesDirectory))
+        {
+            return;
+        }
+
+        foreach (string cliPath in Directory.EnumerateFiles(runtimesDirectory, "copilot", SearchOption.AllDirectories))
+        {
+            try
+            {
+                UnixFileMode current = File.GetUnixFileMode(cliPath);
+                UnixFileMode executable = current
+                    | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute;
+                if (current != executable)
+                {
+                    File.SetUnixFileMode(cliPath, executable);
+                    logger.LogInformation("Restored execute permission on bundled Copilot CLI at {CliPath}.", cliPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to set execute permission on {CliPath}.", cliPath);
+            }
+        }
     }
 
     private async Task<CopilotSession?> TryResumeSessionAsync(string sessionId, CancellationToken cancellationToken)
