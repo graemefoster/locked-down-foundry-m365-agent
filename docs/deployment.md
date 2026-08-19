@@ -62,6 +62,16 @@ azd deploy      # (re)deploy just the two App Service code services
 > role-assignment propagation delay (1–5 min for the Key Vault Crypto role to reach the KV data
 > plane) — the deployment is **idempotent**, so just re-run `azd provision`.
 
+> **AI Search service-level CMK is a preview feature.** The STANDARD tier enables CMK
+> enforcement on the AI Search service and sets a **service-level customer-managed key** (so new
+> indexes/indexers/skillsets inherit it by default) via
+> `infra/stages/10-platform/encryption/search-encryption.bicep`. This uses the Search Management
+> API `2026-03-01-preview` — the first version to support `encryptionWithCmk.serviceLevelEncryptionKey`
+> — which is in **preview** (no SLA, not for production) and is **not** exposed in the Azure
+> portal, only via ARM/Bicep. The key applies to newly created objects only; pre-existing objects
+> keep their prior encryption state. If the service-level key were absent while enforcement is on,
+> every new object would fail unless it carried its own object-level key.
+
 ## Deploy agents (from the in-VNet runner)
 
 The Foundry endpoint is private, so agents are created on the **in-VNet self-hosted GitHub

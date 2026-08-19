@@ -33,9 +33,14 @@ on:
         type: string
         required: true
       build-context:
-        description: "Directory containing the Dockerfile + agent source (build context for `docker build`)."
+        description: "For build-method 'docker': directory containing the Dockerfile + source (docker build context). For 'dotnet': the project directory passed to `dotnet publish`."
         type: string
         required: true
+      build-method:
+        description: "How to produce the publish output: 'docker' (Dockerfile SDK build stage) or 'dotnet' (`dotnet publish` directly on the runner, no Dockerfile)."
+        type: string
+        required: false
+        default: "docker"
       dockerfile:
         description: "Dockerfile path RELATIVE to build-context."
         type: string
@@ -68,6 +73,7 @@ jobs:
       # no .NET SDK on the host, no build on a GitHub-hosted runner. Built ONCE for both envs.
       - name: Build publish output (docker SDK stage) + zip
         id: pack
+        if: inputs.build-method == 'docker'
         shell: pwsh
         env:
           CONTEXT:    ${{ inputs.build-context }}
@@ -95,6 +101,39 @@ jobs:
           }
           if (-not (Test-Path (Join-Path $publishDir $env:ENTRY_DLL))) {
             throw "Publish output missing the agent DLL '$($env:ENTRY_DLL)' - check the build stage output path (/app)."
+          }
+
+          # Zip with the binaries at the archive ROOT (Foundry's code_configuration expects the
+          # entry_point DLL at the top level of the zip).
+          $zipPath = Join-Path (Get-Location) 'agent.zip'
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath -Force
+          Write-Host "Created $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,2)) MiB)"
+
+      # No-Dockerfile alternative: build the publish output with `dotnet publish` DIRECTLY on the
+      # runner (requires the .NET SDK to be installed on the self-hosted runner) and zip it. Ships
+      # the exact `dotnet publish` bits without a Dockerfile.
+      - name: Build publish output (dotnet publish) + zip
+        id: pack-dotnet
+        if: inputs.build-method == 'dotnet'
+        shell: pwsh
+        env:
+          CONTEXT:   ${{ inputs.build-context }}
+          ENTRY_DLL: ${{ inputs.entry-dll }}
+        run: |
+          if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
+            throw "The .NET SDK ('dotnet') was not found on the runner. The no-Dockerfile ('dotnet') build path requires the .NET SDK installed on the self-hosted runner."
+          }
+          if (-not (Test-Path $env:CONTEXT)) { throw "Project directory not found at '$($env:CONTEXT)'." }
+
+          $publishDir = Join-Path (Get-Location) 'publish'
+          if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
+          Write-Host "Publishing '$($env:CONTEXT)' (Release) -> $publishDir"
+          dotnet publish $env:CONTEXT -c Release -o $publishDir
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed for '$($env:CONTEXT)'." }
+
+          if (-not (Test-Path (Join-Path $publishDir $env:ENTRY_DLL))) {
+            throw "Publish output missing the agent DLL '$($env:ENTRY_DLL)' - check the entry-dll input and the project's assembly name."
           }
 
           # Zip with the binaries at the archive ROOT (Foundry's code_configuration expects the

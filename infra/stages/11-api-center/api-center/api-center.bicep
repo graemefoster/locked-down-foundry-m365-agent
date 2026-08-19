@@ -111,6 +111,7 @@ resource apimSource 'Microsoft.ApiCenter/services/workspaces/apiSources@2024-06-
       resourceId: apim.id
     }
     importSpecification: importSpecification
+    targetLifecycleStage: 'testing'
   }
   dependsOn: [
     apimReaderAssignment

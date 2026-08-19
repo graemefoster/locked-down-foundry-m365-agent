@@ -1,0 +1,12 @@
+# .NET
+bin/
+obj/
+
+# Web
+node_modules/
+dist/
+
+# Local env and editor
+.env.local
+.vscode/
+.DS_Store

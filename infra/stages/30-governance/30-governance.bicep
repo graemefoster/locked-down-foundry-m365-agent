@@ -290,6 +290,7 @@ module gatewayFirewallRules './model-gateway/gateway-firewall-rules.bicep' = {
   name: 'gateway-fwall-rules-${uniqueSuffix}-deployment'
   params: {
     firewallPolicyName: firewallPolicyName
+    location: location
     agentSubnetCidr: agentSubnetCidr
     modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr

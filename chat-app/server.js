@@ -1,0 +1,321 @@
+/*
+  chat-app/server.js  — tiny zero-dependency local proxy for the Foundry agent chat UI.
+  --------------------------------------------------------------------------------------
+  Runs on your machine (you must be `az login`-ed). It:
+    * serves index.html (the React chat UI)
+    * mints + caches a data-plane token for https://ai.azure.com via
+      `az account get-access-token` (the browser never sees the token)
+    * forwards two calls to the Foundry agent OpenAI-protocol endpoints:
+        POST /api/conversation  -> .../protocols/openai/conversations   (create a conversation)
+        POST /api/message       -> .../protocols/openai/responses        (send a message, SSE)
+    * synthesises the agent's reply to speech with Azure AI Speech (deterministic
+      TTS — no LLM, so it reads the text verbatim and can never go off-script):
+        POST /api/tts -> Speech SDK synthesis, audio/mpeg out
+      Uses the Speech SDK against the resource's custom-domain endpoint
+      (https://<name>.cognitiveservices.azure.com, the private-link host). The SDK
+      takes an Entra TokenCredential directly (DefaultAzureCredential → `az login`),
+      so there is no manual auth header and no regional-endpoint discovery.
+
+    Runtime deps: microsoft-cognitiveservices-speech-sdk + @azure/identity
+    (see package.json — run `npm install` once). Node 18+ (global fetch).
+
+  Config defaults (override with env vars):
+    FOUNDRY_BASE   e.g. https://<acct>.services.ai.azure.com/api/projects/<project>
+    AGENT_NAME     e.g. support-case-agent
+    AGENT_ID       the agent identity GUID (agent_ids in the create payload)
+    CHAT_USERNAME  the M365 username sent on conversation create
+    VOICE_NAME     Azure Speech neural voice (default en-AU-NatashaNeural)
+    SPEECH_ENDPOINT  optional override for the Speech custom-domain endpoint
+                     (otherwise derived from the base URL)
+    PORT           default 5173
+  The browser can also override baseUrl/agentName/agentId/username per request (settings panel).
+*/
+"use strict";
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const { execFile } = require("child_process");
+const sdk = require("microsoft-cognitiveservices-speech-sdk");
+const { DefaultAzureCredential } = require("@azure/identity");
+
+const PORT = Number(process.env.PORT) || 5173;
+const RESOURCE = "https://ai.azure.com";
+
+const DEFAULTS = {
+  baseUrl:
+    process.env.FOUNDRY_BASE ||
+    "https://ai-knowledgebaseagent-v4k8-kmjn5t.services.ai.azure.com/api/projects/proj-knowledgebaseagent-v4k8",
+  agentName: process.env.AGENT_NAME || "support-case-agent",
+  agentId: process.env.AGENT_ID || "b40ce693-2df5-4cd6-bc2b-7bc0d03d87d1",
+  username: process.env.CHAT_USERNAME || "admin@M365CPI15529713.onmicrosoft.com",
+  appUrl: process.env.APP_URL || "http://localhost:8080",
+  // --- Voice (Azure AI Speech text-to-speech) ---
+  voiceName: process.env.VOICE_NAME || "en-AU-NatashaNeural",
+};
+
+const CONVERSATIONS_API_VERSION = "2025-11-15-preview";
+const RESPONSES_API_VERSION = "v1";
+
+// --- token cache (per Entra resource) ------------------------------------
+const tokenCaches = new Map(); // resource -> { value, exp }
+function getToken(resource = RESOURCE) {
+  return new Promise((resolve, reject) => {
+    const cached = tokenCaches.get(resource);
+    if (cached && cached.value && Date.now() < cached.exp - 60_000) {
+      return resolve(cached.value);
+    }
+    execFile(
+      "az",
+      ["account", "get-access-token", "--resource", resource, "-o", "json"],
+      { maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          return reject(
+            new Error(
+              "`az account get-access-token` failed. Are you `az login`-ed? " +
+                (stderr || err.message)
+            )
+          );
+        }
+        try {
+          const j = JSON.parse(stdout);
+          let exp = 0;
+          if (j.expires_on) exp = Number(j.expires_on) * 1000;
+          else if (j.expiresOn) exp = Date.parse(j.expiresOn);
+          if (!exp || Number.isNaN(exp)) exp = Date.now() + 5 * 60_000;
+          tokenCaches.set(resource, { value: j.accessToken, exp });
+          resolve(j.accessToken);
+        } catch (e) {
+          reject(e);
+        }
+      }
+    );
+  });
+}
+
+// --- Azure AI Speech text-to-speech --------------------------------------
+// Uses the Speech SDK against the resource's custom-domain endpoint
+// (`https://<name>.cognitiveservices.azure.com`), which is the private-link
+// friendly host. The SDK takes an Entra TokenCredential directly, so there's no
+// manual `aad#<resourceId>#<token>` composite header and no regional-endpoint
+// discovery. `DefaultAzureCredential` picks up `az login` (AzureCliCredential)
+// on a dev box and managed identity when hosted, and refreshes tokens itself.
+const speechCredential = new DefaultAzureCredential();
+
+function speechEndpointFrom(body) {
+  if (process.env.SPEECH_ENDPOINT) return process.env.SPEECH_ENDPOINT.replace(/\/+$/, "");
+  const base = (body.baseUrl || DEFAULTS.baseUrl).replace(/\/+$/, "");
+  const host = new URL(base).host; // <resource>.services.ai.azure.com
+  const speechHost = host.replace(/\.services\.ai\.azure\.com$/i, ".cognitiveservices.azure.com");
+  return `https://${speechHost}`;
+}
+
+// Synthesise `text` to speech with Azure AI Speech and return the audio buffer.
+// We wrap the text in SSML and pin leading/trailing silence to 0ms so that
+// clips join seamlessly — Azure otherwise pads every clip with a chunk of
+// silence, which compounds into a long pause at each sentence boundary.
+function xmlEscape(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function buildSsml(text, voice) {
+  const lang = /^([a-z]{2}-[A-Z]{2})/.exec(voice)?.[1] || "en-AU";
+  return (
+    `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" ` +
+    `xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="${lang}">` +
+    `<voice name="${xmlEscape(voice)}">` +
+    `<mstts:silence type="Leading-exact" value="0ms"/>` +
+    `<mstts:silence type="Tailing-exact" value="0ms"/>` +
+    xmlEscape(text) +
+    `</voice></speak>`
+  );
+}
+
+function synthesizeSpeech(body) {
+  const endpoint = speechEndpointFrom(body);
+  const voice = body.voice || DEFAULTS.voiceName;
+  const text = String(body.text || "");
+  const ssml = buildSsml(text, voice);
+
+  return new Promise((resolve, reject) => {
+    let synthesizer;
+    try {
+      const speechConfig = sdk.SpeechConfig.fromEndpoint(new URL(endpoint), speechCredential);
+      speechConfig.speechSynthesisVoiceName = voice;
+      // mp3 plays natively in the browser <audio> element.
+      speechConfig.speechSynthesisOutputFormat =
+        sdk.SpeechSynthesisOutputFormat.Audio24Khz48KBitRateMonoMp3;
+      // Pass null AudioConfig => synthesise to memory (no server-side speaker).
+      synthesizer = new sdk.SpeechSynthesizer(speechConfig, null);
+    } catch (e) {
+      return reject(e);
+    }
+    synthesizer.speakSsmlAsync(
+      ssml,
+      (result) => {
+        try {
+          if (result.reason === sdk.ResultReason.SynthesizingAudioCompleted) {
+            resolve(Buffer.from(result.audioData));
+          } else {
+            reject(new Error("Speech synthesis failed: " + (result.errorDetails || result.reason)));
+          }
+        } finally {
+          synthesizer.close();
+        }
+      },
+      (err) => {
+        try { synthesizer.close(); } catch {}
+        reject(new Error("Speech synthesis error: " + err));
+      }
+    );
+  });
+}
+
+// --- helpers -------------------------------------------------------------
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (c) => {
+      body += c;
+      if (body.length > 40 * 1024 * 1024) {
+        reject(new Error("request too large"));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function sendJson(res, status, obj) {
+  const s = JSON.stringify(obj);
+  res.writeHead(status, { "Content-Type": "application/json" });
+  res.end(s);
+}
+
+function cfgFrom(body) {
+  return {
+    baseUrl: (body.baseUrl || DEFAULTS.baseUrl).replace(/\/+$/, ""),
+    agentName: body.agentName || DEFAULTS.agentName,
+    agentId: body.agentId || DEFAULTS.agentId,
+    username: body.username || DEFAULTS.username,
+  };
+}
+
+// --- request routing -----------------------------------------------------
+const server = http.createServer(async (req, res) => {
+  try {
+    const url = new URL(req.url, `http://localhost:${PORT}`);
+
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+      const html = fs.readFileSync(path.join(__dirname, "index.html"));
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      return res.end(html);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/config") {
+      return sendJson(res, 200, DEFAULTS);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/conversation") {
+      const body = await readJson(req);
+      const cfg = cfgFrom(body);
+      const token = await getToken();
+      const target = `${cfg.baseUrl}/agents/${encodeURIComponent(
+        cfg.agentName
+      )}/endpoint/protocols/openai/conversations?api-version=${CONVERSATIONS_API_VERSION}`;
+      const payload = {
+        topic: body.topic || "New chat",
+        agent_ids: cfg.agentId,
+        username: cfg.username,
+      };
+      const upstream = await fetch(target, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const text = await upstream.text();
+      res.writeHead(upstream.status, { "Content-Type": "application/json" });
+      return res.end(text);
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/message") {
+      const body = await readJson(req);
+      const cfg = cfgFrom(body);
+      if (!body.conversation) return sendJson(res, 400, { error: "missing 'conversation'" });
+      if (!Array.isArray(body.input)) return sendJson(res, 400, { error: "missing 'input'" });
+      const token = await getToken();
+      const target = `${cfg.baseUrl}/agents/${encodeURIComponent(
+        cfg.agentName
+      )}/endpoint/protocols/openai/responses?api-version=${RESPONSES_API_VERSION}`;
+      const payload = { conversation: body.conversation, stream: true, input: body.input };
+
+      const upstream = await fetch(target, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!upstream.ok || !upstream.body) {
+        const errText = await upstream.text();
+        res.writeHead(upstream.status || 502, { "Content-Type": "application/json" });
+        return res.end(errText || JSON.stringify({ error: "upstream error" }));
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      const reader = upstream.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+      return res.end();
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/tts") {
+      const body = await readJson(req);
+      if (!body.text || !String(body.text).trim()) {
+        return sendJson(res, 400, { error: "missing 'text'" });
+      }
+      const audio = await synthesizeSpeech(body);
+      res.writeHead(200, {
+        "Content-Type": "audio/mpeg",
+        "Content-Length": audio.length,
+        "Cache-Control": "no-store",
+      });
+      return res.end(audio);
+    }
+
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("Not found");
+  } catch (e) {
+    if (!res.headersSent) sendJson(res, 500, { error: String(e && e.message ? e.message : e) });
+    else res.end();
+  }
+});
+
+server.listen(PORT, () => {
+  console.log(`\n  Agent chat proxy running:  http://localhost:${PORT}`);
+  console.log(`  Endpoint: ${DEFAULTS.baseUrl}`);
+  console.log(`  Agent   : ${DEFAULTS.agentName}`);
+  console.log(`  Token   : az account get-access-token --resource ${RESOURCE}\n`);
+});

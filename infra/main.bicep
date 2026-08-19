@@ -404,6 +404,7 @@ module stage15dev 'stages/15-foundry-project/15-foundry-project.bicep' = {
     projectDescription: projectDescription
     displayName: displayName
     projectCapHost: projectCapHostDev
+    connectionEnv: 'dev'
     deployStandardAgent: deployStandardAgent
     accountName: stage13.outputs.aiAccountName
     aiSearchName: stage10.outputs.aiSearchName
@@ -422,8 +423,9 @@ module stage15dev 'stages/15-foundry-project/15-foundry-project.bicep' = {
   }
 }
 
-// The TEST project shares the same account + BYO Cosmos/Storage/Search connections. Sequence it
-// AFTER the dev project: both write container-scope (workspace-id-scoped) RBAC on the shared
+// The TEST project shares the same account + underlying Cosmos/Storage/Search resources, but
+// owns its OWN uniquely-named BYO connections (connectionEnv 'test' vs 'dev') because Foundry
+// connection names share one namespace per account. Sequence it AFTER the dev project: both write container-scope (workspace-id-scoped) RBAC on the shared
 // stores, so serialising them avoids the known back-to-back RBAC/rule-collection PUT faults.
 module stage15test 'stages/15-foundry-project/15-foundry-project.bicep' = {
   name: 'stage15-foundry-project-test-${uniqueSuffix}'
@@ -434,6 +436,7 @@ module stage15test 'stages/15-foundry-project/15-foundry-project.bicep' = {
     projectDescription: projectDescription
     displayName: displayName
     projectCapHost: projectCapHostTest
+    connectionEnv: 'test'
     deployStandardAgent: deployStandardAgent
     accountName: stage13.outputs.aiAccountName
     aiSearchName: stage10.outputs.aiSearchName

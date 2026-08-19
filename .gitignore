@@ -19,6 +19,9 @@
 !mcp/agent-tools/package-lock.json
 !apps/sample-gateway/appsettings.json
 !apps/sample-gateway/appsettings.Development.json
+# ...and the local chat-app dev proxy's package manifests (Azure Speech SDK deps).
+!chat-app/package.json
+!chat-app/package-lock.json
 
 # Bicep param files may contain secrets or deployment-specific values.
 # Commit *.bicepparam only if all secrets have been removed.

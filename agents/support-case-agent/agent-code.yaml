@@ -14,8 +14,8 @@ definition:
   protocol_versions:
     - protocol: responses
       version: 2.0.0
-  cpu: "1"
-  memory: "2Gi"
+  cpu: "0.5"
+  memory: "1Gi"
   code_configuration:
     runtime: dotnet_10
     entry_point: ["dotnet", "support-case-agent.Agent.dll"]
