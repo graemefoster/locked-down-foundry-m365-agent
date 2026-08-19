@@ -1,41 +1,25 @@
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS base
-
-# Install Python, LibreOffice, and system dependencies for document processing
-RUN apt-get update && apt-get install -y \
-    python3 \
-    python3-pip \
-    libreoffice \
-    libreoffice-calc \
-    libreoffice-writer \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install common document processing Python libraries
-RUN pip install --no-cache-dir --break-system-packages \
-    PyPDF2 \
-    python-docx \
-    openpyxl \
-    pandas \
-    pillow \
-    python-pptx \
-    unidecode \
-    pydantic
-
-WORKDIR /app
-EXPOSE 8088
-ENV ASPNETCORE_URLS=http://+:8088
-ENV PYTHONPATH=/app/skills
+# Container image for the hosted support-case-agent-ghcpsdk (GitHub Copilot SDK, .NET 10).
+# The CODE deploy path (_deploy-code-agent.yml) builds the `build` stage with `docker build
+# --target build`, copies the publish output from /app, and ships it to Foundry as a zip
+# (code_configuration) - so no image is pushed and Foundry never pulls from the private ACR.
+# Build context is THIS folder (the .Agent project).
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
-COPY . .
+
+# Restore first (better layer caching) then publish to /app. The csproj copies copilot-instructions.md
+# and skills/** into the output, so /app already contains everything the agent needs at runtime.
+COPY *.csproj ./
 RUN dotnet restore
-RUN dotnet publish -c Release -o /app/publish
+COPY . ./
+RUN dotnet publish "support-case-agent-ghcpsdk.Agent.csproj" -c Release -o /app --no-restore
 
-FROM base AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
-COPY --from=build /app/publish .
+COPY --from=build /app ./
 
-# Copy skills packages into the container (sourced from src/agent/skills/ in the build context)
-COPY --from=build /src/skills ./skills
+# The AgentHost web server hosts the agent protocol endpoints on port 8088 (its default) and
+# Foundry reaches it over HTTP on that port. Do NOT override ASPNETCORE_URLS.
+EXPOSE 8088
 
-ENTRYPOINT ["dotnet", "support_case_agent_ghcpsdk.Agent.dll"]
+ENTRYPOINT ["dotnet", "support-case-agent-ghcpsdk.Agent.dll"]

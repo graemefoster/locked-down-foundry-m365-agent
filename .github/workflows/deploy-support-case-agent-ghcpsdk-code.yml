@@ -3,14 +3,13 @@ name: Deploy support-case-agent-ghcpsdk (code, VNet self-hosted)
 # Thin caller for the CODE (source-zip) deploy of the GitHub Copilot SDK hosted agent
 # support-case-agent-ghcpsdk (agents/support-case-agent-ghcpsdk/agent-code.yaml,
 # definition.code_configuration). All the work lives in the reusable
-# .github/workflows/_deploy-code-agent.yml, which builds the publish zip ONCE and promotes it
+# .github/workflows/_deploy-code-agent.yml, which builds the publish output ONCE (via the
+# Dockerfile's `build` SDK stage - no .NET SDK needed on the runner), zips it, and promotes it
 # build-once through dev then test (test gated by the `test` GitHub Environment).
 #
-# No Dockerfile: build-method 'dotnet' runs `dotnet publish` directly on the in-VNet runner (which
-# must have the .NET 10 SDK) and hands Foundry the publish output as a zip. Foundry runs it on its
-# managed dotnet_10 runtime, so it never pulls from the private ACR. The bundled EscalationSkill
-# implements its escalation tool as the `escalate` subcommand of this .NET agent binary, so there
-# is no Python runtime dependency.
+# Foundry runs the publish output on its managed dotnet_10 runtime, so it never pulls from the
+# private ACR. The bundled EscalationSkill implements its escalation tool as the `escalate`
+# subcommand of this .NET agent binary, so there is no Python runtime dependency.
 on:
   workflow_dispatch:
 
@@ -23,5 +22,4 @@ jobs:
     with:
       manifest-path: agents/support-case-agent-ghcpsdk/agent-code.yaml
       build-context: agents/support-case-agent-ghcpsdk/src/agent
-      build-method: dotnet
       entry-dll: support-case-agent-ghcpsdk.Agent.dll
