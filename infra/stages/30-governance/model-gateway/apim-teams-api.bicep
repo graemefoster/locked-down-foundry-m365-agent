@@ -34,8 +34,11 @@
 @description('Name of the existing APIM instance')
 param apimName string
 
-@description('API path (also used as the API name) that YARP forwards Teams traffic to, e.g. "teams"')
+@description('API path (also used as the API name) that YARP forwards Teams traffic to, e.g. "teams". Env-suffixed internally so dev/test each get their own Teams inbound API on the shared APIM instance.')
 param apiPath string = 'teams'
+
+@description('Environment token (e.g. "dev" / "test") that suffixes the Teams API name/path + backend id so the two per-project Teams inbound APIs on the shared account do not collide.')
+param env string
 
 @description('Name of the primary Foundry (Cognitive Services) account that hosts the agent')
 param foundryAccountName string
@@ -57,7 +60,9 @@ param expectedTenantId string = ''
 // Modelled as a first-class APIM `backend` entity (not a hardwired base-url) so
 // tooling can discover the APIM -> Foundry edge; the policy references it by ID.
 var backendBaseUrl = 'https://${foundryAccountName}.services.ai.azure.com'
-var backendId = 'foundry-${foundryAccountName}'
+var backendId = 'foundry-${foundryAccountName}-${env}'
+// Env-suffixed API name/path so dev + test each expose a distinct Teams inbound API.
+var envApiPath = '${apiPath}-${env}'
 // Path-routed: the {agentName} token is a URL-template parameter the bot supplies in the
 // messaging-endpoint path (/teams/{agentName}). APIM substitutes it into the rewrite target,
 // so ONE API + policy serves every published agent (no per-agent re-provision). ${projectName}
@@ -131,10 +136,10 @@ resource foundryBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = 
 
 resource teamsApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
-  name: apiPath
+  name: envApiPath
   properties: {
-    displayName: 'Teams / M365 inbound'
-    path: apiPath
+    displayName: 'Teams / M365 inbound (${env})'
+    path: envApiPath
     protocols: [
       'https'
     ]

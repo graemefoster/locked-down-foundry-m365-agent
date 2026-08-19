@@ -42,8 +42,11 @@
 param(
   [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
   [Parameter(Mandatory = $true)]  [string]$ResourceGroup,
-  # The agent name to publish (one bot, endpoint /teams/<agentName>).
+  # The agent name to publish (one bot, endpoint /<env>/teams/<agentName>).
   [Parameter(Mandatory = $true)]  [string]$AgentName,
+  # Environment token (dev|test) — env-prefixes the shared-YARP edge path so dev and test
+  # bot messaging endpoints are distinct on the one shared proxy.
+  [Parameter(Mandatory = $true)]  [string]$Env,
   # Public YARP FQDN — the Azure Bot Service messaging endpoint host.
   [Parameter(Mandatory = $true)]  [string]$YarpFqdn,
   # Entra tenant the single-tenant bot registration lives in.
@@ -134,7 +137,7 @@ foreach ($k in 'AppVersion', 'ShortDescription', 'FullDescription', 'DeveloperNa
 }
 
 $agentBotName = "$BotName-$AgentName"
-$botEndpoint  = "https://$YarpFqdn/teams/$AgentName"
+$botEndpoint  = "https://$YarpFqdn/$Env/teams/$AgentName"
 $displayName  = Get-DisplayName $AgentName
 
 # --- Step 1: get the agent identity (principal_id = the bot Microsoft App ID) ---

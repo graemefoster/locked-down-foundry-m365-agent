@@ -1,0 +1,10 @@
+@support_case_agent_ghcpsdk_Agent_HostAddress = http://localhost:5263
+
+POST {{support_case_agent_ghcpsdk_Agent_HostAddress}}/invocations
+Accept: application/json
+Content-Type: application/json
+
+{
+  "input": "Hello from the invocations host"
+}
+###

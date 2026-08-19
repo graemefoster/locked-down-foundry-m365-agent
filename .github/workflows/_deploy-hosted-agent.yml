@@ -1,29 +1,24 @@
-name: Deploy hosted Foundry agent (reusable)
+name: Deploy hosted (container-image) Foundry agent (reusable, build-once -> dev -> test)
 
 # ---------------------------------------------------------------------------
-# Reusable, SINGLE-AGENT deploy pipeline for a HOSTED (container) Foundry agent, called by the
-# thin per-agent workflows (e.g. deploy-support-case-agent.yml). One run = one agent.
+# Reusable, SINGLE-AGENT deploy pipeline for a HOSTED (container-image) Foundry agent, called by the
+# thin per-agent workflows. One run promotes ONE agent through dev then test.
 #
-# How it differs from _deploy-agent.yml (the PROMPT-agent reusable): a hosted agent ships a
-# container image, so this workflow first BUILDS that image and injects its reference into the
-# manifest before the (identical) create/publish tail:
+# Build-once / promote model:
+#   * build       - builds + pushes the container image to the PRIVATE ACR ONCE, tagged with the git
+#                   SHA (immutable). Emits the image reference as a job output. This is the single
+#                   image that moves through the environments (built once, referenced by tag).
+#   * deploy-dev  - (environment: dev) patches the SAME image reference into the manifest, injects
+#                   the DEV endpoint / MCP server_url, create-or-update + publish against the dev
+#                   project's PRIVATE endpoint.
+#   * deploy-test - (environment: test, needs: deploy-dev) references the SAME tag (no rebuild) and
+#                   deploys to the test project (gated by the `test` environment's required reviewers).
 #
-#   1. `az acr build` builds the agent's Dockerfile SERVER-SIDE in the private ACR (ACR Tasks) and
-#      pushes the image. The in-VNet runner needs NO Docker daemon — cloud-init installs azure-cli
-#      precisely so `az acr build` works (see cloud-init-linux-vm.yaml). The VM managed identity is
-#      Contributor on the RG (covers ACR build/push); the Foundry project identity already holds
-#      Container Registry Repository Reader on the ACR, so Foundry can pull the image to run it.
-#   2. The built image reference (<loginServer>/<repo>:<git-sha>) is patched into the manifest's
-#      `definition.image` (the agents/<name>/agent.yaml `{{agentAcrImage}}` placeholder).
-#   3. create-agent + publish-agent (the same composite actions the prompt path uses) create/version
-#      the agent against the PRIVATE Foundry endpoint and route 100% of traffic to the new version.
-#   4. Optional publish-teams, gated by agents/<name>/agent-network.json exposeToM365 (same as the
-#      prompt path).
+# Teams / M365 publishing is a separate pipeline (publish-teams.yml), not part of this workflow.
 #
-# Posture A gate: runs on the in-VNet self-hosted runner (the only host that can reach the PRIVATE
-# Foundry endpoint AND the private ACR). Callers are workflow_dispatch-only + repository-guarded so
-# fork code can never execute on the VM. Auth is the VM managed identity via IMDS (`az login
-# --identity` for the build; create/publish authenticate via IMDS directly).
+# Posture A gate: every job runs on the in-VNet self-hosted runner (the only host that can reach the
+# PRIVATE Foundry endpoints AND the private ACR). Callers are workflow_dispatch-only +
+# repository-guarded. Auth is the VM managed identity via IMDS.
 # ---------------------------------------------------------------------------
 on:
   workflow_call:
@@ -33,7 +28,7 @@ on:
         type: string
         required: true
       build-context:
-        description: "Directory containing the Dockerfile + agent source, passed to `az acr build`."
+        description: "Directory containing the Dockerfile + agent source."
         type: string
         required: true
       image-repository:
@@ -45,55 +40,27 @@ on:
         type: string
         required: false
         default: "Dockerfile"
-      publish-to-teams:
-        description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
 
 jobs:
-  # --- build image + create/update + publish against the PRIVATE endpoint ------
-  deploy:
+  # --- build + push the image ONCE (immutable tag) ---------------------------------------------
+  build:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
     outputs:
-      agent-name: ${{ steps.create.outputs.agent-name }}
-      endpoint: ${{ steps.cfg.outputs.endpoint }}
-      expose-to-m365: ${{ steps.netcfg.outputs.expose-to-m365 }}
+      image-ref: ${{ steps.image.outputs.image-ref }}
     steps:
       - uses: actions/checkout@v5
 
-      # The per-agent network-integration manifest (agents/<name>/agent-network.json) is the
-      # authoritative gate for Teams / M365 exposure: exposeToM365 must be true for the publish
-      # job below to run (even if the caller passed publish-to-teams=true). A missing manifest or
-      # exposeToM365=false means the agent is NOT wired into YARP's /teams/<name> edge route.
-      - name: Read network manifest (exposeToM365 gate)
-        id: netcfg
-        shell: pwsh
-        env:
-          MANIFEST: ${{ inputs.manifest-path }}
-        run: |
-          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
-          $expose = 'false'
-          if (Test-Path $net) {
-            $doc = Get-Content $net -Raw | ConvertFrom-Json
-            if ($doc.exposeToM365 -eq $true) { $expose = 'true' }
-          }
-          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host "exposeToM365 = $expose (from $net)"
-
-      # Authenticate as the VM managed identity for the control-plane `az acr build`.
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
 
       # Build the container image on the runner with the local Docker Engine and push it to the
-      # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable).
-      # We build locally rather than with `az acr build` because ACR Tasks run in a
-      # Microsoft-managed environment that can't reach a publicNetworkAccess=Disabled registry.
+      # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable). Built
+      # ONCE; both envs reference the same tag.
       - name: Build and push the agent image (buildx OCI + private ACR)
         id: image
         shell: pwsh
@@ -112,41 +79,22 @@ jobs:
           }
           $tag = "${{ github.sha }}".Substring(0, 12)
 
-          # Full pullable reference = <loginServer>/<repo>:<tag>. Query the login server rather than
-          # hard-coding '.azurecr.io' so this stays correct across clouds.
           $loginServer = az acr show --name $env:ACR_NAME --query loginServer -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($loginServer)) {
             throw "Could not resolve the ACR login server for '$($env:ACR_NAME)'."
           }
           $imageRef = "$loginServer/$($env:REPO):$tag"
 
-          # AAD `docker login` to the registry as the VM managed identity, over the private
-          # endpoint (the VM MI is Contributor on the RG, which grants ACR push).
           az acr login --name $env:ACR_NAME --output none
           if ($LASTEXITCODE -ne 0) { throw "az acr login failed for '$($env:ACR_NAME)' (is the private endpoint reachable + Docker running?)." }
 
-          # Build + push with buildx using the docker-container (BuildKit) driver and
-          # oci-mediatypes=true so the pushed manifest uses OCI layer media types
-          # (application/vnd.oci.image.layer.v1.tar+gzip). The default `docker` driver emits
-          # DOCKER schema2 layers (application/vnd.docker.image.rootfs.diff.tar.gzip), which
-          # Foundry's server-side image build (containers/image) rejects with
-          # "ImageBuildFailed (400): unsupported MIME type for compression ...". See
-          # docs/known-issues.md.
-          #
-          # NOTE: the docker-container driver runs BuildKit inside a container, so the FIRST
-          # build on a fresh runner pulls the `moby/buildkit` image. In a locked-down VNet this
-          # egress must be reachable (Docker Hub / a mirror); if it is blocked, use the code
-          # (source-zip) deploy path instead, which never touches ACR.
-          #
-          # The Ubuntu `docker.io` package does NOT ship the buildx plugin, and without it
-          # `docker build` silently falls back to the LEGACY builder, which only emits Docker
-          # schema2 layers (the exact media type Foundry rejects). cloud-init installs buildx
-          # system-wide; this guard also installs it per-user (GitHub release binary, like yq)
-          # so an already-provisioned runner works without a reprovision.
+          # buildx with the docker-container (BuildKit) driver + oci-mediatypes=true so the pushed
+          # manifest uses OCI layer media types (Foundry's server-side image build rejects DOCKER
+          # schema2 layers). See docs/known-issues.md.
           $buildxVersion = "v0.19.3"
           docker buildx version *> $null
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "buildx plugin not found — installing $buildxVersion into ~/.docker/cli-plugins."
+            Write-Host "buildx plugin not found - installing $buildxVersion into ~/.docker/cli-plugins."
             $pluginDir = Join-Path $env:HOME ".docker/cli-plugins"
             New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
             $pluginPath = Join-Path $pluginDir "docker-buildx"
@@ -184,11 +132,19 @@ jobs:
           "image-ref=$imageRef" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Pushed image: $imageRef"
 
-      # yq is installed by cloud-init on the in-VNet Linux runner.
-      - name: Convert agent.yaml -> agent.json + patch the image reference (yq)
+  # --- deploy to dev -----------------------------------------------------------
+  deploy-dev:
+    needs: build
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: dev
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Convert agent.yaml -> agent.json + patch image + inject dev values (yq)
         env:
-          MANIFEST:  ${{ inputs.manifest-path }}
-          IMAGE_REF: ${{ steps.image.outputs.image-ref }}
+          MANIFEST:     ${{ inputs.manifest-path }}
+          IMAGE_REF:    ${{ needs.build.outputs.image-ref }}
           VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
           VAR_MCP_URL:  ${{ vars.MCP_SERVER_URL }}
         run: |
@@ -206,38 +162,29 @@ jobs:
             echo "::error::Manifest '$MANIFEST' has no 'name'."
             exit 1
           fi
-
-          # Patch the built image reference into definition.image (replaces the {{agentAcrImage}}
-          # placeholder, or any prior value). This is the whole point of the hosted path.
           IMAGE_REF="$IMAGE_REF" yq -i -o=json '.definition.image = strenv(IMAGE_REF)' agent.json
           echo "Patched definition.image = $IMAGE_REF"
-
-          # Convenience: if the manifest still carries the {{FOUNDRY_PROJECT_ENDPOINT}} placeholder
-          # (the Agents Framework container template uses it), substitute the per-env endpoint so
-          # the manifest can be promoted unchanged. Shape-agnostic raw-token replace.
           if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' agent.json; then
             if [ -z "$VAR_ENDPOINT" ]; then
-              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
+              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
               exit 1
             fi
             tmp="$(mktemp)"
             sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" agent.json > "$tmp" && mv "$tmp" agent.json
-            echo "Injected FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
+            echo "Injected dev FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
           fi
-
-          # Inject the per-environment MCP server_url into any MCP tool (same as the prompt path).
           if grep -q '"type": "mcp"' agent.json; then
             if [ -z "$VAR_MCP_URL" ]; then
-              echo "::error::The manifest has an MCP tool but repo variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL)."
+              echo "::error::The manifest has an MCP tool but the dev environment variable MCP_SERVER_URL is not set."
               exit 1
             fi
             MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
-            echo "Injected MCP server_url: $VAR_MCP_URL"
+            echo "Injected dev MCP server_url: $VAR_MCP_URL"
           fi
           echo "Prepared agent '$name':"
           cat agent.json
 
-      - name: Resolve Foundry endpoint
+      - name: Resolve dev Foundry endpoint
         id: cfg
         shell: pwsh
         env:
@@ -245,43 +192,98 @@ jobs:
         run: |
           $endpoint = $env:VAR_ENDPOINT
           if ([string]::IsNullOrWhiteSpace($endpoint)) {
-            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
+            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
           }
           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Create or update agent
+      - name: Create or update agent (dev)
         id: create
         uses: ./.github/actions/create-agent
         with:
           agent-json: agent.json
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
 
-      - name: Publish agent version
+      - name: Publish agent version (dev)
         uses: ./.github/actions/publish-agent
         with:
           agent-name: ${{ steps.create.outputs.agent-name }}
           agent-version: ${{ steps.create.outputs.agent-version }}
           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
 
-  # --- publish to Teams / M365 -------------------------------------------------
-  # Same gate as the prompt path: exposeToM365 (agents/<name>/agent-network.json) AND
-  # publish-to-teams must both be true.
-  publish-teams:
-    needs: deploy
-    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams && needs.deploy.outputs.expose-to-m365 == 'true' }}
+  # --- promote to test (same image tag, gated by the `test` environment's required reviewers) ---
+  deploy-test:
+    needs: [build, deploy-dev]
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
+    environment: test
     steps:
       - uses: actions/checkout@v5
 
-      - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
-        uses: ./.github/actions/publish-teams
+      - name: Convert agent.yaml -> agent.json + patch image + inject test values (yq)
+        env:
+          MANIFEST:     ${{ inputs.manifest-path }}
+          IMAGE_REF:    ${{ needs.build.outputs.image-ref }}
+          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+          VAR_MCP_URL:  ${{ vars.MCP_SERVER_URL }}
+        run: |
+          if ! command -v yq >/dev/null 2>&1; then
+            echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
+            exit 1
+          fi
+          if [ ! -f "$MANIFEST" ]; then
+            echo "::error::Manifest not found: $MANIFEST"
+            exit 1
+          fi
+          yq -o=json '.' "$MANIFEST" > agent.json
+          name="$(yq -r '.name' "$MANIFEST")"
+          if [ -z "$name" ] || [ "$name" = "null" ]; then
+            echo "::error::Manifest '$MANIFEST' has no 'name'."
+            exit 1
+          fi
+          IMAGE_REF="$IMAGE_REF" yq -i -o=json '.definition.image = strenv(IMAGE_REF)' agent.json
+          echo "Patched definition.image = $IMAGE_REF"
+          if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' agent.json; then
+            if [ -z "$VAR_ENDPOINT" ]; then
+              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the test environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
+              exit 1
+            fi
+            tmp="$(mktemp)"
+            sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" agent.json > "$tmp" && mv "$tmp" agent.json
+            echo "Injected test FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
+          fi
+          if grep -q '"type": "mcp"' agent.json; then
+            if [ -z "$VAR_MCP_URL" ]; then
+              echo "::error::The manifest has an MCP tool but the test environment variable MCP_SERVER_URL is not set."
+              exit 1
+            fi
+            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
+            echo "Injected test MCP server_url: $VAR_MCP_URL"
+          fi
+          echo "Prepared agent '$name':"
+          cat agent.json
+
+      - name: Resolve test Foundry endpoint
+        id: cfg
+        shell: pwsh
+        env:
+          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+        run: |
+          $endpoint = $env:VAR_ENDPOINT
+          if ([string]::IsNullOrWhiteSpace($endpoint)) {
+            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
+          }
+          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Create or update agent (test)
+        id: create
+        uses: ./.github/actions/create-agent
         with:
-          foundry-endpoint: ${{ needs.deploy.outputs.endpoint }}
-          agent-name:       ${{ needs.deploy.outputs.agent-name }}
-          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
-          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
-          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
-          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
-          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
-          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
-          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
+          agent-json: agent.json
+          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+
+      - name: Publish agent version (test)
+        uses: ./.github/actions/publish-agent
+        with:
+          agent-name: ${{ steps.create.outputs.agent-name }}
+          agent-version: ${{ steps.create.outputs.agent-version }}
+          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}

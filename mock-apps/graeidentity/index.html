@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GraeIdentity</title>
+    <script>
+      (() => {
+        const param = new URLSearchParams(window.location.search).get("scoutTheme");
+        const theme =
+          param || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+    <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --cp-bg: #f7f4ef;
+        --cp-bg-elevated: #fcfbf8;
+        --cp-surface: #ffffff;
+        --cp-surface-soft: #f5f5f5;
+        --cp-border: #dedede;
+        --cp-border-strong: #919191;
+        --cp-text: #242424;
+        --cp-text-muted: #5c5c5c;
+        --cp-text-soft: #6f6f6f;
+        --cp-accent: #b11f4b;
+        --cp-accent-hover: #9a1a41;
+        --cp-accent-soft: rgba(177, 31, 75, 0.08);
+        --cp-accent-fg: #ffffff;
+        --cp-success: #16a34a;
+        --cp-danger: #dc2626;
+        --cp-warning: #f59e0b;
+        --cp-link: #0078d4;
+        --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+        --cp-overlay: rgba(255, 255, 255, 0.8);
+        --cp-panel: rgba(255, 255, 255, 0.86);
+        --cp-panel-strong: rgba(255, 255, 255, 0.96);
+        --cp-sheen: rgba(255, 255, 255, 0.55);
+        --cp-highlight: rgba(177, 31, 75, 0.12);
+      }
+      html[data-theme="dark"] {
+        color-scheme: dark;
+        --cp-bg: #3d3b3a;
+        --cp-bg-elevated: #343231;
+        --cp-surface: #292929;
+        --cp-surface-soft: #2e2e2e;
+        --cp-border: #474747;
+        --cp-border-strong: #5f5f5f;
+        --cp-text: #dedede;
+        --cp-text-muted: #919191;
+        --cp-text-soft: #b0b0b0;
+        --cp-accent: #fd8ea1;
+        --cp-accent-hover: #fb7b91;
+        --cp-accent-soft: rgba(253, 142, 161, 0.14);
+        --cp-accent-fg: #1a1a1a;
+        --cp-success: #4ade80;
+        --cp-danger: #f87171;
+        --cp-warning: #fbbf24;
+        --cp-link: #4da6ff;
+        --cp-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+        --cp-overlay: rgba(41, 41, 41, 0.88);
+        --cp-panel: rgba(41, 41, 41, 0.72);
+        --cp-panel-strong: rgba(41, 41, 41, 0.96);
+        --cp-sheen: rgba(255, 255, 255, 0.04);
+        --cp-highlight: rgba(253, 142, 161, 0.12);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        background: var(--cp-bg);
+        color: var(--cp-text);
+        font-family: "Segoe UI", Aptos, Calibri, -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .card-shadow {
+        box-shadow: 0 0 2px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.14);
+      }
+
+      button { font-family: inherit; cursor: pointer; }
+
+      .btn {
+        border-radius: 0.625rem;
+        border: 1px solid var(--cp-border);
+        background: var(--cp-surface);
+        color: var(--cp-text);
+        padding: 0.55rem 1rem;
+        font-size: 0.9rem;
+        font-weight: 600;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .btn:hover { background: var(--cp-surface-soft); }
+      .btn-primary {
+        background: var(--cp-accent);
+        color: var(--cp-accent-fg);
+        border-color: var(--cp-accent);
+      }
+      .btn-primary:hover { background: var(--cp-accent-hover); border-color: var(--cp-accent-hover); }
+      .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+      .link {
+        color: var(--cp-link);
+        background: none;
+        border: none;
+        padding: 0;
+        font-size: inherit;
+        cursor: pointer;
+      }
+      .link:hover { text-decoration: underline; }
+
+      input, textarea {
+        font-family: inherit;
+        width: 100%;
+        border-radius: 0.625rem;
+        border: 1px solid var(--cp-border);
+        background: var(--cp-surface);
+        color: var(--cp-text);
+        padding: 0.6rem 0.75rem;
+        font-size: 0.92rem;
+      }
+      textarea { resize: vertical; min-height: 90px; }
+      input:focus, textarea:focus { outline: 2px solid var(--cp-accent); outline-offset: 0; border-color: var(--cp-accent); }
+
+      .badge {
+        display: inline-block;
+        padding: 0.18rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-presets="react">
+      const { useState, useEffect, useRef } = React;
+
+      const APP_NAME = "GraemeCRM";
+      const ROLE_NAME = "AccessGraemeCRM";
+      const DEFAULT_ACCOUNT = "alex.wong@contoso.com";
+      const STORAGE_KEY = "graeidentity-state-v1";
+
+      // ---- persisted state -------------------------------------------------
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) return JSON.parse(raw);
+        } catch (e) {}
+        return {
+          signedIn: false,
+          account: DEFAULT_ACCOUNT,
+          requestStatus: "none", // none | pending | approved | denied
+          justification: "",
+          decisionReason: "",
+        };
+      }
+
+      // ---- small presentational helpers -----------------------------------
+      function StatusBadge({ status }) {
+        const map = {
+          none: { label: "No access", color: "var(--cp-text-muted)", bg: "var(--cp-surface-soft)" },
+          pending: { label: "Pending approval", color: "var(--cp-warning)", bg: "rgba(245,158,11,0.12)" },
+          approved: { label: "Approved", color: "var(--cp-success)", bg: "rgba(22,163,74,0.12)" },
+          active: { label: "Active", color: "var(--cp-success)", bg: "rgba(22,163,74,0.12)" },
+          denied: { label: "Denied", color: "var(--cp-danger)", bg: "rgba(220,38,38,0.12)" },
+        };
+        const s = map[status] || map.none;
+        return (
+          <span className="badge" style={{ color: s.color, background: s.bg }}>
+            {s.label}
+          </span>
+        );
+      }
+
+      function Card({ children, style }) {
+        return (
+          <div
+            className="card-shadow"
+            style={{
+              background: "var(--cp-surface)",
+              border: "1px solid var(--cp-border)",
+              borderRadius: 16,
+              padding: "1.25rem 1.5rem",
+              ...style,
+            }}
+          >
+            {children}
+          </div>
+        );
+      }
+
+      function SectionTitle({ children }) {
+        return (
+          <h3 style={{ margin: "0 0 0.75rem", fontSize: "1.02rem", fontWeight: 700 }}>{children}</h3>
+        );
+      }
+
+      // ---- sign in ---------------------------------------------------------
+      function SignIn({ account, onSignIn }) {
+        const [value, setValue] = useState(account || DEFAULT_ACCOUNT);
+        return (
+          <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "2rem" }}>
+            <Card style={{ width: 400, maxWidth: "100%" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+                <Logo />
+                <div style={{ fontSize: "1.35rem", fontWeight: 800 }}>GraeIdentity</div>
+              </div>
+              <p style={{ color: "var(--cp-text-muted)", marginTop: 0, fontSize: "0.9rem" }}>
+                Sign in to manage your application access.
+              </p>
+              <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                Account
+              </label>
+              <input
+                type="email"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="you@contoso.com"
+              />
+              <button
+                className="btn btn-primary"
+                style={{ width: "100%", marginTop: 16 }}
+                onClick={() => onSignIn(value.trim() || DEFAULT_ACCOUNT)}
+              >
+                Sign in
+              </button>
+            </Card>
+          </div>
+        );
+      }
+
+      function Logo() {
+        return (
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 9,
+              background: "var(--cp-accent)",
+              color: "var(--cp-accent-fg)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 800,
+              fontSize: "1rem",
+            }}
+          >
+            Gi
+          </div>
+        );
+      }
+
+      // ---- header ----------------------------------------------------------
+      function Header({ account, onNav, onSignOut }) {
+        const [menuOpen, setMenuOpen] = useState(false);
+        const ref = useRef(null);
+        useEffect(() => {
+          function handle(e) {
+            if (ref.current && !ref.current.contains(e.target)) setMenuOpen(false);
+          }
+          document.addEventListener("mousedown", handle);
+          return () => document.removeEventListener("mousedown", handle);
+        }, []);
+        return (
+          <header
+            style={{
+              background: "var(--cp-bg-elevated)",
+              borderBottom: "1px solid var(--cp-border)",
+              padding: "0.7rem 1.5rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+            }}
+          >
+            <button
+              onClick={() => onNav("access")}
+              style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", color: "inherit" }}
+            >
+              <Logo />
+              <span style={{ fontSize: "1.15rem", fontWeight: 800 }}>GraeIdentity</span>
+            </button>
+
+            <div ref={ref} style={{ position: "relative" }}>
+              <button
+                onClick={() => setMenuOpen((o) => !o)}
+                className="btn"
+                style={{ display: "flex", alignItems: "center", gap: 8 }}
+              >
+                <Avatar account={account} />
+                <span style={{ fontSize: "0.85rem" }}>{account}</span>
+                <span style={{ color: "var(--cp-text-muted)" }}>▾</span>
+              </button>
+              {menuOpen && (
+                <div
+                  className="card-shadow"
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "calc(100% + 8px)",
+                    width: 260,
+                    background: "var(--cp-surface)",
+                    border: "1px solid var(--cp-border)",
+                    borderRadius: 12,
+                    padding: "0.9rem 1rem",
+                    zIndex: 20,
+                  }}
+                >
+                  <div style={{ fontSize: "0.72rem", color: "var(--cp-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Signed in as
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "8px 0 12px" }}>
+                    <Avatar account={account} large />
+                    <div>
+                      <div style={{ fontWeight: 700 }}>{account.split("@")[0]}</div>
+                      <div style={{ fontSize: "0.8rem", color: "var(--cp-text-muted)" }}>{account}</div>
+                    </div>
+                  </div>
+                  <button className="btn" style={{ width: "100%" }} onClick={onSignOut}>
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          </header>
+        );
+      }
+
+      function Avatar({ account, large }) {
+        const initials = (account || "?")
+          .split("@")[0]
+          .split(/[.\-_]/)
+          .map((p) => p[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+        const size = large ? 40 : 26;
+        return (
+          <div
+            style={{
+              width: size,
+              height: size,
+              borderRadius: "50%",
+              background: "var(--cp-accent-soft)",
+              color: "var(--cp-accent)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 800,
+              fontSize: large ? "0.95rem" : "0.72rem",
+            }}
+          >
+            {initials}
+          </div>
+        );
+      }
+
+      // ---- left nav --------------------------------------------------------
+      function SideNav({ view, onNav }) {
+        const items = [
+          { key: "access", label: "My Access" },
+          { key: "requests", label: "My Requests" },
+        ];
+        const active = view === "app" || view === "request" ? "access" : view;
+        return (
+          <nav style={{ width: 210, padding: "1.25rem 0.75rem", borderRight: "1px solid var(--cp-border)", minHeight: "calc(100vh - 60px)" }}>
+            {items.map((it) => (
+              <button
+                key={it.key}
+                onClick={() => onNav(it.key)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "0.55rem 0.85rem",
+                  marginBottom: 4,
+                  borderRadius: 8,
+                  border: "none",
+                  fontSize: "0.9rem",
+                  fontWeight: active === it.key ? 700 : 500,
+                  background: active === it.key ? "var(--cp-accent-soft)" : "transparent",
+                  color: active === it.key ? "var(--cp-accent)" : "var(--cp-text)",
+                }}
+              >
+                {it.label}
+              </button>
+            ))}
+          </nav>
+        );
+      }
+
+      // ---- Application Access list ----------------------------------------
+      function ApplicationAccess({ state, onOpenApp }) {
+        const assignedActive = state.requestStatus === "approved";
+        const crmStatus = assignedActive ? "active" : state.requestStatus === "pending" ? "pending" : "none";
+        const apps = [
+          { name: APP_NAME, desc: "Customer relationship management", status: crmStatus, openable: true },
+          { name: "GraeMail", desc: "Corporate email", status: "active", openable: false },
+          { name: "GraeWiki", desc: "Internal knowledge base", status: "active", openable: false },
+        ];
+        return (
+          <div>
+            <h2 style={{ marginTop: 0 }}>Application Access</h2>
+            <p style={{ color: "var(--cp-text-muted)", marginTop: 0 }}>
+              Applications and your current access status.
+            </p>
+            <Card style={{ padding: 0, overflow: "hidden" }}>
+              {apps.map((app, i) => (
+                <div
+                  key={app.name}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "1rem 1.25rem",
+                    borderTop: i === 0 ? "none" : "1px solid var(--cp-border)",
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{app.name}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--cp-text-muted)" }}>{app.desc}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                    <StatusBadge status={app.status} />
+                    {app.openable ? (
+                      <button className="link" onClick={() => onOpenApp()}>
+                        Open ›
+                      </button>
+                    ) : (
+                      <span style={{ width: 48 }} />
+                    )}
+                  </div>
+                </div>
+              ))}
+            </Card>
+          </div>
+        );
+      }
+
+      // ---- GraemeCRM application detail page --------------------------------
+      function AppDetail({ state, account, onBack, onRequest, onLaunch }) {
+        const isActive = state.requestStatus === "approved";
+        const isPending = state.requestStatus === "pending";
+        const isDenied = state.requestStatus === "denied";
+        return (
+          <div>
+            <button className="link" onClick={onBack} style={{ marginBottom: 12 }}>
+              ‹ Application Access
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+              <h2 style={{ margin: 0 }}>{APP_NAME}</h2>
+            </div>
+            <p style={{ color: "var(--cp-text-muted)", marginTop: 0 }}>
+              Manage your roles for {APP_NAME}.
+            </p>
+
+            <Card style={{ marginBottom: 16 }}>
+              <SectionTitle>Assigned Roles</SectionTitle>
+              {isActive ? (
+                <RoleRow name={ROLE_NAME} desc="Grants access to start and use GraemeCRM." status="active" />
+              ) : (
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.9rem" }}>
+                  No roles are currently assigned for {APP_NAME}.
+                </div>
+              )}
+            </Card>
+
+            <Card style={{ marginBottom: 16 }}>
+              <SectionTitle>Available Roles</SectionTitle>
+              {isActive ? (
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.9rem" }}>
+                  No further roles are available to request.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 16,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{ROLE_NAME}</div>
+                    <div style={{ fontSize: "0.82rem", color: "var(--cp-text-muted)" }}>
+                      Required to start and use GraemeCRM. Request-based; needs approval.
+                    </div>
+                    {isPending && (
+                      <div style={{ marginTop: 8 }}>
+                        <StatusBadge status="pending" />
+                      </div>
+                    )}
+                    {isDenied && (
+                      <div style={{ marginTop: 8 }}>
+                        <StatusBadge status="denied" />
+                        {state.decisionReason ? (
+                          <span style={{ marginLeft: 10, fontSize: "0.82rem", color: "var(--cp-text-muted)" }}>
+                            Reason: {state.decisionReason}
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="btn btn-primary"
+                    disabled={isPending}
+                    onClick={onRequest}
+                  >
+                    {isPending ? "Request pending" : "Request access"}
+                  </button>
+                </div>
+              )}
+            </Card>
+
+            <Card>
+              <SectionTitle>Launch application</SectionTitle>
+              <p style={{ marginTop: 0, fontSize: "0.9rem", color: "var(--cp-text-muted)" }}>
+                Simulates starting GraemeCRM with the signed-in account.
+              </p>
+              <button className="btn" onClick={() => onLaunch(isActive)}>
+                Open GraemeCRM
+              </button>
+            </Card>
+          </div>
+        );
+      }
+
+      function RoleRow({ name, desc, status }) {
+        return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>{name}</div>
+              <div style={{ fontSize: "0.82rem", color: "var(--cp-text-muted)" }}>{desc}</div>
+            </div>
+            <StatusBadge status={status} />
+          </div>
+        );
+      }
+
+      // ---- Request access form --------------------------------------------
+      function RequestForm({ state, account, onCancel, onSubmit }) {
+        const [justification, setJustification] = useState(state.justification || "");
+        const canSubmit = justification.trim().length > 0;
+        return (
+          <div style={{ maxWidth: 640 }}>
+            <button className="link" onClick={onCancel} style={{ marginBottom: 12 }}>
+              ‹ Back to {APP_NAME}
+            </button>
+            <h2 style={{ marginTop: 0 }}>Request access</h2>
+
+            <Card>
+              <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", rowGap: 12, marginBottom: 18 }}>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Application</div>
+                <div style={{ fontWeight: 700 }}>{APP_NAME}</div>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Role</div>
+                <div style={{ fontWeight: 700 }}>{ROLE_NAME}</div>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Requesting account</div>
+                <div style={{ fontWeight: 700 }}>{account}</div>
+              </div>
+
+              <label style={{ fontSize: "0.88rem", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                Business justification <span style={{ color: "var(--cp-danger)" }}>*</span>
+              </label>
+              <textarea
+                value={justification}
+                onChange={(e) => setJustification(e.target.value)}
+                placeholder="Briefly explain your work-related reason for needing GraemeCRM."
+              />
+
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                <button className="btn btn-primary" disabled={!canSubmit} onClick={() => onSubmit(justification.trim())}>
+                  Submit request
+                </button>
+                <button className="btn" onClick={onCancel}>
+                  Cancel
+                </button>
+              </div>
+            </Card>
+          </div>
+        );
+      }
+
+      // ---- My Requests page (Request status) ------------------------------
+      function MyRequests({ state, onOpenApp }) {
+        if (state.requestStatus === "none") {
+          return (
+            <div>
+              <h2 style={{ marginTop: 0 }}>My Requests</h2>
+              <Card>
+                <div style={{ color: "var(--cp-text-muted)" }}>You have no access requests.</div>
+              </Card>
+            </div>
+          );
+        }
+        return (
+          <div>
+            <h2 style={{ marginTop: 0 }}>My Requests</h2>
+            <Card>
+              <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", rowGap: 12 }}>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Application</div>
+                <div style={{ fontWeight: 700 }}>{APP_NAME}</div>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Role</div>
+                <div style={{ fontWeight: 700 }}>{ROLE_NAME}</div>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Business justification</div>
+                <div>{state.justification || "—"}</div>
+                <div style={{ color: "var(--cp-text-muted)", fontSize: "0.88rem" }}>Request status</div>
+                <div>
+                  <StatusBadge status={state.requestStatus} />
+                  {state.requestStatus === "denied" && state.decisionReason ? (
+                    <span style={{ marginLeft: 10, fontSize: "0.85rem", color: "var(--cp-text-muted)" }}>
+                      {state.decisionReason}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <button className="link" onClick={onOpenApp}>Open {APP_NAME} ›</button>
+              </div>
+            </Card>
+          </div>
+        );
+      }
+
+      // ---- Launch modal ----------------------------------------------------
+      function LaunchModal({ ok, account, onClose }) {
+        return (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,0.45)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 50,
+            }}
+            onMouseDown={onClose}
+          >
+            <div onMouseDown={(e) => e.stopPropagation()}>
+              <Card style={{ width: 440, maxWidth: "90vw" }}>
+                <div style={{ fontSize: "1.2rem", fontWeight: 800, marginBottom: 6 }}>{APP_NAME}</div>
+                {ok ? (
+                  <div>
+                    <div style={{ marginBottom: 8 }}>
+                      <span className="badge" style={{ color: "var(--cp-success)", background: "rgba(22,163,74,0.12)" }}>
+                        Started successfully
+                      </span>
+                    </div>
+                    <p style={{ color: "var(--cp-text-muted)", marginTop: 0 }}>
+                      GraemeCRM started for <strong>{account}</strong>. You have the {ROLE_NAME} role.
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ marginBottom: 8 }}>
+                      <span className="badge" style={{ color: "var(--cp-danger)", background: "rgba(220,38,38,0.12)" }}>
+                        Cannot start
+                      </span>
+                    </div>
+                    <p style={{ color: "var(--cp-text)", marginTop: 0 }}>
+                      <strong>Error GRAE-403:</strong> You do not have permission to start GraemeCRM.
+                      The required role <strong>{ROLE_NAME}</strong> is not assigned to <strong>{account}</strong>.
+                    </p>
+                  </div>
+                )}
+                <div style={{ textAlign: "right", marginTop: 8 }}>
+                  <button className="btn" onClick={onClose}>Close</button>
+                </div>
+              </Card>
+            </div>
+          </div>
+        );
+      }
+
+      // ---- Approver simulation (demo aid) ---------------------------------
+      function ApproverPanel({ state, onApprove, onDeny, onReset }) {
+        const [open, setOpen] = useState(false);
+        return (
+          <div style={{ position: "fixed", right: 16, bottom: 16, zIndex: 40 }}>
+            {open && (
+              <Card style={{ width: 280, marginBottom: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: "0.9rem", marginBottom: 4 }}>Approver simulation</div>
+                <p style={{ fontSize: "0.78rem", color: "var(--cp-text-muted)", marginTop: 0 }}>
+                  Demo-only. Acts as the approver so you can capture each screenshot. Not part of the real UI.
+                </p>
+                <div style={{ fontSize: "0.8rem", marginBottom: 10 }}>
+                  Current request status: <StatusBadge status={state.requestStatus} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <button
+                    className="btn btn-primary"
+                    disabled={state.requestStatus !== "pending"}
+                    onClick={onApprove}
+                  >
+                    Approve request
+                  </button>
+                  <button
+                    className="btn"
+                    disabled={state.requestStatus !== "pending"}
+                    onClick={onDeny}
+                  >
+                    Deny request
+                  </button>
+                  <button className="btn" onClick={onReset}>Reset demo</button>
+                </div>
+              </Card>
+            )}
+            <button
+              className="btn"
+              onClick={() => setOpen((o) => !o)}
+              style={{ float: "right" }}
+              title="Demo approver controls"
+            >
+              {open ? "Hide" : "⚙ Demo controls"}
+            </button>
+          </div>
+        );
+      }
+
+      // ---- root app --------------------------------------------------------
+      function App() {
+        const [state, setState] = useState(loadState);
+        const [view, setView] = useState("access"); // access | app | request | requests
+        const [launch, setLaunch] = useState(null); // { ok }
+
+        useEffect(() => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }, [state]);
+
+        function update(patch) {
+          setState((s) => ({ ...s, ...patch }));
+        }
+
+        if (!state.signedIn) {
+          return (
+            <SignIn
+              account={state.account}
+              onSignIn={(account) => update({ signedIn: true, account })}
+            />
+          );
+        }
+
+        return (
+          <div style={{ minHeight: "100vh" }}>
+            <Header
+              account={state.account}
+              onNav={(v) => setView(v)}
+              onSignOut={() => update({ signedIn: false })}
+            />
+            <div style={{ display: "flex", alignItems: "flex-start" }}>
+              <SideNav view={view} onNav={(v) => setView(v)} />
+              <main style={{ flex: 1, padding: "1.75rem 2rem", maxWidth: 900 }}>
+                {view === "access" && (
+                  <ApplicationAccess state={state} onOpenApp={() => setView("app")} />
+                )}
+                {view === "app" && (
+                  <AppDetail
+                    state={state}
+                    account={state.account}
+                    onBack={() => setView("access")}
+                    onRequest={() => setView("request")}
+                    onLaunch={(ok) => setLaunch({ ok })}
+                  />
+                )}
+                {view === "request" && (
+                  <RequestForm
+                    state={state}
+                    account={state.account}
+                    onCancel={() => setView("app")}
+                    onSubmit={(justification) => {
+                      update({ requestStatus: "pending", justification, decisionReason: "" });
+                      setView("app");
+                    }}
+                  />
+                )}
+                {view === "requests" && (
+                  <MyRequests state={state} onOpenApp={() => setView("app")} />
+                )}
+              </main>
+            </div>
+
+            {launch && (
+              <LaunchModal ok={launch.ok} account={state.account} onClose={() => setLaunch(null)} />
+            )}
+
+            <ApproverPanel
+              state={state}
+              onApprove={() => update({ requestStatus: "approved", decisionReason: "" })}
+              onDeny={() =>
+                update({
+                  requestStatus: "denied",
+                  decisionReason: "Approver could not confirm the business need.",
+                })
+              }
+              onReset={() =>
+                update({ requestStatus: "none", justification: "", decisionReason: "" })
+              }
+            />
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>

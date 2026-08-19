@@ -1,0 +1,5 @@
+# deploy.sh build artifacts + fetched token (never commit)
+publish/
+agent.zip
+metadata.json
+.env

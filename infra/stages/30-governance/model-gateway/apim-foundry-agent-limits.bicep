@@ -45,6 +45,9 @@ param apiName string = 'foundry-agents'
 @description('Name of the primary Foundry (Cognitive Services) account — used to derive the backend entity ID (must match the api module).')
 param foundryAccountName string
 
+@description('Environment token (e.g. "dev" / "test") that suffixes the backend id so it matches the env-suffixed backend created by apim-foundry-agents-api.bicep.')
+param env string
+
 @description('Name of the primary Foundry project — used to build the backend rewrite path (/api/projects/<project>/agents/...).')
 param projectName string
 
@@ -71,7 +74,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   }
 }
 
-var backendId = 'foundry-agents-${foundryAccountName}'
+var backendId = 'foundry-agents-${foundryAccountName}-${env}'
 var metricNs = agentLimits.?metricNamespace ?? metricNamespace
 var agents = agentLimits.?agents ?? []
 

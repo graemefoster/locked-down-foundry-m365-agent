@@ -1,0 +1,143 @@
+name: Publish agent to Teams / M365 (reusable, dev -> test)
+
+# ---------------------------------------------------------------------------
+# Reusable, SINGLE-AGENT Teams / M365 publish pipeline. This is now its OWN pipeline (extracted from
+# the deploy reusables) - run it AFTER an agent has been promoted (deploy-*-agent.yml) to the target
+# environment(s). One run publishes ONE agent to Teams in dev then test.
+#
+# Per-environment gating:
+#   * publish-dev  - (environment: dev)  publishes to Teams for dev IFF the agent's
+#                    agents/<name>/agent-network.json environments.dev.exposeToM365 is true.
+#   * publish-test - (environment: test, needs: publish-dev) same for test, gated behind the `test`
+#                    environment's required reviewers.
+#
+# Each env registers its OWN Azure Bot (set TEAMS_BOT_NAME / TEAMS_NAME_PREFIX as GitHub ENVIRONMENT
+# variables in `dev` and `test` to get isolated bots; a shared repo-level value would collide across
+# envs). The agent must ALREADY exist in that env's project - the per-env AZURE_AI_PROJECT_ENDPOINT
+# variable selects it.
+#
+# Posture A gate: runs on the in-VNet self-hosted runner (reaches the PRIVATE Foundry endpoints via
+# the VM managed identity / IMDS). workflow_dispatch-only + repository-guarded callers.
+# ---------------------------------------------------------------------------
+on:
+  workflow_call:
+    inputs:
+      manifest-path:
+        description: "Path to the agent manifest (agents/<name>/agent.yaml or agent-code.yaml). agent-network.json is read from the same folder."
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-dev:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: dev
+    steps:
+      - uses: actions/checkout@v5
+
+      # Resolve the agent name (manifest .name) and the DEV exposeToM365 gate
+      # (agent-network.json environments.dev.exposeToM365).
+      - name: Resolve agent name + dev exposeToM365 gate
+        id: gate
+        shell: pwsh
+        env:
+          MANIFEST: ${{ inputs.manifest-path }}
+        run: |
+          if (-not (Test-Path $env:MANIFEST)) { throw "Manifest not found: $($env:MANIFEST)" }
+          $name = (& yq -r '.name' $env:MANIFEST)
+          if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'null') { throw "Manifest '$($env:MANIFEST)' has no 'name'." }
+          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+          $expose = 'false'
+          if (Test-Path $net) {
+            $doc = Get-Content $net -Raw | ConvertFrom-Json
+            if ($doc.environments.dev.exposeToM365 -eq $true) { $expose = 'true' }
+          }
+          "agent-name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "agent '$name' dev exposeToM365 = $expose (from $net)"
+
+      - name: Resolve dev Foundry endpoint
+        id: cfg
+        if: steps.gate.outputs.expose-to-m365 == 'true'
+        shell: pwsh
+        env:
+          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+        run: |
+          $endpoint = $env:VAR_ENDPOINT
+          if ([string]::IsNullOrWhiteSpace($endpoint)) {
+            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
+          }
+          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish agent to Teams / M365 (dev)
+        if: steps.gate.outputs.expose-to-m365 == 'true'
+        uses: ./.github/actions/publish-teams
+        with:
+          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+          agent-name:       ${{ steps.gate.outputs.agent-name }}
+          env:              dev
+          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
+
+  publish-test:
+    needs: publish-dev
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    environment: test
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Resolve agent name + test exposeToM365 gate
+        id: gate
+        shell: pwsh
+        env:
+          MANIFEST: ${{ inputs.manifest-path }}
+        run: |
+          if (-not (Test-Path $env:MANIFEST)) { throw "Manifest not found: $($env:MANIFEST)" }
+          $name = (& yq -r '.name' $env:MANIFEST)
+          if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'null') { throw "Manifest '$($env:MANIFEST)' has no 'name'." }
+          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+          $expose = 'false'
+          if (Test-Path $net) {
+            $doc = Get-Content $net -Raw | ConvertFrom-Json
+            if ($doc.environments.test.exposeToM365 -eq $true) { $expose = 'true' }
+          }
+          "agent-name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "agent '$name' test exposeToM365 = $expose (from $net)"
+
+      - name: Resolve test Foundry endpoint
+        id: cfg
+        if: steps.gate.outputs.expose-to-m365 == 'true'
+        shell: pwsh
+        env:
+          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+        run: |
+          $endpoint = $env:VAR_ENDPOINT
+          if ([string]::IsNullOrWhiteSpace($endpoint)) {
+            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
+          }
+          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish agent to Teams / M365 (test)
+        if: steps.gate.outputs.expose-to-m365 == 'true'
+        uses: ./.github/actions/publish-teams
+        with:
+          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+          agent-name:       ${{ steps.gate.outputs.agent-name }}
+          env:              test
+          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}

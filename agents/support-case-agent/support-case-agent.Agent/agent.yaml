@@ -25,7 +25,3 @@ code_configuration:
     runtime: dotnet_10
     entry_point: support_case_agent.Agent.dll
     dependency_resolution: bundled
-
-
-
-

@@ -1,0 +1,13 @@
+{
+  "name": "foundry-chat-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local dev proxy + chat UI for the Foundry hosted agent (with Azure AI Speech TTS voice).",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": { "start": "node server.js" },
+  "dependencies": {
+    "@azure/identity": "^4.5.0",
+    "microsoft-cognitiveservices-speech-sdk": "^1.42.0"
+  }
+}

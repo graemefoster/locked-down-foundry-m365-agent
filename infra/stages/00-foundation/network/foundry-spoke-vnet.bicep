@@ -57,8 +57,10 @@ var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
 var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
 var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
-// Keep Bastion and VM NSG rules paired: Bastion may egress only to vmSubnet,
-// and vmSubnet accepts RDP/SSH only from this dedicated AzureBastionSubnet CIDR.
+// vmSubnet accepts RDP/SSH only from this dedicated AzureBastionSubnet CIDR.
+// The AzureBastionSubnet's OWN NSG, however, must use the required Bastion
+// service-tag rules (VirtualNetwork / Internet:80 / AzureCloud); scoping those
+// to subnet CIDRs fails Azure Bastion's NetworkSecurityGroupNotCompliant check.
 var bastionSubnet = cidrSubnet(vnetAddressPrefix, 24, 4)
 
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
@@ -235,9 +237,9 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           access: 'Allow'
           direction: 'Inbound'
           protocol: '*'
-          sourceAddressPrefix: bastionSubnet
+          sourceAddressPrefix: 'VirtualNetwork'
           sourcePortRange: '*'
-          destinationAddressPrefix: bastionSubnet
+          destinationAddressPrefix: 'VirtualNetwork'
           destinationPortRanges: [
             '8080'
             '5701'
@@ -265,10 +267,10 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           priority: 100
           access: 'Allow'
           direction: 'Outbound'
-          protocol: 'Tcp'
-          sourceAddressPrefix: bastionSubnet
+          protocol: '*'
+          sourceAddressPrefix: '*'
           sourcePortRange: '*'
-          destinationAddressPrefix: vmSubnet
+          destinationAddressPrefix: 'VirtualNetwork'
           destinationPortRanges: [
             '22'
             '3389'
@@ -283,7 +285,7 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           access: 'Allow'
           direction: 'Outbound'
           protocol: 'Tcp'
-          sourceAddressPrefix: bastionSubnet
+          sourceAddressPrefix: '*'
           sourcePortRange: '*'
           destinationAddressPrefix: 'AzureCloud'
           destinationPortRange: '443'
@@ -291,17 +293,17 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
         }
       }
       {
-        name: 'Allow-Internet-Outbound'
+        name: 'Allow-Http-Internet-Outbound'
         properties: {
           priority: 120
           access: 'Allow'
           direction: 'Outbound'
-          protocol: 'Tcp'
-          sourceAddressPrefix: bastionSubnet
+          protocol: '*'
+          sourceAddressPrefix: '*'
           sourcePortRange: '*'
           destinationAddressPrefix: 'Internet'
-          destinationPortRange: '443'
-          description: 'Azure Bastion certificate revocation checks.'
+          destinationPortRange: '80'
+          description: 'Azure Bastion session validation and certificate checks.'
         }
       }
       {
@@ -311,9 +313,9 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           access: 'Allow'
           direction: 'Outbound'
           protocol: '*'
-          sourceAddressPrefix: bastionSubnet
+          sourceAddressPrefix: 'VirtualNetwork'
           sourcePortRange: '*'
-          destinationAddressPrefix: bastionSubnet
+          destinationAddressPrefix: 'VirtualNetwork'
           destinationPortRanges: [
             '8080'
             '5701'

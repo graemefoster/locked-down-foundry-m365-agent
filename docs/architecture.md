@@ -26,7 +26,7 @@ identity (no stored credentials), and TLS 1.2+.
 |---|---|---|
 | Azure AI Foundry | `Microsoft.CognitiveServices/accounts` (AIServices, S0) | Custom subdomain, network ACLs deny-by-default, system-assigned MI, CMK. |
 | Model deployment | `.../accounts/deployments` | Name/format/version/SKU/capacity from `model*` params. |
-| Azure AI Search | `Microsoft.Search/searchServices` (standard) | AAD auth (401 challenge), system MI, semantic search off. |
+| Azure AI Search | `Microsoft.Search/searchServices` (standard) | AAD auth (401 challenge), system MI, semantic search off, CMK (service-level key, enforced). |
 | Storage | `Microsoft.Storage/storageAccounts` (StorageV2, ZRS/GRS) | Blob + Queue, block public blob access, SharedKey disabled (force AAD). |
 | Cosmos DB | `Microsoft.DocumentDB/databaseAccounts` (SQL API) | Session consistency, local auth disabled, single region. |
 | Key Vault, ACR | | Private, used for CMK + container builds. |
@@ -62,7 +62,7 @@ infra/
 ├── main.parameters.json        # azd parameter file (${VAR=default} env bindings)
 └── stages/                     # Sequential stages (deps: 00 ← 10 ← 13 ← 15 ← 20 ← 30 ← 40)
     ├── 00-foundation/          # Networking (hub + spokes, DNS resolver, firewall, flow logs) + observability
-    ├── 10-platform/            # Key Vault, ACR, Cosmos/Storage/Search, App Service + YARP, APIM/provider Foundry, PEs, Storage CMK
+    ├── 10-platform/            # Key Vault, ACR, Cosmos/Storage/Search, App Service + YARP, APIM/provider Foundry, PEs, Storage + Search CMK
     ├── 13-foundry/             # Foundry account + model + PE, KV/App Insights RBAC, account CMK
     ├── 15-foundry-project/     # AI project + BYO connections, project RBAC, Agents capability host
     ├── 20-workload-mcp/        # MCP web app, app registration, builtin-auth, APIM MCP servers

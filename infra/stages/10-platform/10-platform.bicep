@@ -10,6 +10,7 @@ foundation. Composes the slices —
                                  provider RBAC
   rbac/keyvault-storage-search-role-assignment.bicep → Storage/Search KV Crypto grants
   encryption/storage-encryption.bicep → Storage CMK re-PUT
+  encryption/search-encryption.bicep  → AI Search service-level CMK re-PUT
 
 The Foundry account lives in stage 13 (13-foundry) and the AI project in stage 15
 (15-foundry-project), each carrying its own private endpoint, RBAC and CMK encryption.
@@ -129,10 +130,11 @@ module modelGateway 'model-gateway-platform.bicep' = {
   ]
 }
 
-// ==================== Storage CMK (STANDARD tier only) ====================
+// ==================== Data-store CMK (STANDARD tier only) ====================
 // Grant the Storage + Search service identities the Key Vault Crypto Service Encryption
-// User role, THEN re-PUT the Storage account with customer-managed-key encryption (the KV
-// data-plane role must be effective first). The account CMK re-PUT lives in stage 13.
+// User role, THEN re-PUT the Storage account and AI Search service with customer-managed-key
+// encryption (the KV data-plane role must be effective first). The account CMK re-PUT lives in
+// stage 13.
 module keyVaultStorageSearchRoleAssignments 'rbac/keyvault-storage-search-role-assignment.bicep' = if (deployStandardAgent) {
   name: 'keyvault-storage-search-rbac-${uniqueSuffix}-deployment'
   params: {
@@ -150,6 +152,24 @@ module storageEncryption 'encryption/storage-encryption.bicep' = if (deployStand
     keyVaultUri: dataResources.outputs.keyVaultUri
     keyVaultKeyName: dataResources.outputs.keyName
     skuName: storageSkuName
+  }
+  dependsOn: [
+    keyVaultStorageSearchRoleAssignments
+  ]
+}
+
+// Set the AI Search service-level customer-managed key (re-PUT). The base service enables CMK
+// enforcement but leaves the key unset; without a service-level key every new object would need
+// its own object-level key. Runs after the KV Crypto role grant so the search identity can
+// wrap/unwrap with the vault key.
+module searchEncryption 'encryption/search-encryption.bicep' = if (deployStandardAgent) {
+  name: 'search-encryption-${uniqueSuffix}-deployment'
+  params: {
+    aiSearchName: dataResources.outputs.aiSearchName
+    location: location
+    keyVaultUri: dataResources.outputs.keyVaultUri
+    keyVaultKeyName: dataResources.outputs.keyName
+    keyVaultKeyVersion: last(split(dataResources.outputs.keyUriWithVersion, '/'))
   }
   dependsOn: [
     keyVaultStorageSearchRoleAssignments

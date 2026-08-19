@@ -1,0 +1,1574 @@
+diff --git a/.github/actionlint.yaml b/.github/actionlint.yaml
+new file mode 100644
+index 0000000..8734c7a
+--- /dev/null
++++ b/.github/actionlint.yaml
+@@ -0,0 +1,7 @@
++# actionlint configuration.
++# Register the labels of the in-VNet self-hosted runner so actionlint does not flag
++# `runs-on: [self-hosted, vnet, foundry-private]` as unknown labels.
++self-hosted-runner:
++  labels:
++    - vnet
++    - foundry-private
+diff --git a/.github/actions/publish-teams/action.yml b/.github/actions/publish-teams/action.yml
+index 6af2c99..e87e289 100644
+--- a/.github/actions/publish-teams/action.yml
++++ b/.github/actions/publish-teams/action.yml
+@@ -18,6 +18,9 @@ inputs:
+   agent-name:
+     description: The agent name to publish (one Azure Bot Service).
+     required: true
++  env:
++    description: Environment token (dev|test) — env-prefixes the shared-YARP bot messaging endpoint.
++    required: true
+   resource-group:
+     description: Resource group that holds the Bot Service and the VM.
+     required: true
+@@ -87,6 +90,7 @@ runs:
+       env:
+         FOUNDRY_ENDPOINT: ${{ inputs.foundry-endpoint }}
+         AGENT_NAME:       ${{ inputs.agent-name }}
++        ENV_NAME:         ${{ inputs.env }}
+         RESOURCE_GROUP:   ${{ inputs.resource-group }}
+         YARP_FQDN:        ${{ inputs.yarp-fqdn }}
+         TENANT_ID:        ${{ inputs.tenant-id }}
+@@ -95,7 +99,7 @@ runs:
+         LOG_ANALYTICS_ID: ${{ inputs.log-analytics-id }}
+         PUBLISH_SCOPE:    ${{ inputs.publish-scope }}
+       run: |
+-        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAME','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
++        foreach ($v in 'FOUNDRY_ENDPOINT','AGENT_NAME','ENV_NAME','RESOURCE_GROUP','YARP_FQDN','TENANT_ID','BOT_NAME') {
+           if ([string]::IsNullOrWhiteSpace((Get-Item "env:$v" -ErrorAction SilentlyContinue).Value)) {
+             throw "Publish requires '$v'. Set the corresponding repo variables (AZURE_RESOURCE_GROUP, TEAMS_YARP_FQDN, TEAMS_TENANT_ID, TEAMS_BOT_NAME, ...) from 'azd env get-values', or pass the matching action input."
+           }
+@@ -105,6 +109,7 @@ runs:
+           -FoundryProjectEndpoint   $env:FOUNDRY_ENDPOINT `
+           -ResourceGroup            $env:RESOURCE_GROUP `
+           -AgentName                $env:AGENT_NAME `
++          -Env                      $env:ENV_NAME `
+           -YarpFqdn                 $env:YARP_FQDN `
+           -TenantId                 $env:TENANT_ID `
+           -BotName                  $env:BOT_NAME `
+diff --git a/.github/workflows/_deploy-agent.yml b/.github/workflows/_deploy-agent.yml
+index 20bdfed..c37c901 100644
+--- a/.github/workflows/_deploy-agent.yml
++++ b/.github/workflows/_deploy-agent.yml
+@@ -1,23 +1,26 @@
+-name: Deploy Foundry agent (reusable)
++name: Deploy Foundry agent (reusable, build-once -> dev -> test)
+ 
+ # ---------------------------------------------------------------------------
+ # Reusable, SINGLE-AGENT deploy pipeline for a Foundry prompt agent, called by the thin
+-# per-agent workflows (deploy-teams-agent.yml). One run = one agent.
++# per-agent workflows (deploy-teams-agent.yml). One run promotes ONE agent through dev then test.
+ #
+-# Posture A gate: this runs on the in-VNet self-hosted runner (the only host that can reach the
+-# PRIVATE Foundry endpoint). The callers are workflow_dispatch-only + repository-guarded so fork
+-# code can never execute on the VM. No `az login` is needed to deploy: create-agent /
+-# publish-agent authenticate as the VM managed identity via IMDS.
++# Build-once / promote model:
++#   * build       - normalizes agents/<name>/agent.yaml -> agent.json ONCE (NO env-specific values
++#                   injected) and uploads it as a workflow artifact. This single artifact moves
++#                   through the environments.
++#   * deploy-dev  - (environment: dev) downloads the artifact, injects the DEV MCP server_url /
++#                   endpoint from the `dev` GitHub Environment variables, create-or-update + publish
++#                   against the dev project's PRIVATE endpoint.
++#   * deploy-test - (environment: test, needs: deploy-dev) same, against the test project. The
++#                   `test` GitHub Environment carries required reviewers, so promotion is a gate.
+ #
+-# Why REST and not `azd` / the `azure.ai.agent` tooling: our agents are PROMPT agents
+-# (agent.yaml `kind: prompt` — a model + instructions, optionally an MCP tool), so there is
+-# nothing to build/package/upload; and `azd deploy` uploads from the azd HOST, which in this
+-# locked-down setup cannot reach the private endpoint. Calling the Agents REST API from the
+-# in-VNet runner is the correct and simplest path.
++# Teams / M365 publishing is NO LONGER part of this pipeline - it is a separate, independently
++# gated pipeline (publish-teams.yml) run after an agent is promoted.
+ #
+-# Environment-agnostic MCP: if the manifest has an MCP tool, its per-environment MCP server_url is
+-# INJECTED into the definition below from the MCP_SERVER_URL repo variable. The model is set
+-# directly in agents/<name>/agent.yaml.
++# Posture A gate: every job runs on the in-VNet self-hosted runner (the only host that can reach
++# the PRIVATE Foundry endpoints). Callers are workflow_dispatch-only + repository-guarded so fork
++# code can never execute on the VM. create-agent / publish-agent authenticate as the VM managed
++# identity via IMDS (no `az login` needed).
+ # ---------------------------------------------------------------------------
+ on:
+   workflow_call:
+@@ -26,53 +29,23 @@ on:
+         description: "Path to the agent manifest (agents/<name>/agent.yaml)."
+         type: string
+         required: true
+-      publish-to-teams:
+-        description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
+-        type: boolean
+-        required: false
+-        default: false
+ 
+ permissions:
+   contents: read
+ 
+ jobs:
+-  # --- create/update + publish against the PRIVATE endpoint --------------------
+-  deploy:
++  # --- build ONCE: normalize the manifest (no env injection) + upload it as an artifact ---------
++  build:
+     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
+-    outputs:
+-      agent-name: ${{ steps.create.outputs.agent-name }}
+-      endpoint: ${{ steps.cfg.outputs.endpoint }}
+-      expose-to-m365: ${{ steps.netcfg.outputs.expose-to-m365 }}
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      # The per-agent network-integration manifest (agents/<name>/agent-network.json) is the
+-      # authoritative gate for Teams / M365 exposure: exposeToM365 must be true for the publish
+-      # job below to run (even if the caller passed publish-to-teams=true). A missing manifest or
+-      # exposeToM365=false means the agent is NOT wired into YARP's /teams/<name> edge route, so
+-      # publishing it to Teams would create a bot whose messaging endpoint 404s at the proxy.
+-      - name: Read network manifest (exposeToM365 gate)
+-        id: netcfg
+-        shell: pwsh
+-        env:
+-          MANIFEST: ${{ inputs.manifest-path }}
+-        run: |
+-          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+-          $expose = 'false'
+-          if (Test-Path $net) {
+-            $doc = Get-Content $net -Raw | ConvertFrom-Json
+-            if ($doc.exposeToM365 -eq $true) { $expose = 'true' }
+-          }
+-          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+-          Write-Host "exposeToM365 = $expose (from $net)"
+-
+       # yq is installed by cloud-init on the in-VNet Linux runner
+       # (infra/stages/40-runner/resources/cloud-init-linux-vm.yaml).
+-      - name: Convert agent.yaml -> agent.json + inject MCP URL (yq)
++      - name: Convert agent.yaml -> agent.json (no env injection)
+         env:
+           MANIFEST: ${{ inputs.manifest-path }}
+-          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
+         run: |
+           if ! command -v yq >/dev/null 2>&1; then
+             echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
+@@ -88,20 +61,45 @@ jobs:
+             echo "::error::Manifest '$MANIFEST' has no 'name'."
+             exit 1
+           fi
+-          # Inject the per-environment MCP server_url into every MCP tool (schema requires one of
+-          # server_url/connector_id/tunnel_id). Only applies to manifests that declare an MCP tool.
++          echo "Normalized manifest for agent '$name' (per-env values are injected at deploy time):"
++          cat agent.json
++
++      - name: Upload agent manifest artifact
++        uses: actions/upload-artifact@v4
++        with:
++          name: agent-manifest
++          path: agent.json
++          retention-days: 7
++          if-no-files-found: error
++
++  # --- deploy to dev -----------------------------------------------------------
++  deploy-dev:
++    needs: build
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
++    runs-on: [self-hosted, vnet, foundry-private]
++    environment: dev
++    steps:
++      - uses: actions/checkout@v5
++
++      - name: Download agent manifest artifact
++        uses: actions/download-artifact@v4
++        with:
++          name: agent-manifest
++
++      - name: Inject the dev MCP server_url (yq)
++        env:
++          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
++        run: |
+           if grep -q '"type": "mcp"' agent.json; then
+             if [ -z "$VAR_MCP_URL" ]; then
+-              echo "::error::The manifest has an MCP tool but repo variable MCP_SERVER_URL is not set (from 'azd env get-value MCP_GATEWAY_URL' — the postprovision hook syncs it)."
++              echo "::error::The manifest has an MCP tool but the dev environment variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL_DEV)."
+               exit 1
+             fi
+             MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
+-            echo "Injected MCP server_url: $VAR_MCP_URL"
++            echo "Injected dev MCP server_url: $VAR_MCP_URL"
+           fi
+-          echo "Prepared agent '$name':"
+-          cat agent.json
+ 
+-      - name: Resolve Foundry endpoint
++      - name: Resolve dev Foundry endpoint
+         id: cfg
+         shell: pwsh
+         env:
+@@ -109,46 +107,73 @@ jobs:
+         run: |
+           $endpoint = $env:VAR_ENDPOINT
+           if ([string]::IsNullOrWhiteSpace($endpoint)) {
+-            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
++            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
+           }
+           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+ 
+-      - name: Create or update agent
++      - name: Create or update agent (dev)
+         id: create
+         uses: ./.github/actions/create-agent
+         with:
+           agent-json: agent.json
+           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+ 
+-      - name: Publish agent version
++      - name: Publish agent version (dev)
+         uses: ./.github/actions/publish-agent
+         with:
+           agent-name: ${{ steps.create.outputs.agent-name }}
+           agent-version: ${{ steps.create.outputs.agent-version }}
+           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+ 
+-  # --- publish to Teams / M365 -------------------------------------------------
+-  # Gated by the manifest's exposeToM365 flag (agents/<name>/agent-network.json — the authoritative
+-  # exposure gate; the deploy-agent-network workflow wires the matching YARP edge route) and the
+-  # publish-to-teams input. Creates the Azure Bot Service and submits the app to the Microsoft 365
+-  # catalog for the single agent this run just deployed. Only runs when publish-to-teams is true
+-  # AND exposeToM365 is true.
+-  publish-teams:
+-    needs: deploy
+-    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams && needs.deploy.outputs.expose-to-m365 == 'true' }}
++  # --- promote to test (gated by the `test` environment's required reviewers) ------------------
++  deploy-test:
++    needs: deploy-dev
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
++    environment: test
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
+-        uses: ./.github/actions/publish-teams
++      - name: Download agent manifest artifact
++        uses: actions/download-artifact@v4
+         with:
+-          foundry-endpoint: ${{ needs.deploy.outputs.endpoint }}
+-          agent-name:       ${{ needs.deploy.outputs.agent-name }}
+-          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+-          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+-          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+-          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+-          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+-          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+-          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
++          name: agent-manifest
++
++      - name: Inject the test MCP server_url (yq)
++        env:
++          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
++        run: |
++          if grep -q '"type": "mcp"' agent.json; then
++            if [ -z "$VAR_MCP_URL" ]; then
++              echo "::error::The manifest has an MCP tool but the test environment variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL_TEST)."
++              exit 1
++            fi
++            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
++            echo "Injected test MCP server_url: $VAR_MCP_URL"
++          fi
++
++      - name: Resolve test Foundry endpoint
++        id: cfg
++        shell: pwsh
++        env:
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++        run: |
++          $endpoint = $env:VAR_ENDPOINT
++          if ([string]::IsNullOrWhiteSpace($endpoint)) {
++            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
++          }
++          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Create or update agent (test)
++        id: create
++        uses: ./.github/actions/create-agent
++        with:
++          agent-json: agent.json
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
++
++      - name: Publish agent version (test)
++        uses: ./.github/actions/publish-agent
++        with:
++          agent-name: ${{ steps.create.outputs.agent-name }}
++          agent-version: ${{ steps.create.outputs.agent-version }}
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+diff --git a/.github/workflows/_deploy-code-agent.yml b/.github/workflows/_deploy-code-agent.yml
+index 2032ff2..6472e78 100644
+--- a/.github/workflows/_deploy-code-agent.yml
++++ b/.github/workflows/_deploy-code-agent.yml
+@@ -1,32 +1,29 @@
+-name: Deploy code (source-zip) Foundry agent (reusable)
++name: Deploy code (source-zip) Foundry agent (reusable, build-once -> dev -> test)
+ 
+ # ---------------------------------------------------------------------------
+-# Reusable, SINGLE-AGENT deploy pipeline for a HOSTED Foundry agent shipped as CODE (a source zip),
+-# called by the thin per-agent workflows (e.g. deploy-support-case-agent-code.yml). One run = one
+-# agent. This is the alternative to _deploy-hosted-agent.yml (the container-image path).
++# Reusable, SINGLE-AGENT deploy pipeline for a Foundry agent shipped as CODE (a source zip),
++# called by the thin per-agent workflows (deploy-support-case-agent-code.yml). One run promotes
++# ONE agent through dev then test. Alternative to _deploy-hosted-agent.yml (the container-image path).
+ #
+-# Why a separate path: the image path needs Foundry's provisioning sandbox to PULL the image from
+-# an ACR. In the locked-down environment that pull is unreliable, so this path hands Foundry the
+-# `dotnet publish` OUTPUT directly (multipart zip, code_configuration) and lets Foundry build/run
+-# it on its managed dotnet runtime - no ACR pull at all.
++# Why this path: the image path needs Foundry's provisioning sandbox to PULL the image from an ACR;
++# in the locked-down environment that pull is unreliable, so this path hands Foundry the
++# `dotnet publish` OUTPUT directly (multipart zip, code_configuration).
+ #
+-# EVERYTHING runs on the in-VNet self-hosted runner (enterprise posture: source is never built on a
+-# GitHub-hosted runner, and only the in-VNet runner can reach the PRIVATE Foundry endpoint). The
+-# publish output is produced by building the Dockerfile's SDK `build` stage with the local Docker
+-# engine (the same NuGet restore the image path already performs) and copying /app out of it - so
+-# no .NET SDK has to be installed on the VM.
++# Build-once / promote model:
++#   * build       - builds the publish output ONCE (`docker build --target build` -> copy /app ->
++#                   agent.zip) and uploads agent.zip as a workflow artifact. This is the single
++#                   binary artifact that moves through the environments (built once).
++#   * deploy-dev  - (environment: dev) downloads agent.zip, builds per-env metadata (injecting the
++#                   DEV MCP server_url / endpoint), multipart-uploads to the dev project's PRIVATE
++#                   endpoint, publishes.
++#   * deploy-test - (environment: test, needs: deploy-dev) same, against the test project (gated by
++#                   the `test` environment's required reviewers).
+ #
+-#   1. `docker build --target build` compiles + `dotnet publish`es the .Agent project inside the
+-#      mcr.microsoft.com/dotnet/sdk:10.0 stage; the publish output is copied out to ./publish.
+-#   2. ./publish is zipped with the binaries at the archive ROOT (agent.zip).
+-#   3. deploy-code-agent.ps1 multipart-uploads { metadata (agent.yaml), code (agent.zip) } to the
+-#      PRIVATE Foundry endpoint (create-or-version) via the VM managed identity (IMDS).
+-#   4. publish-agent routes 100% of traffic to the new version.
+-#   5. Optional publish-teams, gated by agents/<name>/agent-network.json exposeToM365 (same as the
+-#      other paths).
++# Teams / M365 publishing is a separate pipeline (publish-teams.yml), not part of this workflow.
+ #
+-# Posture A gate: runs on the in-VNet self-hosted runner. Callers are workflow_dispatch-only +
+-# repository-guarded so fork code can never execute on the VM.
++# Posture A gate: every job runs on the in-VNet self-hosted runner (source is never built on a
++# GitHub-hosted runner, and only the in-VNet runner can reach the PRIVATE Foundry endpoints).
++# Callers are workflow_dispatch-only + repository-guarded so fork code can never execute on the VM.
+ # ---------------------------------------------------------------------------
+ on:
+   workflow_call:
+@@ -54,47 +51,21 @@ on:
+         type: string
+         required: false
+         default: "support-case-agent.Agent.dll"
+-      publish-to-teams:
+-        description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
+-        type: boolean
+-        required: false
+-        default: false
+ 
+ permissions:
+   contents: read
+ 
+ jobs:
+-  # --- build publish zip + create/version + publish, all on the in-VNet runner -----------------
+-  deploy:
++  # --- build the publish zip ONCE + upload it as an artifact -----------------------------------
++  build:
+     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
+-    outputs:
+-      agent-name: ${{ steps.deploy.outputs.agent-name }}
+-      endpoint: ${{ steps.cfg.outputs.endpoint }}
+-      expose-to-m365: ${{ steps.netcfg.outputs.expose-to-m365 }}
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      # exposeToM365 gate (agents/<name>/agent-network.json) - identical to the other deploy paths.
+-      - name: Read network manifest (exposeToM365 gate)
+-        id: netcfg
+-        shell: pwsh
+-        env:
+-          MANIFEST: ${{ inputs.manifest-path }}
+-        run: |
+-          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+-          $expose = 'false'
+-          if (Test-Path $net) {
+-            $doc = Get-Content $net -Raw | ConvertFrom-Json
+-            if ($doc.exposeToM365 -eq $true) { $expose = 'true' }
+-          }
+-          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+-          Write-Host "exposeToM365 = $expose (from $net)"
+-
+       # Build the publish output inside the Dockerfile's SDK `build` stage and copy /app out of it.
+-      # Reusing the Dockerfile means the code deploy ships the EXACT bits the image path builds
+-      # (framework-dependent publish), and NuGet restore uses the same proven egress as the image
+-      # build - no .NET SDK on the host, no build on a GitHub-hosted runner.
++      # Reusing the Dockerfile means the code deploy ships the EXACT bits the image path builds -
++      # no .NET SDK on the host, no build on a GitHub-hosted runner. Built ONCE for both envs.
+       - name: Build publish output (docker SDK stage) + zip
+         id: pack
+         shell: pwsh
+@@ -132,13 +103,32 @@ jobs:
+           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+           Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath -Force
+           Write-Host "Created $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,2)) MiB)"
+-          "zip-path=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Upload agent code artifact
++        uses: actions/upload-artifact@v4
++        with:
++          name: agent-code
++          path: agent.zip
++          retention-days: 7
++          if-no-files-found: error
++
++  # --- deploy to dev -----------------------------------------------------------
++  deploy-dev:
++    needs: build
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
++    runs-on: [self-hosted, vnet, foundry-private]
++    environment: dev
++    steps:
++      - uses: actions/checkout@v5
++
++      - name: Download agent code artifact
++        uses: actions/download-artifact@v4
++        with:
++          name: agent-code
+ 
+       # Build the multipart metadata part { name, description, definition } from the manifest and
+-      # inject the per-environment MCP server_url / Foundry endpoint if the manifest references them
+-      # (parity with the other deploy paths; no-op for the current tool-less manifest).
++      # inject the DEV MCP server_url / Foundry endpoint if the manifest references them.
+       - name: Prepare metadata (yq)
+-        id: meta
+         env:
+           MANIFEST:     ${{ inputs.manifest-path }}
+           VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+@@ -157,30 +147,27 @@ jobs:
+             echo "::error::Manifest '$MANIFEST' has no 'name'."
+             exit 1
+           fi
+-          # Strictly the { name, description, definition } object (the Foundry code-deploy metadata
+-          # part); drop manifest-only fields such as `object`.
+           yq -o=json '{"name": .name, "description": .description, "definition": .definition}' "$MANIFEST" > metadata.json
+-
+           if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' metadata.json; then
+             if [ -z "$VAR_ENDPOINT" ]; then
+-              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but repo variable AZURE_AI_PROJECT_ENDPOINT is not set."
++              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
+               exit 1
+             fi
+             tmp="$(mktemp)"; sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" metadata.json > "$tmp" && mv "$tmp" metadata.json
+-            echo "Injected FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
++            echo "Injected dev FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
+           fi
+           if grep -q '"type": "mcp"' metadata.json; then
+             if [ -z "$VAR_MCP_URL" ]; then
+-              echo "::error::The manifest has an MCP tool but repo variable MCP_SERVER_URL is not set."
++              echo "::error::The manifest has an MCP tool but the dev environment variable MCP_SERVER_URL is not set."
+               exit 1
+             fi
+             MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' metadata.json
+-            echo "Injected MCP server_url: $VAR_MCP_URL"
++            echo "Injected dev MCP server_url: $VAR_MCP_URL"
+           fi
+           echo "Prepared metadata for agent '$name':"
+           cat metadata.json
+ 
+-      - name: Resolve Foundry endpoint
++      - name: Resolve dev Foundry endpoint
+         id: cfg
+         shell: pwsh
+         env:
+@@ -188,43 +175,103 @@ jobs:
+         run: |
+           $endpoint = $env:VAR_ENDPOINT
+           if ([string]::IsNullOrWhiteSpace($endpoint)) {
+-            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
++            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
+           }
+           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+ 
+-      - name: Upload code + create/version agent
++      - name: Upload code + create/version agent (dev)
+         id: deploy
+         shell: pwsh
+         run: |
+           ./scripts/deploy-code-agent.ps1 `
+             -MetadataJsonPath       "metadata.json" `
+-            -ZipPath                "${{ steps.pack.outputs.zip-path }}" `
++            -ZipPath                "agent.zip" `
+             -FoundryProjectEndpoint "${{ steps.cfg.outputs.endpoint }}"
+ 
+-      - name: Publish agent version
++      - name: Publish agent version (dev)
+         uses: ./.github/actions/publish-agent
+         with:
+           agent-name: ${{ steps.deploy.outputs.agent-name }}
+           agent-version: ${{ steps.deploy.outputs.agent-version }}
+           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+ 
+-  # --- publish to Teams / M365 (same gate as the other paths) ----------------------------------
+-  publish-teams:
+-    needs: deploy
+-    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams && needs.deploy.outputs.expose-to-m365 == 'true' }}
++  # --- promote to test (gated by the `test` environment's required reviewers) ------------------
++  deploy-test:
++    needs: deploy-dev
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
++    environment: test
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
+-        uses: ./.github/actions/publish-teams
++      - name: Download agent code artifact
++        uses: actions/download-artifact@v4
+         with:
+-          foundry-endpoint: ${{ needs.deploy.outputs.endpoint }}
+-          agent-name:       ${{ needs.deploy.outputs.agent-name }}
+-          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+-          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+-          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+-          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+-          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+-          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+-          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
++          name: agent-code
++
++      - name: Prepare metadata (yq)
++        env:
++          MANIFEST:     ${{ inputs.manifest-path }}
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++          VAR_MCP_URL:  ${{ vars.MCP_SERVER_URL }}
++        run: |
++          if ! command -v yq >/dev/null 2>&1; then
++            echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
++            exit 1
++          fi
++          if [ ! -f "$MANIFEST" ]; then
++            echo "::error::Manifest not found: $MANIFEST"
++            exit 1
++          fi
++          name="$(yq -r '.name' "$MANIFEST")"
++          if [ -z "$name" ] || [ "$name" = "null" ]; then
++            echo "::error::Manifest '$MANIFEST' has no 'name'."
++            exit 1
++          fi
++          yq -o=json '{"name": .name, "description": .description, "definition": .definition}' "$MANIFEST" > metadata.json
++          if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' metadata.json; then
++            if [ -z "$VAR_ENDPOINT" ]; then
++              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the test environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
++              exit 1
++            fi
++            tmp="$(mktemp)"; sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" metadata.json > "$tmp" && mv "$tmp" metadata.json
++            echo "Injected test FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
++          fi
++          if grep -q '"type": "mcp"' metadata.json; then
++            if [ -z "$VAR_MCP_URL" ]; then
++              echo "::error::The manifest has an MCP tool but the test environment variable MCP_SERVER_URL is not set."
++              exit 1
++            fi
++            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' metadata.json
++            echo "Injected test MCP server_url: $VAR_MCP_URL"
++          fi
++          echo "Prepared metadata for agent '$name':"
++          cat metadata.json
++
++      - name: Resolve test Foundry endpoint
++        id: cfg
++        shell: pwsh
++        env:
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++        run: |
++          $endpoint = $env:VAR_ENDPOINT
++          if ([string]::IsNullOrWhiteSpace($endpoint)) {
++            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
++          }
++          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Upload code + create/version agent (test)
++        id: deploy
++        shell: pwsh
++        run: |
++          ./scripts/deploy-code-agent.ps1 `
++            -MetadataJsonPath       "metadata.json" `
++            -ZipPath                "agent.zip" `
++            -FoundryProjectEndpoint "${{ steps.cfg.outputs.endpoint }}"
++
++      - name: Publish agent version (test)
++        uses: ./.github/actions/publish-agent
++        with:
++          agent-name: ${{ steps.deploy.outputs.agent-name }}
++          agent-version: ${{ steps.deploy.outputs.agent-version }}
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+diff --git a/.github/workflows/_deploy-hosted-agent.yml b/.github/workflows/_deploy-hosted-agent.yml
+index 1f4358f..132a865 100644
+--- a/.github/workflows/_deploy-hosted-agent.yml
++++ b/.github/workflows/_deploy-hosted-agent.yml
+@@ -1,29 +1,24 @@
+-name: Deploy hosted Foundry agent (reusable)
++name: Deploy hosted (container-image) Foundry agent (reusable, build-once -> dev -> test)
+ 
+ # ---------------------------------------------------------------------------
+-# Reusable, SINGLE-AGENT deploy pipeline for a HOSTED (container) Foundry agent, called by the
+-# thin per-agent workflows (e.g. deploy-support-case-agent.yml). One run = one agent.
++# Reusable, SINGLE-AGENT deploy pipeline for a HOSTED (container-image) Foundry agent, called by the
++# thin per-agent workflows. One run promotes ONE agent through dev then test.
+ #
+-# How it differs from _deploy-agent.yml (the PROMPT-agent reusable): a hosted agent ships a
+-# container image, so this workflow first BUILDS that image and injects its reference into the
+-# manifest before the (identical) create/publish tail:
++# Build-once / promote model:
++#   * build       - builds + pushes the container image to the PRIVATE ACR ONCE, tagged with the git
++#                   SHA (immutable). Emits the image reference as a job output. This is the single
++#                   image that moves through the environments (built once, referenced by tag).
++#   * deploy-dev  - (environment: dev) patches the SAME image reference into the manifest, injects
++#                   the DEV endpoint / MCP server_url, create-or-update + publish against the dev
++#                   project's PRIVATE endpoint.
++#   * deploy-test - (environment: test, needs: deploy-dev) references the SAME tag (no rebuild) and
++#                   deploys to the test project (gated by the `test` environment's required reviewers).
+ #
+-#   1. `az acr build` builds the agent's Dockerfile SERVER-SIDE in the private ACR (ACR Tasks) and
+-#      pushes the image. The in-VNet runner needs NO Docker daemon — cloud-init installs azure-cli
+-#      precisely so `az acr build` works (see cloud-init-linux-vm.yaml). The VM managed identity is
+-#      Contributor on the RG (covers ACR build/push); the Foundry project identity already holds
+-#      Container Registry Repository Reader on the ACR, so Foundry can pull the image to run it.
+-#   2. The built image reference (<loginServer>/<repo>:<git-sha>) is patched into the manifest's
+-#      `definition.image` (the agents/<name>/agent.yaml `{{agentAcrImage}}` placeholder).
+-#   3. create-agent + publish-agent (the same composite actions the prompt path uses) create/version
+-#      the agent against the PRIVATE Foundry endpoint and route 100% of traffic to the new version.
+-#   4. Optional publish-teams, gated by agents/<name>/agent-network.json exposeToM365 (same as the
+-#      prompt path).
++# Teams / M365 publishing is a separate pipeline (publish-teams.yml), not part of this workflow.
+ #
+-# Posture A gate: runs on the in-VNet self-hosted runner (the only host that can reach the PRIVATE
+-# Foundry endpoint AND the private ACR). Callers are workflow_dispatch-only + repository-guarded so
+-# fork code can never execute on the VM. Auth is the VM managed identity via IMDS (`az login
+-# --identity` for the build; create/publish authenticate via IMDS directly).
++# Posture A gate: every job runs on the in-VNet self-hosted runner (the only host that can reach the
++# PRIVATE Foundry endpoints AND the private ACR). Callers are workflow_dispatch-only +
++# repository-guarded. Auth is the VM managed identity via IMDS.
+ # ---------------------------------------------------------------------------
+ on:
+   workflow_call:
+@@ -33,7 +28,7 @@ on:
+         type: string
+         required: true
+       build-context:
+-        description: "Directory containing the Dockerfile + agent source, passed to `az acr build`."
++        description: "Directory containing the Dockerfile + agent source."
+         type: string
+         required: true
+       image-repository:
+@@ -45,55 +40,27 @@ on:
+         type: string
+         required: false
+         default: "Dockerfile"
+-      publish-to-teams:
+-        description: "After deploy, publish this agent to Teams / M365 (requires manual approval)."
+-        type: boolean
+-        required: false
+-        default: false
+ 
+ permissions:
+   contents: read
+ 
+ jobs:
+-  # --- build image + create/update + publish against the PRIVATE endpoint ------
+-  deploy:
++  # --- build + push the image ONCE (immutable tag) ---------------------------------------------
++  build:
+     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
+     outputs:
+-      agent-name: ${{ steps.create.outputs.agent-name }}
+-      endpoint: ${{ steps.cfg.outputs.endpoint }}
+-      expose-to-m365: ${{ steps.netcfg.outputs.expose-to-m365 }}
++      image-ref: ${{ steps.image.outputs.image-ref }}
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      # The per-agent network-integration manifest (agents/<name>/agent-network.json) is the
+-      # authoritative gate for Teams / M365 exposure: exposeToM365 must be true for the publish
+-      # job below to run (even if the caller passed publish-to-teams=true). A missing manifest or
+-      # exposeToM365=false means the agent is NOT wired into YARP's /teams/<name> edge route.
+-      - name: Read network manifest (exposeToM365 gate)
+-        id: netcfg
+-        shell: pwsh
+-        env:
+-          MANIFEST: ${{ inputs.manifest-path }}
+-        run: |
+-          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
+-          $expose = 'false'
+-          if (Test-Path $net) {
+-            $doc = Get-Content $net -Raw | ConvertFrom-Json
+-            if ($doc.exposeToM365 -eq $true) { $expose = 'true' }
+-          }
+-          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+-          Write-Host "exposeToM365 = $expose (from $net)"
+-
+-      # Authenticate as the VM managed identity for the control-plane `az acr build`.
+       - name: Sign in with the VM managed identity
+         shell: pwsh
+         run: az login --identity --output none
+ 
+       # Build the container image on the runner with the local Docker Engine and push it to the
+-      # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable).
+-      # We build locally rather than with `az acr build` because ACR Tasks run in a
+-      # Microsoft-managed environment that can't reach a publicNetworkAccess=Disabled registry.
++      # PRIVATE ACR over its private endpoint, tagged with the git SHA (immutable, traceable). Built
++      # ONCE; both envs reference the same tag.
+       - name: Build and push the agent image (buildx OCI + private ACR)
+         id: image
+         shell: pwsh
+@@ -112,41 +79,22 @@ jobs:
+           }
+           $tag = "${{ github.sha }}".Substring(0, 12)
+ 
+-          # Full pullable reference = <loginServer>/<repo>:<tag>. Query the login server rather than
+-          # hard-coding '.azurecr.io' so this stays correct across clouds.
+           $loginServer = az acr show --name $env:ACR_NAME --query loginServer -o tsv
+           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($loginServer)) {
+             throw "Could not resolve the ACR login server for '$($env:ACR_NAME)'."
+           }
+           $imageRef = "$loginServer/$($env:REPO):$tag"
+ 
+-          # AAD `docker login` to the registry as the VM managed identity, over the private
+-          # endpoint (the VM MI is Contributor on the RG, which grants ACR push).
+           az acr login --name $env:ACR_NAME --output none
+           if ($LASTEXITCODE -ne 0) { throw "az acr login failed for '$($env:ACR_NAME)' (is the private endpoint reachable + Docker running?)." }
+ 
+-          # Build + push with buildx using the docker-container (BuildKit) driver and
+-          # oci-mediatypes=true so the pushed manifest uses OCI layer media types
+-          # (application/vnd.oci.image.layer.v1.tar+gzip). The default `docker` driver emits
+-          # DOCKER schema2 layers (application/vnd.docker.image.rootfs.diff.tar.gzip), which
+-          # Foundry's server-side image build (containers/image) rejects with
+-          # "ImageBuildFailed (400): unsupported MIME type for compression ...". See
+-          # docs/known-issues.md.
+-          #
+-          # NOTE: the docker-container driver runs BuildKit inside a container, so the FIRST
+-          # build on a fresh runner pulls the `moby/buildkit` image. In a locked-down VNet this
+-          # egress must be reachable (Docker Hub / a mirror); if it is blocked, use the code
+-          # (source-zip) deploy path instead, which never touches ACR.
+-          #
+-          # The Ubuntu `docker.io` package does NOT ship the buildx plugin, and without it
+-          # `docker build` silently falls back to the LEGACY builder, which only emits Docker
+-          # schema2 layers (the exact media type Foundry rejects). cloud-init installs buildx
+-          # system-wide; this guard also installs it per-user (GitHub release binary, like yq)
+-          # so an already-provisioned runner works without a reprovision.
++          # buildx with the docker-container (BuildKit) driver + oci-mediatypes=true so the pushed
++          # manifest uses OCI layer media types (Foundry's server-side image build rejects DOCKER
++          # schema2 layers). See docs/known-issues.md.
+           $buildxVersion = "v0.19.3"
+           docker buildx version *> $null
+           if ($LASTEXITCODE -ne 0) {
+-            Write-Host "buildx plugin not found — installing $buildxVersion into ~/.docker/cli-plugins."
++            Write-Host "buildx plugin not found - installing $buildxVersion into ~/.docker/cli-plugins."
+             $pluginDir = Join-Path $env:HOME ".docker/cli-plugins"
+             New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+             $pluginPath = Join-Path $pluginDir "docker-buildx"
+@@ -184,11 +132,19 @@ jobs:
+           "image-ref=$imageRef" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+           Write-Host "Pushed image: $imageRef"
+ 
+-      # yq is installed by cloud-init on the in-VNet Linux runner.
+-      - name: Convert agent.yaml -> agent.json + patch the image reference (yq)
++  # --- deploy to dev -----------------------------------------------------------
++  deploy-dev:
++    needs: build
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
++    runs-on: [self-hosted, vnet, foundry-private]
++    environment: dev
++    steps:
++      - uses: actions/checkout@v5
++
++      - name: Convert agent.yaml -> agent.json + patch image + inject dev values (yq)
+         env:
+-          MANIFEST:  ${{ inputs.manifest-path }}
+-          IMAGE_REF: ${{ steps.image.outputs.image-ref }}
++          MANIFEST:     ${{ inputs.manifest-path }}
++          IMAGE_REF:    ${{ needs.build.outputs.image-ref }}
+           VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
+           VAR_MCP_URL:  ${{ vars.MCP_SERVER_URL }}
+         run: |
+@@ -206,38 +162,29 @@ jobs:
+             echo "::error::Manifest '$MANIFEST' has no 'name'."
+             exit 1
+           fi
+-
+-          # Patch the built image reference into definition.image (replaces the {{agentAcrImage}}
+-          # placeholder, or any prior value). This is the whole point of the hosted path.
+           IMAGE_REF="$IMAGE_REF" yq -i -o=json '.definition.image = strenv(IMAGE_REF)' agent.json
+           echo "Patched definition.image = $IMAGE_REF"
+-
+-          # Convenience: if the manifest still carries the {{FOUNDRY_PROJECT_ENDPOINT}} placeholder
+-          # (the Agents Framework container template uses it), substitute the per-env endpoint so
+-          # the manifest can be promoted unchanged. Shape-agnostic raw-token replace.
+           if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' agent.json; then
+             if [ -z "$VAR_ENDPOINT" ]; then
+-              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
++              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
+               exit 1
+             fi
+             tmp="$(mktemp)"
+             sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" agent.json > "$tmp" && mv "$tmp" agent.json
+-            echo "Injected FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
++            echo "Injected dev FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
+           fi
+-
+-          # Inject the per-environment MCP server_url into any MCP tool (same as the prompt path).
+           if grep -q '"type": "mcp"' agent.json; then
+             if [ -z "$VAR_MCP_URL" ]; then
+-              echo "::error::The manifest has an MCP tool but repo variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL)."
++              echo "::error::The manifest has an MCP tool but the dev environment variable MCP_SERVER_URL is not set."
+               exit 1
+             fi
+             MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
+-            echo "Injected MCP server_url: $VAR_MCP_URL"
++            echo "Injected dev MCP server_url: $VAR_MCP_URL"
+           fi
+           echo "Prepared agent '$name':"
+           cat agent.json
+ 
+-      - name: Resolve Foundry endpoint
++      - name: Resolve dev Foundry endpoint
+         id: cfg
+         shell: pwsh
+         env:
+@@ -245,43 +192,98 @@ jobs:
+         run: |
+           $endpoint = $env:VAR_ENDPOINT
+           if ([string]::IsNullOrWhiteSpace($endpoint)) {
+-            throw "Repo variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it; or run 'azd env refresh')."
++            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
+           }
+           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+ 
+-      - name: Create or update agent
++      - name: Create or update agent (dev)
+         id: create
+         uses: ./.github/actions/create-agent
+         with:
+           agent-json: agent.json
+           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+ 
+-      - name: Publish agent version
++      - name: Publish agent version (dev)
+         uses: ./.github/actions/publish-agent
+         with:
+           agent-name: ${{ steps.create.outputs.agent-name }}
+           agent-version: ${{ steps.create.outputs.agent-version }}
+           foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+ 
+-  # --- publish to Teams / M365 -------------------------------------------------
+-  # Same gate as the prompt path: exposeToM365 (agents/<name>/agent-network.json) AND
+-  # publish-to-teams must both be true.
+-  publish-teams:
+-    needs: deploy
+-    if: ${{ github.repository == 'graemefoster/locked-down-foundry-m365-agent' && inputs.publish-to-teams && needs.deploy.outputs.expose-to-m365 == 'true' }}
++  # --- promote to test (same image tag, gated by the `test` environment's required reviewers) ---
++  deploy-test:
++    needs: [build, deploy-dev]
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
++    environment: test
+     steps:
+       - uses: actions/checkout@v5
+ 
+-      - name: Publish agent to Teams / M365 (in-VNet, via VM managed identity)
+-        uses: ./.github/actions/publish-teams
++      - name: Convert agent.yaml -> agent.json + patch image + inject test values (yq)
++        env:
++          MANIFEST:     ${{ inputs.manifest-path }}
++          IMAGE_REF:    ${{ needs.build.outputs.image-ref }}
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++          VAR_MCP_URL:  ${{ vars.MCP_SERVER_URL }}
++        run: |
++          if ! command -v yq >/dev/null 2>&1; then
++            echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
++            exit 1
++          fi
++          if [ ! -f "$MANIFEST" ]; then
++            echo "::error::Manifest not found: $MANIFEST"
++            exit 1
++          fi
++          yq -o=json '.' "$MANIFEST" > agent.json
++          name="$(yq -r '.name' "$MANIFEST")"
++          if [ -z "$name" ] || [ "$name" = "null" ]; then
++            echo "::error::Manifest '$MANIFEST' has no 'name'."
++            exit 1
++          fi
++          IMAGE_REF="$IMAGE_REF" yq -i -o=json '.definition.image = strenv(IMAGE_REF)' agent.json
++          echo "Patched definition.image = $IMAGE_REF"
++          if grep -q '{{FOUNDRY_PROJECT_ENDPOINT}}' agent.json; then
++            if [ -z "$VAR_ENDPOINT" ]; then
++              echo "::error::Manifest references {{FOUNDRY_PROJECT_ENDPOINT}} but the test environment variable AZURE_AI_PROJECT_ENDPOINT is not set."
++              exit 1
++            fi
++            tmp="$(mktemp)"
++            sed "s#{{FOUNDRY_PROJECT_ENDPOINT}}#${VAR_ENDPOINT}#g" agent.json > "$tmp" && mv "$tmp" agent.json
++            echo "Injected test FOUNDRY_PROJECT_ENDPOINT: $VAR_ENDPOINT"
++          fi
++          if grep -q '"type": "mcp"' agent.json; then
++            if [ -z "$VAR_MCP_URL" ]; then
++              echo "::error::The manifest has an MCP tool but the test environment variable MCP_SERVER_URL is not set."
++              exit 1
++            fi
++            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
++            echo "Injected test MCP server_url: $VAR_MCP_URL"
++          fi
++          echo "Prepared agent '$name':"
++          cat agent.json
++
++      - name: Resolve test Foundry endpoint
++        id: cfg
++        shell: pwsh
++        env:
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++        run: |
++          $endpoint = $env:VAR_ENDPOINT
++          if ([string]::IsNullOrWhiteSpace($endpoint)) {
++            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
++          }
++          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Create or update agent (test)
++        id: create
++        uses: ./.github/actions/create-agent
+         with:
+-          foundry-endpoint: ${{ needs.deploy.outputs.endpoint }}
+-          agent-name:       ${{ needs.deploy.outputs.agent-name }}
+-          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
+-          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
+-          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
+-          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
+-          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
+-          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
+-          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
++          agent-json: agent.json
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
++
++      - name: Publish agent version (test)
++        uses: ./.github/actions/publish-agent
++        with:
++          agent-name: ${{ steps.create.outputs.agent-name }}
++          agent-version: ${{ steps.create.outputs.agent-version }}
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+diff --git a/.github/workflows/deploy-agent-network.yml b/.github/workflows/deploy-agent-network.yml
+index b477508..b933721 100644
+--- a/.github/workflows/deploy-agent-network.yml
++++ b/.github/workflows/deploy-agent-network.yml
+@@ -14,19 +14,23 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
+ #      with no `tokenLimits` stays denied on the Responses API. Caller identity governs metering +
+ #      throttling only; the caller's own token is forwarded to Foundry for authorization.
+ #
+-#   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
+-#      appSettings so ONLY explicitly-wired, per-agent paths reach APIM:
+-#        * exposeToM365=true    -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
+-#        * exposeFoundryApi=true -> an explicit /agents/<agentName>/{**remainder} route (one PER agent)
+-#          that YARP prepends (PathPrefix) with the governed foundry-agents API path before forwarding
+-#          to APIM. Because the agent name is baked into the edge path, an agent that is NOT allowlisted
+-#          has no route and is 404'd at YARP — blocked EARLY, before it reaches APIM. APIM then reads
+-#          the agent from the path and rewrites the tail onto the Foundry agent endpoint, so every
+-#          protocol (openai/responses, invocations, …) an agent exposes is proxied through.
++#   2. YARP edge routes (deny-by-default) — patches the SHARED YARP proxy web app's
++#      ReverseProxy__Routes__* appSettings so ONLY explicitly-wired, per-agent, per-env paths reach
++#      APIM. Edge paths are env-prefixed so dev + test coexist on the one shared proxy:
++#        * exposeToM365=true    -> an explicit /<env>/teams/<agentName> route (the Bot messaging
++#          endpoint). PathSet rewrites it onto the per-env APIM Teams API ('teams-<env>').
++#        * exposeFoundryApi=true -> an explicit /<env>/agents/<agentName>/{**remainder} route (one PER
++#          agent) that YARP strips the '/<env>' prefix from, then prepends (PathPrefix) with the
++#          governed per-env foundry-agents API path before forwarding to APIM. Because the agent name
++#          is baked into the edge path, an agent that is NOT allowlisted has no route and is 404'd at
++#          YARP — blocked EARLY, before it reaches APIM. APIM then reads the agent from the path and
++#          rewrites the tail onto the Foundry agent endpoint, so every protocol (openai/responses,
++#          invocations, …) an agent exposes is proxied through.
+ #      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
+-#      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
+-#      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
+-#      are never touched.
++#      explicitly wired 404s at the edge. Route keys are env-namespaced (teams_<env>_* /
++#      foundry_<env>_*); the prune preserves the SIBLING env's routes while removing this env's stale
++#      ones (+ legacy unprefixed keys), so removing an agent / flipping a flag removes its route.
++#      cluster1 (-> APIM) + the AI settings are never touched.
+ #
+ #   3. MCP allowlist (per agent) — resolves the name-only mcp/mcp-policy.json against LIVE agent
+ #      identities read from the Foundry DATA PLANE (instance_identity.client_id on the project
+@@ -64,6 +68,13 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
+ # ---------------------------------------------------------------------------
+ on:
+   workflow_dispatch:
++    inputs:
++      environment:
++        description: "Which environment to apply the network governance to (dev or test)."
++        type: choice
++        required: true
++        default: dev
++        options: [dev, test]
+ 
+ permissions:
+   contents: read
+@@ -72,6 +83,11 @@ jobs:
+   apply-agent-network:
+     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
++    # Selects the per-env GitHub Environment variables (FOUNDRY_AGENTS_API_NAME,
++    # FOUNDRY_AGENTS_API_PATH, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT, ...) and gates
++    # `test` behind its required reviewers. The `env` input is also passed to the env-suffixed
++    # governance Bicep modules so their backend ids / policies match the per-env APIM APIs.
++    environment: ${{ inputs.environment }}
+     steps:
+       - uses: actions/checkout@v5
+ 
+@@ -84,6 +100,7 @@ jobs:
+       - name: Aggregate tokenLimits and apply the Foundry agent token-limit policy
+         shell: pwsh
+         env:
++          ENV:             ${{ inputs.environment }}
+           RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
+           APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
+           API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
+@@ -148,9 +165,11 @@ jobs:
+             $file = Join-Path $_.FullName 'agent-network.json'
+             if (Test-Path $file) {
+               $doc = Get-Content $file -Raw | ConvertFrom-Json
+-              $tl  = $doc.tokenLimits
++              # Per-env schema: read environments.<env>.tokenLimits (a missing block => deny-all).
++              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
++              $tl  = if ($null -ne $envBlock) { $envBlock.tokenLimits } else { $null }
+               if ($null -eq $tl) {
+-                Write-Host "$file has no 'tokenLimits' — skipping (that agent stays deny-all on the Responses API)."
++                Write-Host "$file has no 'tokenLimits' for env '$($env:ENV)' — skipping (that agent stays deny-all on the Responses API)."
+               } else {
+                 $principals = @($tl.principals) | Where-Object { $_ -ne $null }
+                 if ($principals.Count -eq 0) {
+@@ -190,6 +209,7 @@ jobs:
+               apimName=$env:APIM_NAME `
+               apiName=$env:API_NAME `
+               foundryAccountName=$env:ACCOUNT_NAME `
++              env=$env:ENV `
+               projectName=$projectName `
+               tenantId=$tenantId `
+               callerAudience=$audience `
+@@ -201,9 +221,11 @@ jobs:
+       - name: Wire YARP edge routes (deny-by-default) from agent-network.json
+         shell: pwsh
+         env:
+-          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+-          YARP_WEBAPP_NAME: ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
+-          FOUNDRY_API_PATH: ${{ vars.FOUNDRY_AGENTS_API_PATH }}
++          ENV:                 ${{ inputs.environment }}
++          RESOURCE_GROUP:      ${{ vars.AZURE_RESOURCE_GROUP }}
++          YARP_WEBAPP_NAME:    ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
++          FOUNDRY_API_PATH:    ${{ vars.FOUNDRY_AGENTS_API_PATH }}
++          TEAMS_APIM_API_NAME: ${{ vars.TEAMS_APIM_API_NAME }}
+         run: |
+           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or [string]::IsNullOrWhiteSpace($env:YARP_WEBAPP_NAME)) {
+             throw "Set repo variables AZURE_RESOURCE_GROUP and TEAMS_YARP_WEBAPP_NAME (the postprovision hook syncs them; or run 'azd env refresh')."
+@@ -223,17 +245,26 @@ jobs:
+             if (Test-Path $file) {
+               $doc  = Get-Content $file -Raw | ConvertFrom-Json
+               $name = $_.Name
+-              if ($doc.exposeToM365 -eq $true) {
++              # Per-env schema: read environments.<env>.{exposeToM365,exposeFoundryApi}. A missing
++              # env block => the agent has no edge exposure for this environment.
++              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
++              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
+                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
+                 $teamsAgents += $name
+               }
+-              if ($doc.exposeFoundryApi -eq $true) {
++              if ($null -ne $envBlock -and $envBlock.exposeFoundryApi -eq $true) {
+                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
+                 $foundryAgents += $name
+               }
+             }
+           }
+ 
++          # Teams edge routes forward to the per-env APIM Teams API (path '<apiPath>-<env>'), surfaced
++          # as the per-env TEAMS_APIM_API_NAME variable. Required only if any agent exposes to M365.
++          if ($teamsAgents.Count -gt 0 -and [string]::IsNullOrWhiteSpace($env:TEAMS_APIM_API_NAME)) {
++            throw "An agent sets exposeToM365=true for env '$($env:ENV)' but TEAMS_APIM_API_NAME is not set (the postprovision hook syncs it to the '$($env:ENV)' GitHub Environment; or run 'azd env refresh')."
++          }
++
+           # DESIRED ReverseProxy__Routes__* appSettings (ASP.NET '__' -> ':' config binding). We
+           # manage ONLY the Routes; cluster1 (-> APIM) and the AI settings in the baked config are
+           # left alone. route1 (the image's baked {**catch-all}) is NEUTERED to a non-routable path
+@@ -248,9 +279,13 @@ jobs:
+           $desired['ReverseProxy__Routes__route1__Match__Path'] = '/__disabled_no_route__/{**catch-all}'
+ 
+           foreach ($name in ($teamsAgents | Sort-Object -Unique)) {
+-            $rid = "teams_$($name -replace '-','_')"
+-            $desired["ReverseProxy__Routes__${rid}__ClusterId"]   = 'cluster1'
+-            $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
++            # Env-namespaced route-id KEY (dev/test coexist on the shared proxy) + env-prefixed edge
++            # path. PathSet rewrites the edge path onto the per-env APIM Teams API ('teams-<env>'),
++            # so /dev/teams/<name> -> /teams-dev/<name> at cluster1 (APIM).
++            $rid = "teams_$($env:ENV)_$($name -replace '-','_')"
++            $desired["ReverseProxy__Routes__${rid}__ClusterId"]              = 'cluster1'
++            $desired["ReverseProxy__Routes__${rid}__Match__Path"]            = "/$($env:ENV)/teams/$name"
++            $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathSet"] = "/$($env:TEAMS_APIM_API_NAME)/$name"
+           }
+ 
+           # EXPLICIT per-agent Foundry ingress (deny-by-default at the edge): one route per agent
+@@ -270,14 +305,18 @@ jobs:
+             }
+             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
+             foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
+-              $rid = "foundry_$($name -replace '-','_')"
+-              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                 = 'cluster1'
+-              $desired["ReverseProxy__Routes__${rid}__Match__Path"]               = "/agents/$name/{**remainder}"
+-              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathPrefix"] = $p
++              # Env-namespaced KEY + env-prefixed edge path. Strip the '/<env>' edge prefix, then
++              # prepend the governed foundry-agents API path ($p), so
++              #   /dev/agents/<name>/... -> (remove /dev) /agents/<name>/... -> $p/agents/<name>/...
++              $rid = "foundry_$($env:ENV)_$($name -replace '-','_')"
++              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                       = 'cluster1'
++              $desired["ReverseProxy__Routes__${rid}__Match__Path"]                     = "/$($env:ENV)/agents/$name/{**remainder}"
++              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathRemovePrefix"] = "/$($env:ENV)"
++              $desired["ReverseProxy__Routes__${rid}__Transforms__1__PathPrefix"]       = $p
+             }
+           }
+ 
+-          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
++          Write-Host "Desired YARP routes for env '$($env:ENV)' ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
+           $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
+ 
+           # Read the current appSettings so we can compute which route settings are now stale.
+@@ -295,7 +334,17 @@ jobs:
+           # Prune any existing ReverseProxy__Routes__* settings NOT in the desired set, so removing
+           # an agent / flipping a flag removes its route (deny-by-default). Runs after set so the
+           # desired routes are already live before any stale ones are removed.
+-          $stale = @($current | Where-Object { $_.name -like 'ReverseProxy__Routes__*' -and -not $desired.Contains($_.name) } | ForEach-Object { $_.name })
++          # Prune scope: this env's routes + any LEGACY unprefixed route keys (one-time migration
++          # cleanup from the old single-env schema), but PRESERVE the sibling env's routes — the
++          # YARP proxy is SHARED, so dev and test routes coexist on it. route1 (the neutered
++          # catch-all) is always in $desired, so it is never pruned.
++          $otherEnv = if ($env:ENV -eq 'dev') { 'test' } else { 'dev' }
++          $stale = @($current | Where-Object {
++              $_.name -like 'ReverseProxy__Routes__*' -and
++              -not $desired.Contains($_.name) -and
++              $_.name -notlike "ReverseProxy__Routes__teams_${otherEnv}_*" -and
++              $_.name -notlike "ReverseProxy__Routes__foundry_${otherEnv}_*"
++            } | ForEach-Object { $_.name })
+           if ($stale.Count -gt 0) {
+             Write-Host "Pruning $($stale.Count) stale route setting(s): $($stale -join ', ')"
+             az webapp config appsettings delete -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --setting-names @stale --output none
+@@ -308,6 +357,7 @@ jobs:
+       - name: Resolve agent names to AppIds and apply the MCP allowlist policies
+         shell: pwsh
+         env:
++          ENV:              ${{ inputs.environment }}
+           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+           APIM_NAME:        ${{ vars.MCP_COMPLIANCE_APIM_NAME }}
+           MCP_AUDIENCE:     ${{ vars.MCP_COMPLIANCE_AUDIENCE }}
+@@ -345,6 +395,7 @@ jobs:
+             --parameters `
+               apimName=$env:APIM_NAME `
+               mcpAudience=$env:MCP_AUDIENCE `
++              env=$env:ENV `
+               tenantId=$tenantId `
+               "mcpPolicy=@$resolvedPolicy" `
+             --output none
+@@ -358,6 +409,7 @@ jobs:
+       - name: Resolve exposeToM365 agents to bot App IDs and pin the Teams APIM audience allowlist
+         shell: pwsh
+         env:
++          ENV:              ${{ inputs.environment }}
+           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
+           APIM_NAME:        ${{ vars.TEAMS_APIM_NAME }}
+           ACCOUNT_NAME:     ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
+@@ -391,7 +443,8 @@ jobs:
+             $file = Join-Path $_.FullName 'agent-network.json'
+             if (Test-Path $file) {
+               $doc = Get-Content $file -Raw | ConvertFrom-Json
+-              if ($doc.exposeToM365 -eq $true) {
++              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
++              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
+                 if ($_.Name -notmatch $segRe) { throw "${file}: agent folder name '$($_.Name)' is not a safe route segment (allowed: letters, digits, . -)." }
+                 $teamsAgents += $_.Name
+               }
+@@ -422,6 +475,7 @@ jobs:
+             --parameters `
+               apimName=$env:APIM_NAME `
+               foundryAccountName=$env:ACCOUNT_NAME `
++              env=$env:ENV `
+               projectName=$projectName `
+               expectedTenantId=$tenantId `
+               "botAppIds=@$botIdsFile" `
+diff --git a/.github/workflows/deploy-support-case-agent-code.yml b/.github/workflows/deploy-support-case-agent-code.yml
+index 6e284ae..8b231c9 100644
+--- a/.github/workflows/deploy-support-case-agent-code.yml
++++ b/.github/workflows/deploy-support-case-agent-code.yml
+@@ -2,21 +2,14 @@ name: Deploy support-case-agent (code, VNet self-hosted)
+ 
+ # Thin caller for the CODE (source-zip) deploy of support-case-agent
+ # (agents/support-case-agent/agent-code.yaml, definition.code_configuration). All the work lives in
+-# the reusable .github/workflows/_deploy-code-agent.yml - this file only targets ONE agent: it
+-# points at the code manifest and the build context (the .Agent project holding the Dockerfile).
++# the reusable .github/workflows/_deploy-code-agent.yml, which builds the publish zip ONCE and
++# promotes it build-once through dev then test (test gated by the `test` GitHub Environment).
+ #
+-# This is the alternative to deploy-support-case-agent.yml (the container-image path). It hands
+-# Foundry the `dotnet publish` output as a zip instead of a prebuilt image, so it never requires
+-# Foundry to pull from the private ACR - the deploy path that works in the locked-down environment.
+-# Teams publishing is off by default (this agent has no agent-network.json exposeToM365 route yet).
++# This is the alternative to the container-image path: it hands Foundry the `dotnet publish` output
++# as a zip instead of a prebuilt image, so it never requires Foundry to pull from the private ACR.
++# Teams publishing is a separate pipeline (publish-teams.yml); this agent has no exposeToM365 route.
+ on:
+   workflow_dispatch:
+-    inputs:
+-      publishToTeams:
+-        description: "After deploy, publish this agent to Teams / M365 (requires exposeToM365 + manual approval)"
+-        type: boolean
+-        required: false
+-        default: false
+ 
+ permissions:
+   contents: read
+@@ -27,4 +20,3 @@ jobs:
+     with:
+       manifest-path: agents/support-case-agent/agent-code.yaml
+       build-context: agents/support-case-agent/support-case-agent.Agent
+-      publish-to-teams: ${{ inputs.publishToTeams }}
+diff --git a/.github/workflows/deploy-teams-agent.yml b/.github/workflows/deploy-teams-agent.yml
+index ab6658a..c0ae975 100644
+--- a/.github/workflows/deploy-teams-agent.yml
++++ b/.github/workflows/deploy-teams-agent.yml
+@@ -1,18 +1,13 @@
+ name: Deploy teams-agent (VNet self-hosted)
+ 
+-# Thin caller for the agent published to Microsoft Teams / M365 (agents/teams-agent/agent.yaml),
+-# served through the enterprise model gateway (APIM). All the work lives in the reusable
+-# .github/workflows/_deploy-agent.yml — this file only targets ONE agent (endpoint + gateway model
+-# come from repo variables / the manifest) and, by default, publishes it to Teams. The Teams
+-# publish is a separate job gated by the `vnet-deploy` environment for manual approval.
++# Thin caller for the teams-agent prompt agent (agents/teams-agent/agent.yaml). All the work lives
++# in the reusable .github/workflows/_deploy-agent.yml, which promotes this one agent build-once
++# through dev then test (test gated by the `test` GitHub Environment's required reviewers).
++#
++# Teams / M365 publishing is now a SEPARATE pipeline (publish-teams-teams-agent.yml) - run it after
++# the agent has been promoted.
+ on:
+   workflow_dispatch:
+-    inputs:
+-      publishToTeams:
+-        description: "After deploy, publish this agent to Teams / M365 (requires manual approval)"
+-        type: boolean
+-        required: false
+-        default: true
+ 
+ permissions:
+   contents: read
+@@ -22,4 +17,3 @@ jobs:
+     uses: ./.github/workflows/_deploy-agent.yml
+     with:
+       manifest-path: agents/teams-agent/agent.yaml
+-      publish-to-teams: ${{ inputs.publishToTeams }}
+diff --git a/.github/workflows/nightly-eval-agent.yml b/.github/workflows/nightly-eval-agent.yml
+index 167e1e4..6355a55 100644
+--- a/.github/workflows/nightly-eval-agent.yml
++++ b/.github/workflows/nightly-eval-agent.yml
+@@ -43,6 +43,12 @@ on:
+     - cron: "0 16 * * *"
+   workflow_dispatch:
+     inputs:
++      environment:
++        description: "Which environment's project to evaluate (dev or test)."
++        type: choice
++        required: false
++        default: dev
++        options: [dev, test]
+       agentIds:
+         description: "Agent id(s) to evaluate as name:version, comma-separated. Default: latest version only (single-agent). Pass two ids to force a comparison (unsupported in Private BYO workspaces — see header)."
+         required: false
+@@ -67,6 +73,9 @@ jobs:
+   evaluate:
+     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+     runs-on: [self-hosted, vnet, foundry-private]
++    # Resolve per-env variables (AZURE_AI_PROJECT_ENDPOINT is now a GitHub Environment variable).
++    # Defaults to dev for the nightly schedule (which supplies no inputs).
++    environment: ${{ inputs.environment || 'dev' }}
+     steps:
+       - uses: actions/checkout@v5
+ 
+diff --git a/.github/workflows/publish-teams-teams-agent.yml b/.github/workflows/publish-teams-teams-agent.yml
+new file mode 100644
+index 0000000..04d093a
+--- /dev/null
++++ b/.github/workflows/publish-teams-teams-agent.yml
+@@ -0,0 +1,19 @@
++name: Publish teams-agent to Teams / M365 (VNet self-hosted)
++
++# Thin caller for the Teams / M365 publish of teams-agent (agents/teams-agent/agent.yaml). All the
++# work lives in the reusable .github/workflows/publish-teams.yml, which publishes to Teams in dev
++# then test, each gated by that env's agents/teams-agent/agent-network.json environments.<env>
++# .exposeToM365 flag AND the `test` GitHub Environment's required reviewers.
++#
++# Run this AFTER deploy-teams-agent.yml has promoted the agent to the target environment(s).
++on:
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  publish:
++    uses: ./.github/workflows/publish-teams.yml
++    with:
++      manifest-path: agents/teams-agent/agent.yaml
+diff --git a/.github/workflows/publish-teams.yml b/.github/workflows/publish-teams.yml
+new file mode 100644
+index 0000000..4edde57
+--- /dev/null
++++ b/.github/workflows/publish-teams.yml
+@@ -0,0 +1,143 @@
++name: Publish agent to Teams / M365 (reusable, dev -> test)
++
++# ---------------------------------------------------------------------------
++# Reusable, SINGLE-AGENT Teams / M365 publish pipeline. This is now its OWN pipeline (extracted from
++# the deploy reusables) - run it AFTER an agent has been promoted (deploy-*-agent.yml) to the target
++# environment(s). One run publishes ONE agent to Teams in dev then test.
++#
++# Per-environment gating:
++#   * publish-dev  - (environment: dev)  publishes to Teams for dev IFF the agent's
++#                    agents/<name>/agent-network.json environments.dev.exposeToM365 is true.
++#   * publish-test - (environment: test, needs: publish-dev) same for test, gated behind the `test`
++#                    environment's required reviewers.
++#
++# Each env registers its OWN Azure Bot (set TEAMS_BOT_NAME / TEAMS_NAME_PREFIX as GitHub ENVIRONMENT
++# variables in `dev` and `test` to get isolated bots; a shared repo-level value would collide across
++# envs). The agent must ALREADY exist in that env's project - the per-env AZURE_AI_PROJECT_ENDPOINT
++# variable selects it.
++#
++# Posture A gate: runs on the in-VNet self-hosted runner (reaches the PRIVATE Foundry endpoints via
++# the VM managed identity / IMDS). workflow_dispatch-only + repository-guarded callers.
++# ---------------------------------------------------------------------------
++on:
++  workflow_call:
++    inputs:
++      manifest-path:
++        description: "Path to the agent manifest (agents/<name>/agent.yaml or agent-code.yaml). agent-network.json is read from the same folder."
++        type: string
++        required: true
++
++permissions:
++  contents: read
++
++jobs:
++  publish-dev:
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
++    runs-on: [self-hosted, vnet, foundry-private]
++    environment: dev
++    steps:
++      - uses: actions/checkout@v5
++
++      # Resolve the agent name (manifest .name) and the DEV exposeToM365 gate
++      # (agent-network.json environments.dev.exposeToM365).
++      - name: Resolve agent name + dev exposeToM365 gate
++        id: gate
++        shell: pwsh
++        env:
++          MANIFEST: ${{ inputs.manifest-path }}
++        run: |
++          if (-not (Test-Path $env:MANIFEST)) { throw "Manifest not found: $($env:MANIFEST)" }
++          $name = (& yq -r '.name' $env:MANIFEST)
++          if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'null') { throw "Manifest '$($env:MANIFEST)' has no 'name'." }
++          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
++          $expose = 'false'
++          if (Test-Path $net) {
++            $doc = Get-Content $net -Raw | ConvertFrom-Json
++            if ($doc.environments.dev.exposeToM365 -eq $true) { $expose = 'true' }
++          }
++          "agent-name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++          Write-Host "agent '$name' dev exposeToM365 = $expose (from $net)"
++
++      - name: Resolve dev Foundry endpoint
++        id: cfg
++        if: steps.gate.outputs.expose-to-m365 == 'true'
++        shell: pwsh
++        env:
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++        run: |
++          $endpoint = $env:VAR_ENDPOINT
++          if ([string]::IsNullOrWhiteSpace($endpoint)) {
++            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
++          }
++          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Publish agent to Teams / M365 (dev)
++        if: steps.gate.outputs.expose-to-m365 == 'true'
++        uses: ./.github/actions/publish-teams
++        with:
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
++          agent-name:       ${{ steps.gate.outputs.agent-name }}
++          env:              dev
++          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
++          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
++          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
++          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
++          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
++          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
++          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
++
++  publish-test:
++    needs: publish-dev
++    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
++    runs-on: [self-hosted, vnet, foundry-private]
++    environment: test
++    steps:
++      - uses: actions/checkout@v5
++
++      - name: Resolve agent name + test exposeToM365 gate
++        id: gate
++        shell: pwsh
++        env:
++          MANIFEST: ${{ inputs.manifest-path }}
++        run: |
++          if (-not (Test-Path $env:MANIFEST)) { throw "Manifest not found: $($env:MANIFEST)" }
++          $name = (& yq -r '.name' $env:MANIFEST)
++          if ([string]::IsNullOrWhiteSpace($name) -or $name -eq 'null') { throw "Manifest '$($env:MANIFEST)' has no 'name'." }
++          $net = Join-Path (Split-Path $env:MANIFEST -Parent) 'agent-network.json'
++          $expose = 'false'
++          if (Test-Path $net) {
++            $doc = Get-Content $net -Raw | ConvertFrom-Json
++            if ($doc.environments.test.exposeToM365 -eq $true) { $expose = 'true' }
++          }
++          "agent-name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++          "expose-to-m365=$expose" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++          Write-Host "agent '$name' test exposeToM365 = $expose (from $net)"
++
++      - name: Resolve test Foundry endpoint
++        id: cfg
++        if: steps.gate.outputs.expose-to-m365 == 'true'
++        shell: pwsh
++        env:
++          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
++        run: |
++          $endpoint = $env:VAR_ENDPOINT
++          if ([string]::IsNullOrWhiteSpace($endpoint)) {
++            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
++          }
++          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
++
++      - name: Publish agent to Teams / M365 (test)
++        if: steps.gate.outputs.expose-to-m365 == 'true'
++        uses: ./.github/actions/publish-teams
++        with:
++          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
++          agent-name:       ${{ steps.gate.outputs.agent-name }}
++          env:              test
++          resource-group:   ${{ vars.AZURE_RESOURCE_GROUP }}
++          yarp-fqdn:        ${{ vars.TEAMS_YARP_FQDN }}
++          tenant-id:        ${{ vars.TEAMS_TENANT_ID }}
++          bot-name:         ${{ vars.TEAMS_BOT_NAME }}
++          name-prefix:      ${{ vars.TEAMS_NAME_PREFIX }}
++          log-analytics-id: ${{ vars.TEAMS_LOG_ANALYTICS_ID }}
++          publish-scope:    ${{ vars.TEAMS_PUBLISH_SCOPE }}
+diff --git a/agents/teams-agent/agent-network.json b/agents/teams-agent/agent-network.json
+index afa8665..9101453 100644
+--- a/agents/teams-agent/agent-network.json
++++ b/agents/teams-agent/agent-network.json
+@@ -1,24 +1,48 @@
+ {
+-  "//": "Network-integration manifest for teams-agent. Describes how this agent is wired into",
+-  "//flows": "the enterprise network flows. Aggregated by the deploy-agent-network workflow.",
+-  "//exposeToM365": "true: published to Microsoft Teams / M365. YARP wires an explicit /teams/teams-agent edge route (edge deny-by-default: only wired agent paths reach APIM) and the Teams publish job runs. Removing this flag or the manifest would 404 the bot at YARP.",
+-  "//exposeFoundryApi": "false: NOT reachable through the governed Foundry Responses API path.",
+-  "//tokenLimits": "Omitted: the Teams (activityProtocol) path is governed by the Bot Framework validate-jwt policy on the APIM Teams API, not by the Responses token-limit policy.",
+-  "exposeToM365": true,
+-  "exposeFoundryApi": true,
+-  "tokenLimits": {
+-    "principals": [
+-      {
+-        "email": "admin@M365CPI15529713.onmicrosoft.com",
+-        "tokensPerMinute": 10000
+-      },
+-      {
+-        "email": "admin@M365CPI15529713.onmicrosoft.com",
+-        "appId": "11111111-1111-1111-1111-111111111111",
+-        "tokensPerMinute": 30000,
+-        "tokenQuota": 1000000,
+-        "tokenQuotaPeriod": "Daily"
++  "//": "Network-integration manifest for teams-agent. Describes how this agent is wired into the",
++  "//flows": "enterprise network flows, PER ENVIRONMENT. Aggregated by the deploy-agent-network workflow and read (per env) by the deploy + publish-teams pipelines.",
++  "//schema": "Every setting lives under environments.<env>. Readers take an `env` (dev|test) and read environments[env]. An env with no block, or a missing manifest, is treated as fully denied (exposeToM365=false, exposeFoundryApi=false, no tokenLimits).",
++  "//exposeToM365": "true: published to Microsoft Teams / M365 for that env. YARP wires an explicit /teams/teams-agent edge route (edge deny-by-default) and the Teams publish pipeline runs for that env.",
++  "//exposeFoundryApi": "true: reachable through the governed Foundry Responses API path for that env (explicit per-agent YARP route + APIM token-limit policy).",
++  "//tokenLimits": "Per-env allowlist of principals metered/throttled on the Responses API. Omitted or empty => that agent stays deny-all on the Responses API for that env.",
++  "environments": {
++    "dev": {
++      "exposeToM365": false,
++      "exposeFoundryApi": true,
++      "tokenLimits": {
++        "principals": [
++          {
++            "email": "admin@M365CPI15529713.onmicrosoft.com",
++            "tokensPerMinute": 10000
++          },
++          {
++            "email": "admin@M365CPI15529713.onmicrosoft.com",
++            "appId": "11111111-1111-1111-1111-111111111111",
++            "tokensPerMinute": 30000,
++            "tokenQuota": 1000000,
++            "tokenQuotaPeriod": "Daily"
++          }
++        ]
+       }
+-    ]
++    },
++    "test": {
++      "exposeToM365": true,
++      "exposeFoundryApi": true,
++      "tokenLimits": {
++        "principals": [
++          {
++            "email": "admin@M365CPI15529713.onmicrosoft.com",
++            "tokensPerMinute": 10000
++          },
++          {
++            "email": "admin@M365CPI15529713.onmicrosoft.com",
++            "appId": "11111111-1111-1111-1111-111111111111",
++            "tokensPerMinute": 30000,
++            "tokenQuota": 1000000,
++            "tokenQuotaPeriod": "Daily"
++          }
++        ]
++      }
++    }
+   }
+ }
+diff --git a/scripts/publish-teams-runner.ps1 b/scripts/publish-teams-runner.ps1
+index a9e14f3..1ba19e9 100644
+--- a/scripts/publish-teams-runner.ps1
++++ b/scripts/publish-teams-runner.ps1
+@@ -42,8 +42,11 @@
+ param(
+   [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
+   [Parameter(Mandatory = $true)]  [string]$ResourceGroup,
+-  # The agent name to publish (one bot, endpoint /teams/<agentName>).
++  # The agent name to publish (one bot, endpoint /<env>/teams/<agentName>).
+   [Parameter(Mandatory = $true)]  [string]$AgentName,
++  # Environment token (dev|test) — env-prefixes the shared-YARP edge path so dev and test
++  # bot messaging endpoints are distinct on the one shared proxy.
++  [Parameter(Mandatory = $true)]  [string]$Env,
+   # Public YARP FQDN — the Azure Bot Service messaging endpoint host.
+   [Parameter(Mandatory = $true)]  [string]$YarpFqdn,
+   # Entra tenant the single-tenant bot registration lives in.
+@@ -134,7 +137,7 @@ foreach ($k in 'AppVersion', 'ShortDescription', 'FullDescription', 'DeveloperNa
+ }
+ 
+ $agentBotName = "$BotName-$AgentName"
+-$botEndpoint  = "https://$YarpFqdn/teams/$AgentName"
++$botEndpoint  = "https://$YarpFqdn/$Env/teams/$AgentName"
+ $displayName  = Get-DisplayName $AgentName
+ 
+ # --- Step 1: get the agent identity (principal_id = the bot Microsoft App ID) ---

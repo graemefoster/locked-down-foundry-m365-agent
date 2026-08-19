@@ -41,6 +41,9 @@
 @description('Name of the existing hub firewall policy to attach the gateway rule collection group to.')
 param firewallPolicyName string
 
+@description('Deployment region, used to build the region-specific APIM live-diagnostics telemetry FQDN.')
+param location string = resourceGroup().location
+
 @description('Agent subnet CIDR. Allowed to reach the APIM inbound private endpoint on 443.')
 param agentSubnetCidr string
 
@@ -74,7 +77,8 @@ var apimEgressServiceTags = [
 // telemetry over HTTPS:443. These are FQDN (L7) flows, so they need APPLICATION rules
 // — the service-tag NETWORK rules above never match them and they were being denied
 // (observed: HTTP:80 to www.microsoft.com/pkiops/*, crl2.microsoft.com, caissuers.microsoft.com;
-// HTTPS:443 to mobile.events.data.microsoft.com). CRL/OCSP failures normally soft-fail,
+// HTTPS:443 to mobile.events.data.microsoft.com; and APIM live metrics/diagnostics to
+// <region>.livediagnostics.monitor.azure.com). CRL/OCSP failures normally soft-fail,
 // but denying them adds latency and noise, so allow the documented PKI + telemetry set.
 var apimPkiFqdns = [
   'www.microsoft.com'
@@ -86,6 +90,7 @@ var apimPkiFqdns = [
 ]
 var apimTelemetryFqdns = [
   'mobile.events.data.microsoft.com'
+  '${location}.livediagnostics.monitor.azure.com'
 ]
 // APIM validate-jwt (Teams inbound API) fetches the Bot Framework IdP's OpenID Connect
 // metadata + signing keys from this host to cryptographically verify the Bot Channel

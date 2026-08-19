@@ -117,8 +117,11 @@ param deployerPrincipalType string = 'User'
 // the in-VNet Teams-publish workflow path (scripts/publish-teams-runner.ps1 -> publish-teams.ps1),
 // one agent per run. The single path-routed APIM Teams API listens on /teams/{agentName}, so it
 // does not need to know the agent names ahead of time.
-@description('Bot Microsoft App IDs (= each published agent identity principal_id) allowed as APIM validate-jwt audiences. Empty = validate the Bot Framework issuer only; deploy-agent-network.yml rebuilds the full audience allowlist live once the agents are deployed.')
-param teamsBotAppIds array = []
+@description('DEV bot Microsoft App IDs (= each published dev-project agent identity principal_id) allowed as the DEV APIM Teams API validate-jwt audiences. Empty = validate the Bot Framework issuer only; the Teams-publish pipeline rebuilds the full dev audience allowlist live once the dev agents are deployed.')
+param teamsBotAppIdsDev array = []
+
+@description('TEST bot Microsoft App IDs allowed as the TEST APIM Teams API validate-jwt audiences. Empty = validate the Bot Framework issuer only; the Teams-publish pipeline rebuilds the full test audience allowlist live once the test agents are deployed.')
+param teamsBotAppIdsTest array = []
 
 // Create a short, unique suffix, that will be unique to each resource group
 var uniqueSuffix = substring(uniqueString('${resourceGroup().id}'), 0, 4)
@@ -199,14 +202,18 @@ param githubRunnerPat string = ''
 @description('Comma-separated labels applied to the self-hosted runner.')
 param githubRunnerLabels string = 'vnet,foundry-private'
 
-var projectName = toLower('${firstProjectName}${uniqueSuffix}')
+var projectNameDev = toLower('${firstProjectName}-dev-${uniqueSuffix}')
+var projectNameTest = toLower('${firstProjectName}-test-${uniqueSuffix}')
 var cosmosDBName = toLower('${aiServices}${uniqueSuffix}cosmosdb')
 var aiSearchName = toLower('${aiServices}${uniqueSuffix}search')
 var azureStorageName = toLower('${aiServices}${uniqueSuffix}stg')
 var keyVaultName = toLower('${aiServices}${uniqueSuffix}kv')
 
-@description('The name of the project capability host to be created')
+@description('Base name for the per-project capability hosts (suffixed with dev/test).')
 param projectCapHost string = 'caphostproj'
+
+var projectCapHostDev = '${projectCapHost}dev'
+var projectCapHostTest = '${projectCapHost}test'
 
 var appServicePlanName = toLower('${uniqueSuffix}-asp')
 
@@ -388,15 +395,16 @@ module stage13 'stages/13-foundry/13-foundry.bicep' = {
 // The AI project (sub-resource of the account) + all of its data-plane RBAC, its Key Vault
 // Crypto grant, and the Agents capability host. Needs the account (13) + data substrate +
 // private endpoints (10).
-module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
-  name: 'stage15-foundry-project-${uniqueSuffix}'
+module stage15dev 'stages/15-foundry-project/15-foundry-project.bicep' = {
+  name: 'stage15-foundry-project-dev-${uniqueSuffix}'
   params: {
     location: location
     uniqueSuffix: uniqueSuffix
-    projectName: projectName
+    projectName: projectNameDev
     projectDescription: projectDescription
     displayName: displayName
-    projectCapHost: projectCapHost
+    projectCapHost: projectCapHostDev
+    connectionEnv: 'dev'
     deployStandardAgent: deployStandardAgent
     accountName: stage13.outputs.aiAccountName
     aiSearchName: stage10.outputs.aiSearchName
@@ -415,15 +423,51 @@ module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
   }
 }
 
+// The TEST project shares the same account + underlying Cosmos/Storage/Search resources, but
+// owns its OWN uniquely-named BYO connections (connectionEnv 'test' vs 'dev') because Foundry
+// connection names share one namespace per account. Sequence it AFTER the dev project: both write container-scope (workspace-id-scoped) RBAC on the shared
+// stores, so serialising them avoids the known back-to-back RBAC/rule-collection PUT faults.
+module stage15test 'stages/15-foundry-project/15-foundry-project.bicep' = {
+  name: 'stage15-foundry-project-test-${uniqueSuffix}'
+  params: {
+    location: location
+    uniqueSuffix: uniqueSuffix
+    projectName: projectNameTest
+    projectDescription: projectDescription
+    displayName: displayName
+    projectCapHost: projectCapHostTest
+    connectionEnv: 'test'
+    deployStandardAgent: deployStandardAgent
+    accountName: stage13.outputs.aiAccountName
+    aiSearchName: stage10.outputs.aiSearchName
+    aiSearchServiceResourceGroupName: stage10.outputs.aiSearchServiceResourceGroupName
+    aiSearchServiceSubscriptionId: stage10.outputs.aiSearchServiceSubscriptionId
+    cosmosDBName: stage10.outputs.cosmosDBName
+    cosmosDBSubscriptionId: stage10.outputs.cosmosDBSubscriptionId
+    cosmosDBResourceGroupName: stage10.outputs.cosmosDBResourceGroupName
+    azureStorageName: stage10.outputs.azureStorageName
+    azureStorageSubscriptionId: stage10.outputs.azureStorageSubscriptionId
+    azureStorageResourceGroupName: stage10.outputs.azureStorageResourceGroupName
+    acrName: stage10.outputs.acrName
+    appInsightsName: appInsightsName
+    keyVaultName: stage10.outputs.keyVaultName
+    logAnalyticsId: stage00.outputs.logAnalyticsId
+  }
+  dependsOn: [
+    stage15dev
+  ]
+}
+
 // ==================== STAGE 20 — WORKLOAD: MCP ====================
 // The governed MCP workload on top of the stage 10 platform: the private MCP web app
 // + its MI-as-FIC identity + private endpoint, the guarding Entra app registration, the
 // APIM MCP server API(s) fronting it, and App Service built-in auth on the web app.
-module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
-  name: 'stage20-workload-mcp-${uniqueSuffix}'
+module stage20dev 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
+  name: 'stage20-workload-mcp-dev-${uniqueSuffix}'
   params: {
     location: location
     uniqueSuffix: uniqueSuffix
+    env: 'dev'
     appServicePlanName: appServicePlanName
     appInsightsName: appInsightsName
     appServiceDelegatedSubnetId: stage00.outputs.appServiceDelegatedSubnetId
@@ -435,10 +479,31 @@ module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
   }
 }
 
-// URL of the sample MCP server (the first configured server) that the reusable deploy-agent
-// workflow injects as an agent's `server_url`. first() is safe: mcp/mcp.json always has >=1
+module stage20test 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
+  name: 'stage20-workload-mcp-test-${uniqueSuffix}'
+  params: {
+    location: location
+    uniqueSuffix: uniqueSuffix
+    env: 'test'
+    appServicePlanName: appServicePlanName
+    appInsightsName: appInsightsName
+    appServiceDelegatedSubnetId: stage00.outputs.appServiceDelegatedSubnetId
+    logAnalyticsId: stage00.outputs.logAnalyticsId
+    appServiceSpokeVnetName: stage00.outputs.appServiceSpokeVnetName
+    appServicePeSubnetName: stage00.outputs.appServicePeSubnetName
+    appServiceDnsZoneId: stage00.outputs.appServiceDnsZoneId
+    apimName: stage10.outputs.apimName
+  }
+  dependsOn: [
+    stage20dev
+  ]
+}
+
+// URL of the DEV sample MCP server (the first configured server) that the reusable deploy-agent
+// workflow injects as a dev agent's `server_url`. first() is safe: mcp/mcp.json always has >=1
 // server, and the sample 'mcp' server is the first entry by convention.
-var mcpSampleGatewayUrl = '${first(stage20.outputs.servers).url}/'
+var mcpSampleGatewayUrl = '${first(stage20dev.outputs.servers).url}/'
+var mcpSampleGatewayUrlTest = '${first(stage20test.outputs.servers).url}/'
 
 // ==================== STAGE 30 — GOVERNANCE ====================
 // Post-platform governance: project MCP connections, APIM API/policy/connection + Teams API,
@@ -450,13 +515,16 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     location: location
     uniqueSuffix: uniqueSuffix
     aiAccountName: stage13.outputs.aiAccountName
-    projectName: stage15.outputs.projectName
+    projectNameDev: stage15dev.outputs.projectName
+    projectNameTest: stage15test.outputs.projectName
     apimName: stage10.outputs.apimName
     providerAccountId: stage10.outputs.providerAccountId
-    projectId: stage15.outputs.projectId
+    projectIdDev: stage15dev.outputs.projectId
     gatewayUrl: stage10.outputs.gatewayUrl
-    servers: stage20.outputs.servers
-    mcpAudience: stage20.outputs.mcpAudience
+    serversDev: stage20dev.outputs.servers
+    serversTest: stage20test.outputs.servers
+    mcpAudienceDev: stage20dev.outputs.mcpAudience
+    mcpAudienceTest: stage20test.outputs.mcpAudience
     modelGatewayApimSubnetId: stage00.outputs.modelGatewayApimSubnetId
     providerBackendBaseUrl: providerBackendBaseUrl
     gatewayCallerAppId: gatewayCallerAppId
@@ -468,7 +536,8 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
     foundryPeSubnetCidr: foundryPeSubnetCidr
     appServicePeSubnetCidr: appServicePeSubnetCidr
-    teamsBotAppIds: teamsBotAppIds
+    teamsBotAppIdsDev: teamsBotAppIdsDev
+    teamsBotAppIdsTest: teamsBotAppIdsTest
     enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
     enableNonCompliantModelDemo: enableNonCompliantModelDemo
     modelName: modelName
@@ -481,8 +550,10 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     stage00
     stage10
     stage13
-    stage15
-    stage20
+    stage15dev
+    stage15test
+    stage20dev
+    stage20test
   ]
 }
 
@@ -500,7 +571,8 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
     bastionSubnetId: stage00.outputs.bastionSubnetId
     vmSubnetName: stage00.outputs.vmSubnetName
     aiAccountName: stage13.outputs.aiAccountName
-    projectName: stage15.outputs.projectName
+    projectNameDev: stage15dev.outputs.projectName
+    projectNameTest: stage15test.outputs.projectName
     keyVaultName: stage10.outputs.keyVaultName
     vmAdminPassword: vmAdminPassword
     vmAdminUsername: vmAdminUsername
@@ -515,7 +587,8 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
     stage00
     stage10
     stage13
-    stage15
+    stage15dev
+    stage15test
   ]
 }
 
@@ -535,14 +608,20 @@ output AZURE_RESOURCE_GROUP string = resourceGroup().name
 output GITHUB_ACTIONS_RUNNER_VM_NAME string = stage40.outputs.vmName
 
 
-@description('Foundry project endpoint the seeded agents are created against.')
-output AZURE_AI_PROJECT_ENDPOINT string = stage15.outputs.projectEndpoint
+@description('DEV Foundry project endpoint the seeded dev agents are created against.')
+output AZURE_AI_PROJECT_ENDPOINT_DEV string = stage15dev.outputs.projectEndpoint
+
+@description('TEST Foundry project endpoint the seeded test agents are created against.')
+output AZURE_AI_PROJECT_ENDPOINT_TEST string = stage15test.outputs.projectEndpoint
 
 @description('Foundry (Cognitive Services) account name. Used by the predown hook to delete capability hosts before teardown.')
 output AZURE_AI_ACCOUNT_NAME string = stage13.outputs.aiAccountName
 
-@description('Foundry project name. Used by the predown hook to delete capability hosts before teardown.')
-output AZURE_AI_PROJECT_NAME string = stage15.outputs.projectName
+@description('DEV Foundry project name. Used by the predown hook to delete the dev project capability host before teardown.')
+output AZURE_AI_PROJECT_NAME_DEV string = stage15dev.outputs.projectName
+
+@description('TEST Foundry project name. Used by the predown hook to delete the test project capability host before teardown.')
+output AZURE_AI_PROJECT_NAME_TEST string = stage15test.outputs.projectName
 
 @description('Model deployment name assigned to the default seeded agent.')
 output AZURE_AI_MODEL_DEPLOYMENT_NAME string = modelName
@@ -573,8 +652,11 @@ output TEAMS_YARP_WEBAPP_NAME string = stage10.outputs.yarpWebAppName
 @description('APIM instance name (the Teams-publish path pins the Teams API validate-jwt audience live once the bot App ID is known).')
 output TEAMS_APIM_NAME string = apimName
 
-@description('Name of the APIM Teams inbound API (== its path).')
-output TEAMS_APIM_API_NAME string = stage30.outputs.teamsApiName
+@description('Name of the DEV APIM Teams inbound API (== its path).')
+output TEAMS_APIM_API_NAME_DEV string = stage30.outputs.teamsApiNameDev
+
+@description('Name of the TEST APIM Teams inbound API (== its path).')
+output TEAMS_APIM_API_NAME_TEST string = stage30.outputs.teamsApiNameTest
 
 @description('Entra tenant the single-tenant bot registration lives in.')
 output TEAMS_TENANT_ID string = tenant().tenantId
@@ -588,31 +670,43 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 @description('Log Analytics workspace resource ID — the Teams-publish path passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
-@description('Per-environment MCP server URL (the APIM MCP gateway) for the primary sample server, identical to the target of the testweathermcpserver project connection. The reusable deploy-agent workflow injects this as the MCP tool `server_url` so an agent manifest with an MCP tool stays env-agnostic (the Foundry MCP tool schema requires one of server_url/connector_id/tunnel_id even when a project connection supplies auth).')
-output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
+@description('Per-environment DEV MCP server URL (the APIM MCP gateway) for the primary sample server. The reusable deploy-agent workflow injects this as the MCP tool `server_url` for dev agents.')
+output MCP_GATEWAY_URL_DEV string = mcpSampleGatewayUrl
+
+@description('Per-environment TEST MCP server URL (the APIM MCP gateway) for the primary sample server. The reusable deploy-agent workflow injects this as the MCP tool `server_url` for test agents.')
+output MCP_GATEWAY_URL_TEST string = mcpSampleGatewayUrlTest
 
 // --- MCP compliance (deploy-agent-network workflow) ---------------------------------
 @description('APIM instance name — used by the deploy-agent-network workflow to re-apply the MCP rate-limit policies on demand.')
 output MCP_COMPLIANCE_APIM_NAME string = apimName
 @description('Number of MCP servers governed by the applied compliance policies (from mcp/mcp.json).')
 output MCP_COMPLIANCE_SERVER_COUNT int = stage30.outputs.governedServerCount
-@description('MCP app registration audience the compliance policy validates the agent token against.')
-output MCP_COMPLIANCE_AUDIENCE string = stage20.outputs.mcpAudience
+@description('DEV MCP app registration audience the compliance policy validates the agent token against.')
+output MCP_COMPLIANCE_AUDIENCE_DEV string = stage20dev.outputs.mcpAudience
+@description('TEST MCP app registration audience the compliance policy validates the agent token against.')
+output MCP_COMPLIANCE_AUDIENCE_TEST string = stage20test.outputs.mcpAudience
 
-@description('Name of the private MCP (agent-tools) web app. The predeploy/postdeploy hooks open and re-close its SCM site so azd can zip-deploy the Node source.')
-output MCP_WEBAPP_NAME string = stage20.outputs.mcpWebAppName
+@description('Name of the DEV private MCP (agent-tools) web app. The predeploy/postdeploy hooks open and re-close its SCM site so azd can zip-deploy the Node source.')
+output MCP_WEBAPP_NAME_DEV string = stage20dev.outputs.mcpWebAppName
+
+@description('Name of the TEST private MCP (agent-tools) web app. The predeploy/postdeploy hooks open and re-close its SCM site so azd can zip-deploy the Node source.')
+output MCP_WEBAPP_NAME_TEST string = stage20test.outputs.mcpWebAppName
 
 // --- Foundry agent token governance (deploy-agent-network workflow) ----------------
 @description('APIM instance name — used by the deploy-agent-network workflow to re-apply the Foundry agent token-limit policy on demand.')
 output FOUNDRY_AGENTS_APIM_NAME string = apimName
-@description('APIM API resource name the deploy-agent-network workflow attaches the aggregated token-limit policy to.')
-output FOUNDRY_AGENTS_API_NAME string = stage30.outputs.foundryAgentsApiName
+@description('DEV APIM API resource name the deploy-agent-network workflow attaches the aggregated token-limit policy to.')
+output FOUNDRY_AGENTS_API_NAME_DEV string = stage30.outputs.foundryAgentsApiNameDev
+@description('TEST APIM API resource name the deploy-agent-network workflow attaches the aggregated token-limit policy to.')
+output FOUNDRY_AGENTS_API_NAME_TEST string = stage30.outputs.foundryAgentsApiNameTest
 @description('Primary Foundry account name — the deploy-agent-network workflow derives the backend entity ID from it.')
 output FOUNDRY_AGENTS_ACCOUNT_NAME string = stage13.outputs.aiAccountName
 @description('Optional caller audience the foundry-agents API validates (empty = tenant + signature only).')
 output FOUNDRY_AGENTS_AUDIENCE string = agentCallerAudience
-@description('Public path of the governed Foundry agent /responses API (<account>/<project>).')
-output FOUNDRY_AGENTS_API_PATH string = stage30.outputs.foundryAgentsApiPath
+@description('Public path of the governed DEV Foundry agent /responses API (<account>/<project-dev>).')
+output FOUNDRY_AGENTS_API_PATH_DEV string = stage30.outputs.foundryAgentsApiPathDev
+@description('Public path of the governed TEST Foundry agent /responses API (<account>/<project-test>).')
+output FOUNDRY_AGENTS_API_PATH_TEST string = stage30.outputs.foundryAgentsApiPathTest
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 

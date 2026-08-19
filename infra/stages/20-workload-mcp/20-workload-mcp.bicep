@@ -24,21 +24,25 @@ param appServicePeSubnetName string
 param appServiceDnsZoneId string
 param apimName string
 
+@description('Environment token (e.g. "dev" / "test"). Suffixes the MCP web app, its identity, the guarding app registration, and the APIM MCP server API(s) so dev and test each get their own isolated MCP workload on the shared platform.')
+param env string
+
 module mcpWebApp 'mcp-web-app.bicep' = {
-  name: 'stage20-mcp-web-app-${uniqueSuffix}'
+  name: 'stage20-mcp-web-app-${env}-${uniqueSuffix}'
   params: {
     location: location
     appInsightsName: appInsightsName
     appServiceDelegationSubnetId: appServiceDelegatedSubnetId
     aspName: appServicePlanName
     logAnalyticsId: logAnalyticsId
+    env: env
   }
 }
 
 // The YARP proxy is the public ingress (its own FQDN + managed cert is the Bot Channel
 // Adapter entry point), so it gets NO private endpoint — only the MCP web app does.
 module appServicePrivateEndpoint './network/app-service-private-endpoint.bicep' = {
-  name: 'stage20-mcp-private-endpoint-${uniqueSuffix}'
+  name: 'stage20-mcp-private-endpoint-${env}-${uniqueSuffix}'
   params: {
     appServiceSpokeVnetName: appServiceSpokeVnetName
     appServicePeSubnetName: appServicePeSubnetName
@@ -52,10 +56,10 @@ module appServicePrivateEndpoint './network/app-service-private-endpoint.bicep' 
   user-assigned managed identity (MI-as-FIC) so App Service built-in auth is secretless.
 */
 module mcpAppRegistration './gateway/app-registration.bicep' = {
-  name: 'mcp-appreg-${uniqueSuffix}-deployment'
+  name: 'mcp-appreg-${env}-${uniqueSuffix}-deployment'
   params: {
-    clientAppName: 'mcp-gateway-${uniqueSuffix}'
-    clientAppDisplayName: 'MCP Gateway (${uniqueSuffix})'
+    clientAppName: 'mcp-gateway-${env}-${uniqueSuffix}'
+    clientAppDisplayName: 'MCP Gateway ${env} (${uniqueSuffix})'
     webAppIdentityPrincipalId: mcpWebApp.outputs.mcpWebAppIdentityPrincipalId
   }
 }
@@ -66,9 +70,10 @@ module mcpAppRegistration './gateway/app-registration.bicep' = {
 // Backend FQDNs are generated at provision time, so they are NOT stored in mcp/mcp.json — they
 // are flowed in here, keyed by server name. The existing sample is the server named 'mcp'.
 module apimMcpServers './model-gateway/apim-mcp-servers.bicep' = {
-  name: 'mcp-apim-servers-${uniqueSuffix}-deployment'
+  name: 'mcp-apim-servers-${env}-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
+    env: env
     serverFqdns: {
       mcp: mcpWebApp.outputs.mcpWebAppFqdn
     }
@@ -81,7 +86,7 @@ module apimMcpServers './model-gateway/apim-mcp-servers.bicep' = {
   audience against the app registration's Application ID URI.
 */
 module mcpBuiltinAuth './gateway/builtin-auth.bicep' = {
-  name: 'mcp-auth-${uniqueSuffix}-deployment'
+  name: 'mcp-auth-${env}-${uniqueSuffix}-deployment'
   params: {
     appServiceName: mcpWebApp.outputs.mcpWebAppName
     clientId: mcpAppRegistration.outputs.clientAppId

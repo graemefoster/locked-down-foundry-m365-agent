@@ -50,27 +50,29 @@ if ($LASTEXITCODE -ne 0) {
 # Prefer the explicit runner repo URL (that is where the workflows + runner live); otherwise let
 # gh infer it from the current git remote.
 $repoArgs = @()
+$repoSlug = $null
 $repoUrl  = Get-OptionalEnv 'GITHUB_RUNNER_REPO_URL'
 if ($repoUrl) {
   $slug = ($repoUrl -replace '^https?://github\.com/', '') -replace '\.git$', ''
   $slug = $slug.Trim('/')
-  if ($slug) { $repoArgs = @('--repo', $slug) }
+  if ($slug) { $repoArgs = @('--repo', $slug); $repoSlug = $slug }
+}
+if (-not $repoSlug) {
+  $repoSlug = (gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null)
+  if ($LASTEXITCODE -ne 0) { $repoSlug = $null }
 }
 
-# --- Variable mapping: repo variable name  ->  source env var (Bicep output) -------------------
-# Ordered for readable output. Same name unless noted (MCP_SERVER_URL <- MCP_GATEWAY_URL).
-$variableMap = [ordered]@{
+# --- Shared (repo-scoped) variables: same for both environments -------------------------------
+# repo variable name -> source env var (Bicep output). Same name unless noted.
+$sharedMap = [ordered]@{
   AZURE_RESOURCE_GROUP           = 'AZURE_RESOURCE_GROUP'
-  AZURE_AI_PROJECT_ENDPOINT      = 'AZURE_AI_PROJECT_ENDPOINT'
+  AZURE_AI_ACCOUNT_NAME          = 'AZURE_AI_ACCOUNT_NAME'
   AZURE_AI_MODEL_DEPLOYMENT_NAME = 'AZURE_AI_MODEL_DEPLOYMENT_NAME'
-  MCP_SERVER_URL                 = 'MCP_GATEWAY_URL'
   MCP_COMPLIANCE_APIM_NAME       = 'MCP_COMPLIANCE_APIM_NAME'
-  MCP_COMPLIANCE_AUDIENCE        = 'MCP_COMPLIANCE_AUDIENCE'
+  MCP_COMPLIANCE_SERVER_COUNT    = 'MCP_COMPLIANCE_SERVER_COUNT'
   FOUNDRY_AGENTS_APIM_NAME       = 'FOUNDRY_AGENTS_APIM_NAME'
-  FOUNDRY_AGENTS_API_NAME        = 'FOUNDRY_AGENTS_API_NAME'
   FOUNDRY_AGENTS_ACCOUNT_NAME    = 'FOUNDRY_AGENTS_ACCOUNT_NAME'
   FOUNDRY_AGENTS_AUDIENCE        = 'FOUNDRY_AGENTS_AUDIENCE'
-  FOUNDRY_AGENTS_API_PATH        = 'FOUNDRY_AGENTS_API_PATH'
   TEAMS_APIM_NAME                = 'TEAMS_APIM_NAME'
   TEAMS_BOT_NAME                 = 'TEAMS_BOT_NAME'
   TEAMS_NAME_PREFIX              = 'TEAMS_NAME_PREFIX'
@@ -81,23 +83,71 @@ $variableMap = [ordered]@{
   AZURE_CONTAINER_REGISTRY_NAME  = 'AZURE_CONTAINER_REGISTRY_NAME'
 }
 
-$target = if ($repoArgs.Count) { $repoArgs[1] } else { '(current git remote)' }
+# --- Per-environment variables: pushed to the 'dev' and 'test' GitHub Environments -------------
+# The workflows read these as `vars.*` while running with `environment: dev|test`, so each
+# environment gets its OWN value from the matching env-suffixed Bicep output. The workflow-facing
+# name (left) is env-agnostic; the source output (right, {ENV} substituted) is per-env. The only
+# rename is MCP_SERVER_URL <- MCP_GATEWAY_URL_{ENV}.
+$perEnvMap = [ordered]@{
+  MCP_SERVER_URL             = 'MCP_GATEWAY_URL_{ENV}'
+  AZURE_AI_PROJECT_ENDPOINT  = 'AZURE_AI_PROJECT_ENDPOINT_{ENV}'
+  AZURE_AI_PROJECT_NAME      = 'AZURE_AI_PROJECT_NAME_{ENV}'
+  MCP_COMPLIANCE_AUDIENCE    = 'MCP_COMPLIANCE_AUDIENCE_{ENV}'
+  MCP_WEBAPP_NAME            = 'MCP_WEBAPP_NAME_{ENV}'
+  FOUNDRY_AGENTS_API_NAME    = 'FOUNDRY_AGENTS_API_NAME_{ENV}'
+  FOUNDRY_AGENTS_API_PATH    = 'FOUNDRY_AGENTS_API_PATH_{ENV}'
+  TEAMS_APIM_API_NAME        = 'TEAMS_APIM_API_NAME_{ENV}'
+}
+
+$environments = @('dev', 'test')
+
+$target = if ($repoSlug) { $repoSlug } else { '(current git remote)' }
 Write-Host "[postprovision] Syncing GitHub Actions variables on $target ..."
 
 $set = 0
 $skipped = @()
-foreach ($repoVar in $variableMap.Keys) {
-  $value = Get-OptionalEnv $variableMap[$repoVar]
+
+# --- 1) Shared repo-scoped variables ----------------------------------------------------------
+foreach ($repoVar in $sharedMap.Keys) {
+  $value = Get-OptionalEnv $sharedMap[$repoVar]
   if ([string]::IsNullOrWhiteSpace($value)) {
     $skipped += $repoVar
     continue
   }
   gh variable set $repoVar @repoArgs --body $value
   if ($LASTEXITCODE -eq 0) {
-    Write-Host "  [+] $repoVar"
+    Write-Host "  [+] (repo) $repoVar"
     $set++
   } else {
-    Write-Warning "  [!] Failed to set $repoVar (gh exit $LASTEXITCODE)."
+    Write-Warning "  [!] Failed to set repo variable $repoVar (gh exit $LASTEXITCODE)."
+  }
+}
+
+# --- 2) Per-environment variables -------------------------------------------------------------
+# Ensure each GitHub Environment exists first (idempotent PUT), then push the per-env values.
+# `gh variable set --env` requires the environment to already exist. Best-effort: the required
+# reviewers on 'test' are configured out-of-band (see docs) and are NOT overwritten by the PUT.
+foreach ($environment in $environments) {
+  if ($repoSlug) {
+    gh api -X PUT "repos/$repoSlug/environments/$environment" *> $null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "  [!] Could not ensure GitHub Environment '$environment' exists (need repo admin). Its per-env variables may fail to set."
+    }
+  }
+  foreach ($envVar in $perEnvMap.Keys) {
+    $sourceName = $perEnvMap[$envVar] -replace '\{ENV\}', $environment.ToUpper()
+    $value = Get-OptionalEnv $sourceName
+    if ([string]::IsNullOrWhiteSpace($value)) {
+      $skipped += "$environment/$envVar"
+      continue
+    }
+    gh variable set $envVar @repoArgs --env $environment --body $value
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "  [+] ($environment) $envVar"
+      $set++
+    } else {
+      Write-Warning "  [!] Failed to set $environment variable $envVar (gh exit $LASTEXITCODE)."
+    }
   }
 }
 

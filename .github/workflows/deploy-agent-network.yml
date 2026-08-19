@@ -14,19 +14,23 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 #      with no `tokenLimits` stays denied on the Responses API. Caller identity governs metering +
 #      throttling only; the caller's own token is forwarded to Foundry for authorization.
 #
-#   2. YARP edge routes (deny-by-default) — patches the YARP proxy web app's ReverseProxy__Routes__*
-#      appSettings so ONLY explicitly-wired, per-agent paths reach APIM:
-#        * exposeToM365=true    -> an explicit /teams/<agentName> route (the Bot messaging endpoint).
-#        * exposeFoundryApi=true -> an explicit /agents/<agentName>/{**remainder} route (one PER agent)
-#          that YARP prepends (PathPrefix) with the governed foundry-agents API path before forwarding
-#          to APIM. Because the agent name is baked into the edge path, an agent that is NOT allowlisted
-#          has no route and is 404'd at YARP — blocked EARLY, before it reaches APIM. APIM then reads
-#          the agent from the path and rewrites the tail onto the Foundry agent endpoint, so every
-#          protocol (openai/responses, invocations, …) an agent exposes is proxied through.
+#   2. YARP edge routes (deny-by-default) — patches the SHARED YARP proxy web app's
+#      ReverseProxy__Routes__* appSettings so ONLY explicitly-wired, per-agent, per-env paths reach
+#      APIM. Edge paths are env-prefixed so dev + test coexist on the one shared proxy:
+#        * exposeToM365=true    -> an explicit /<env>/teams/<agentName> route (the Bot messaging
+#          endpoint). PathSet rewrites it onto the per-env APIM Teams API ('teams-<env>').
+#        * exposeFoundryApi=true -> an explicit /<env>/agents/<agentName>/{**remainder} route (one PER
+#          agent) that YARP strips the '/<env>' prefix from, then prepends (PathPrefix) with the
+#          governed per-env foundry-agents API path before forwarding to APIM. Because the agent name
+#          is baked into the edge path, an agent that is NOT allowlisted has no route and is 404'd at
+#          YARP — blocked EARLY, before it reaches APIM. APIM then reads the agent from the path and
+#          rewrites the tail onto the Foundry agent endpoint, so every protocol (openai/responses,
+#          invocations, …) an agent exposes is proxied through.
 #      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
-#      explicitly wired 404s at the edge. Stale ReverseProxy__Routes__* settings are pruned, so
-#      removing an agent / flipping a flag removes its route. cluster1 (-> APIM) + the AI settings
-#      are never touched.
+#      explicitly wired 404s at the edge. Route keys are env-namespaced (teams_<env>_* /
+#      foundry_<env>_*); the prune preserves the SIBLING env's routes while removing this env's stale
+#      ones (+ legacy unprefixed keys), so removing an agent / flipping a flag removes its route.
+#      cluster1 (-> APIM) + the AI settings are never touched.
 #
 #   3. MCP allowlist (per agent) — resolves the name-only mcp/mcp-policy.json against LIVE agent
 #      identities read from the Foundry DATA PLANE (instance_identity.client_id on the project
@@ -64,6 +68,13 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 # ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Which environment to apply the network governance to (dev or test)."
+        type: choice
+        required: true
+        default: dev
+        options: [dev, test]
 
 permissions:
   contents: read
@@ -72,6 +83,11 @@ jobs:
   apply-agent-network:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
+    # Selects the per-env GitHub Environment variables (FOUNDRY_AGENTS_API_NAME,
+    # FOUNDRY_AGENTS_API_PATH, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT, ...) and gates
+    # `test` behind its required reviewers. The `env` input is also passed to the env-suffixed
+    # governance Bicep modules so their backend ids / policies match the per-env APIM APIs.
+    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v5
 
@@ -84,6 +100,7 @@ jobs:
       - name: Aggregate tokenLimits and apply the Foundry agent token-limit policy
         shell: pwsh
         env:
+          ENV:             ${{ inputs.environment }}
           RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
           API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
@@ -148,9 +165,11 @@ jobs:
             $file = Join-Path $_.FullName 'agent-network.json'
             if (Test-Path $file) {
               $doc = Get-Content $file -Raw | ConvertFrom-Json
-              $tl  = $doc.tokenLimits
+              # Per-env schema: read environments.<env>.tokenLimits (a missing block => deny-all).
+              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
+              $tl  = if ($null -ne $envBlock) { $envBlock.tokenLimits } else { $null }
               if ($null -eq $tl) {
-                Write-Host "$file has no 'tokenLimits' — skipping (that agent stays deny-all on the Responses API)."
+                Write-Host "$file has no 'tokenLimits' for env '$($env:ENV)' — skipping (that agent stays deny-all on the Responses API)."
               } else {
                 $principals = @($tl.principals) | Where-Object { $_ -ne $null }
                 if ($principals.Count -eq 0) {
@@ -190,6 +209,7 @@ jobs:
               apimName=$env:APIM_NAME `
               apiName=$env:API_NAME `
               foundryAccountName=$env:ACCOUNT_NAME `
+              env=$env:ENV `
               projectName=$projectName `
               tenantId=$tenantId `
               callerAudience=$audience `
@@ -201,9 +221,11 @@ jobs:
       - name: Wire YARP edge routes (deny-by-default) from agent-network.json
         shell: pwsh
         env:
-          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
-          YARP_WEBAPP_NAME: ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
-          FOUNDRY_API_PATH: ${{ vars.FOUNDRY_AGENTS_API_PATH }}
+          ENV:                 ${{ inputs.environment }}
+          RESOURCE_GROUP:      ${{ vars.AZURE_RESOURCE_GROUP }}
+          YARP_WEBAPP_NAME:    ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
+          FOUNDRY_API_PATH:    ${{ vars.FOUNDRY_AGENTS_API_PATH }}
+          TEAMS_APIM_API_NAME: ${{ vars.TEAMS_APIM_API_NAME }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or [string]::IsNullOrWhiteSpace($env:YARP_WEBAPP_NAME)) {
             throw "Set repo variables AZURE_RESOURCE_GROUP and TEAMS_YARP_WEBAPP_NAME (the postprovision hook syncs them; or run 'azd env refresh')."
@@ -223,15 +245,24 @@ jobs:
             if (Test-Path $file) {
               $doc  = Get-Content $file -Raw | ConvertFrom-Json
               $name = $_.Name
-              if ($doc.exposeToM365 -eq $true) {
+              # Per-env schema: read environments.<env>.{exposeToM365,exposeFoundryApi}. A missing
+              # env block => the agent has no edge exposure for this environment.
+              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
+              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
                 $teamsAgents += $name
               }
-              if ($doc.exposeFoundryApi -eq $true) {
+              if ($null -ne $envBlock -and $envBlock.exposeFoundryApi -eq $true) {
                 if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
                 $foundryAgents += $name
               }
             }
+          }
+
+          # Teams edge routes forward to the per-env APIM Teams API (path '<apiPath>-<env>'), surfaced
+          # as the per-env TEAMS_APIM_API_NAME variable. Required only if any agent exposes to M365.
+          if ($teamsAgents.Count -gt 0 -and [string]::IsNullOrWhiteSpace($env:TEAMS_APIM_API_NAME)) {
+            throw "An agent sets exposeToM365=true for env '$($env:ENV)' but TEAMS_APIM_API_NAME is not set (the postprovision hook syncs it to the '$($env:ENV)' GitHub Environment; or run 'azd env refresh')."
           }
 
           # DESIRED ReverseProxy__Routes__* appSettings (ASP.NET '__' -> ':' config binding). We
@@ -248,9 +279,13 @@ jobs:
           $desired['ReverseProxy__Routes__route1__Match__Path'] = '/__disabled_no_route__/{**catch-all}'
 
           foreach ($name in ($teamsAgents | Sort-Object -Unique)) {
-            $rid = "teams_$($name -replace '-','_')"
-            $desired["ReverseProxy__Routes__${rid}__ClusterId"]   = 'cluster1'
-            $desired["ReverseProxy__Routes__${rid}__Match__Path"] = "/teams/$name"
+            # Env-namespaced route-id KEY (dev/test coexist on the shared proxy) + env-prefixed edge
+            # path. PathSet rewrites the edge path onto the per-env APIM Teams API ('teams-<env>'),
+            # so /dev/teams/<name> -> /teams-dev/<name> at cluster1 (APIM).
+            $rid = "teams_$($env:ENV)_$($name -replace '-','_')"
+            $desired["ReverseProxy__Routes__${rid}__ClusterId"]              = 'cluster1'
+            $desired["ReverseProxy__Routes__${rid}__Match__Path"]            = "/$($env:ENV)/teams/$name"
+            $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathSet"] = "/$($env:TEAMS_APIM_API_NAME)/$name"
           }
 
           # EXPLICIT per-agent Foundry ingress (deny-by-default at the edge): one route per agent
@@ -270,14 +305,18 @@ jobs:
             }
             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
             foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
-              $rid = "foundry_$($name -replace '-','_')"
-              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                 = 'cluster1'
-              $desired["ReverseProxy__Routes__${rid}__Match__Path"]               = "/agents/$name/{**remainder}"
-              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathPrefix"] = $p
+              # Env-namespaced KEY + env-prefixed edge path. Strip the '/<env>' edge prefix, then
+              # prepend the governed foundry-agents API path ($p), so
+              #   /dev/agents/<name>/... -> (remove /dev) /agents/<name>/... -> $p/agents/<name>/...
+              $rid = "foundry_$($env:ENV)_$($name -replace '-','_')"
+              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                       = 'cluster1'
+              $desired["ReverseProxy__Routes__${rid}__Match__Path"]                     = "/$($env:ENV)/agents/$name/{**remainder}"
+              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathRemovePrefix"] = "/$($env:ENV)"
+              $desired["ReverseProxy__Routes__${rid}__Transforms__1__PathPrefix"]       = $p
             }
           }
 
-          Write-Host "Desired YARP routes ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
+          Write-Host "Desired YARP routes for env '$($env:ENV)' ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
           $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
 
           # Read the current appSettings so we can compute which route settings are now stale.
@@ -295,7 +334,17 @@ jobs:
           # Prune any existing ReverseProxy__Routes__* settings NOT in the desired set, so removing
           # an agent / flipping a flag removes its route (deny-by-default). Runs after set so the
           # desired routes are already live before any stale ones are removed.
-          $stale = @($current | Where-Object { $_.name -like 'ReverseProxy__Routes__*' -and -not $desired.Contains($_.name) } | ForEach-Object { $_.name })
+          # Prune scope: this env's routes + any LEGACY unprefixed route keys (one-time migration
+          # cleanup from the old single-env schema), but PRESERVE the sibling env's routes — the
+          # YARP proxy is SHARED, so dev and test routes coexist on it. route1 (the neutered
+          # catch-all) is always in $desired, so it is never pruned.
+          $otherEnv = if ($env:ENV -eq 'dev') { 'test' } else { 'dev' }
+          $stale = @($current | Where-Object {
+              $_.name -like 'ReverseProxy__Routes__*' -and
+              -not $desired.Contains($_.name) -and
+              $_.name -notlike "ReverseProxy__Routes__teams_${otherEnv}_*" -and
+              $_.name -notlike "ReverseProxy__Routes__foundry_${otherEnv}_*"
+            } | ForEach-Object { $_.name })
           if ($stale.Count -gt 0) {
             Write-Host "Pruning $($stale.Count) stale route setting(s): $($stale -join ', ')"
             az webapp config appsettings delete -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --setting-names @stale --output none
@@ -308,6 +357,7 @@ jobs:
       - name: Resolve agent names to AppIds and apply the MCP allowlist policies
         shell: pwsh
         env:
+          ENV:              ${{ inputs.environment }}
           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:        ${{ vars.MCP_COMPLIANCE_APIM_NAME }}
           MCP_AUDIENCE:     ${{ vars.MCP_COMPLIANCE_AUDIENCE }}
@@ -345,6 +395,7 @@ jobs:
             --parameters `
               apimName=$env:APIM_NAME `
               mcpAudience=$env:MCP_AUDIENCE `
+              env=$env:ENV `
               tenantId=$tenantId `
               "mcpPolicy=@$resolvedPolicy" `
             --output none
@@ -358,6 +409,7 @@ jobs:
       - name: Resolve exposeToM365 agents to bot App IDs and pin the Teams APIM audience allowlist
         shell: pwsh
         env:
+          ENV:              ${{ inputs.environment }}
           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:        ${{ vars.TEAMS_APIM_NAME }}
           ACCOUNT_NAME:     ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
@@ -391,7 +443,8 @@ jobs:
             $file = Join-Path $_.FullName 'agent-network.json'
             if (Test-Path $file) {
               $doc = Get-Content $file -Raw | ConvertFrom-Json
-              if ($doc.exposeToM365 -eq $true) {
+              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
+              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
                 if ($_.Name -notmatch $segRe) { throw "${file}: agent folder name '$($_.Name)' is not a safe route segment (allowed: letters, digits, . -)." }
                 $teamsAgents += $_.Name
               }
@@ -422,6 +475,7 @@ jobs:
             --parameters `
               apimName=$env:APIM_NAME `
               foundryAccountName=$env:ACCOUNT_NAME `
+              env=$env:ENV `
               projectName=$projectName `
               expectedTenantId=$tenantId `
               "botAppIds=@$botIdsFile" `

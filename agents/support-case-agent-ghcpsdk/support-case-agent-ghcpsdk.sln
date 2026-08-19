@@ -1,0 +1,34 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{827E0CD3-B72D-47B6-A68D-7590B98EB39B}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "agent", "agent", "{096B6098-F141-7114-B090-72D1899D8853}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "support_case_agent_ghcpsdk.Agent", "src\agent\support_case_agent_ghcpsdk.Agent.csproj", "{7C1DA4E4-9162-86FF-7FDB-315934886630}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "SolutionItems", "SolutionItems", "{EFA7A435-8249-498D-9A14-1FDAF565E047}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7C1DA4E4-9162-86FF-7FDB-315934886630}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7C1DA4E4-9162-86FF-7FDB-315934886630}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7C1DA4E4-9162-86FF-7FDB-315934886630}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7C1DA4E4-9162-86FF-7FDB-315934886630}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{096B6098-F141-7114-B090-72D1899D8853} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
+		{7C1DA4E4-9162-86FF-7FDB-315934886630} = {096B6098-F141-7114-B090-72D1899D8853}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A9A03B36-21F5-44F7-88BF-81FBD22A2938}
+	EndGlobalSection
+EndGlobal

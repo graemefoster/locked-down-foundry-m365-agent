@@ -1,0 +1,7 @@
+# actionlint configuration.
+# Register the labels of the in-VNet self-hosted runner so actionlint does not flag
+# `runs-on: [self-hosted, vnet, foundry-private]` as unknown labels.
+self-hosted-runner:
+  labels:
+    - vnet
+    - foundry-private

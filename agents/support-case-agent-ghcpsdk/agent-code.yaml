@@ -1,0 +1,27 @@
+object: agent.version
+name: support-case-agent-ghcpsdk
+description: General IT support agent (GitHub Copilot SDK, dotnet_10) with GraeCRM / GraeIdentity / escalation skills, served through the model gateway.
+# CODE (source-zip) deploy of the GitHub Copilot SDK hosted agent under src/agent. Instead of a
+# prebuilt container image, Foundry receives the `dotnet publish` output as a zip
+# (code_configuration) and runs it on its managed dotnet_10 runtime. No Dockerfile is used - the
+# reusable workflow builds with `dotnet publish` directly (build-method: dotnet).
+#
+# The bundled skills (skills/**, copied into the publish output by the csproj) include an
+# escalation tool implemented as the `escalate` subcommand of this .NET agent binary
+# (see EscalationTool.cs / Program.cs) — no Python runtime dependency.
+definition:
+  kind: hosted
+  protocol_versions:
+    - protocol: invocations
+      version: 1.0.0
+  cpu: "0.5"
+  memory: "1Gi"
+  code_configuration:
+    runtime: dotnet_10
+    entry_point: ["dotnet", "support-case-agent-ghcpsdk.Agent.dll"]
+    dependency_resolution: bundled
+  environment_variables:
+    MODEL_DEPLOYMENT_NAME: "gpt-5.4"
+    # Injected per-environment by the deploy workflow (dev/test) from the AZURE_AI_PROJECT_ENDPOINT
+    # variable. CopilotSessionManager reads this to build the BYOK provider base URL.
+    FOUNDRY_PROJECT_ENDPOINT: "{{FOUNDRY_PROJECT_ENDPOINT}}"
