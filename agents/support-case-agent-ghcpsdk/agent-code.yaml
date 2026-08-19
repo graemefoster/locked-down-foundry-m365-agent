@@ -2,9 +2,10 @@ object: agent.version
 name: support-case-agent-ghcpsdk
 description: General IT support agent (GitHub Copilot SDK, dotnet_10) with GraeCRM / GraeIdentity / escalation skills, served through the model gateway.
 # CODE (source-zip) deploy of the GitHub Copilot SDK hosted agent under src/agent. Instead of a
-# prebuilt container image, Foundry receives the `dotnet publish` output as a zip
-# (code_configuration) and runs it on its managed dotnet_10 runtime. No Dockerfile is used - the
-# reusable workflow builds with `dotnet publish` directly (build-method: dotnet).
+# prebuilt container image, Foundry receives the publish output as a zip (code_configuration) and
+# runs it on its managed dotnet_10 runtime. The reusable workflow builds that output from the
+# Dockerfile's `build` SDK stage (docker build --target build), so no .NET SDK is needed on the
+# runner and no image is pushed to the ACR.
 #
 # The bundled skills (skills/**, copied into the publish output by the csproj) include an
 # escalation tool implemented as the `escalate` subcommand of this .NET agent binary
