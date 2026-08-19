@@ -104,10 +104,19 @@ jobs:
           }
 
           # Zip with the binaries at the archive ROOT (Foundry's code_configuration expects the
-          # entry_point DLL at the top level of the zip).
+          # entry_point DLL at the top level of the zip). Use the `zip` CLI (Linux runner) NOT
+          # Compress-Archive: `zip` stores Unix mode bits, so bundled native executables (e.g. the
+          # GitHub Copilot CLI at runtimes/<rid>/native/copilot) stay executable after Foundry
+          # extracts the zip. Compress-Archive / .NET ZipFile drop the mode -> "Permission denied".
           $zipPath = Join-Path (Get-Location) 'agent.zip'
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath -Force
+          Push-Location $publishDir
+          try {
+            zip --quiet --recurse-paths --symlinks $zipPath .
+            if ($LASTEXITCODE -ne 0) { throw "zip failed (is the 'zip' package installed on the runner?)." }
+          } finally {
+            Pop-Location
+          }
           Write-Host "Created $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,2)) MiB)"
 
       # No-Dockerfile alternative: build the publish output with `dotnet publish` DIRECTLY on the
@@ -137,14 +146,21 @@ jobs:
           }
 
           # Zip with the binaries at the archive ROOT (Foundry's code_configuration expects the
-          # entry_point DLL at the top level of the zip).
+          # entry_point DLL at the top level of the zip). Use the `zip` CLI (not Compress-Archive)
+          # so Unix mode bits are preserved and bundled native executables stay executable.
           $zipPath = Join-Path (Get-Location) 'agent.zip'
           if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
-          Compress-Archive -Path (Join-Path $publishDir '*') -DestinationPath $zipPath -Force
+          Push-Location $publishDir
+          try {
+            zip --quiet --recurse-paths --symlinks $zipPath .
+            if ($LASTEXITCODE -ne 0) { throw "zip failed (is the 'zip' package installed on the runner?)." }
+          } finally {
+            Pop-Location
+          }
           Write-Host "Created $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,2)) MiB)"
 
       - name: Upload agent code artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: agent-code
           path: agent.zip
@@ -161,7 +177,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent code artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: agent-code
 
@@ -244,7 +260,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent code artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: agent-code
 

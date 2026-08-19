@@ -20,6 +20,10 @@
 #                 compression"), so we install the buildx plugin and build OCI images.
 #   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
 #   git, jq     - actions/checkout and general workflow plumbing
+#   zip, unzip  - the CODE-agent deploy zips the publish output with the `zip` CLI so it stores
+#                 Unix mode bits (PowerShell Compress-Archive / .NET ZipFile do NOT), keeping
+#                 bundled native executables (e.g. the GitHub Copilot CLI) executable after Foundry
+#                 extracts the code_configuration zip
 #   yq          - agent.yaml -> agent.json in the reusable deploy-agent.yml (this is why
 #                 that conversion no longer needs a separate GitHub-hosted job)
 #
@@ -32,6 +36,8 @@ packages:
   - curl
   - git
   - jq
+  - zip
+  - unzip
   - python3
   - python3-pip
   - python3-venv
