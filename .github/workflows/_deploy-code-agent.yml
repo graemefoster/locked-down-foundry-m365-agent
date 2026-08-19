@@ -160,7 +160,7 @@ jobs:
           Write-Host "Created $zipPath ($([math]::Round((Get-Item $zipPath).Length/1MB,2)) MiB)"
 
       - name: Upload agent code artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: agent-code
           path: agent.zip
@@ -177,7 +177,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent code artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: agent-code
 
@@ -260,7 +260,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent code artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: agent-code
 

@@ -65,7 +65,7 @@ jobs:
           cat agent.json
 
       - name: Upload agent manifest artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-manifest
           path: agent.json
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent manifest artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: agent-manifest
 
@@ -135,7 +135,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download agent manifest artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: agent-manifest
 
