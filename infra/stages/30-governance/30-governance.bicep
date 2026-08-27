@@ -145,6 +145,14 @@ module apimMcpComplianceAllDev './model-gateway/apim-mcp-compliance-all.bicep' =
   }
 }
 
+// SERIALIZED APIM config writes: every module below writes children (apis/backends/policies)
+// to the SAME shared APIM instance. APIM's management plane does NOT tolerate concurrent
+// config writes — parallel PUTs intermittently fail with 502 "InternalServerError"
+// (BadGateway). They are therefore chained end-to-end via dependsOn so exactly one APIM
+// config change is in flight at a time (same conservative sequencing the firewall RCGs and
+// apimLockdown already use). The chain is:
+//   mcpComplianceDev -> mcpComplianceTest -> apiPolicy -> teamsDev -> teamsTest
+//     -> foundryAgentsApiDev -> foundryAgentsApiTest -> foundryAgentLimitsDev -> foundryAgentLimitsTest
 module apimMcpComplianceAllTest './model-gateway/apim-mcp-compliance-all.bicep' = {
   name: 'mcp-compliance-all-test-${uniqueSuffix}-deployment'
   params: {
@@ -153,6 +161,9 @@ module apimMcpComplianceAllTest './model-gateway/apim-mcp-compliance-all.bicep' 
     mcpAudience: mcpAudienceTest
     tenantId: tenant().tenantId
   }
+  dependsOn: [
+    apimMcpComplianceAllDev
+  ]
 }
 
 module apimApiPolicy './model-gateway/apim-api-policy.bicep' = {
@@ -164,6 +175,9 @@ module apimApiPolicy './model-gateway/apim-api-policy.bicep' = {
     projectMiClientId: gatewayCallerAppId
     callerProjectResourceId: projectIdDev
   }
+  dependsOn: [
+    apimMcpComplianceAllTest
+  ]
 }
 
 // Advertise APIM to the DEV (primary) Foundry project as an ApiManagement connection. The
@@ -192,6 +206,9 @@ module apimTeamsApiDev './model-gateway/apim-teams-api.bicep' = {
     botAppIds: teamsBotAppIdsDev
     expectedTenantId: tenant().tenantId
   }
+  dependsOn: [
+    apimApiPolicy
+  ]
 }
 
 module apimTeamsApiTest './model-gateway/apim-teams-api.bicep' = {
@@ -204,8 +221,15 @@ module apimTeamsApiTest './model-gateway/apim-teams-api.bicep' = {
     botAppIds: teamsBotAppIdsTest
     expectedTenantId: tenant().tenantId
   }
+  dependsOn: [
+    apimTeamsApiDev
+  ]
 }
 
+// APIM Foundry agent /responses inbound API (structure) + token-governance policy, PER ENV. The
+// API is created once here; the deny-by-default token-limit + llm-emit-token-metric policy is
+// applied with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
+// per-env agents/<name>/agent-network.json by the deploy-agent-network workflow. Always deployed.
 // APIM Foundry agent /responses inbound API (structure) + token-governance policy, PER ENV. The
 // API is created once here; the deny-by-default token-limit + llm-emit-token-metric policy is
 // applied with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
@@ -218,6 +242,9 @@ module apimFoundryAgentsApiDev './model-gateway/apim-foundry-agents-api.bicep' =
     foundryAccountName: aiAccountName
     projectName: projectNameDev
   }
+  dependsOn: [
+    apimTeamsApiTest
+  ]
 }
 
 module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' = {
@@ -228,6 +255,9 @@ module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' 
     foundryAccountName: aiAccountName
     projectName: projectNameTest
   }
+  dependsOn: [
+    apimFoundryAgentsApiDev
+  ]
 }
 
 module apimFoundryAgentLimitsDev './model-gateway/apim-foundry-agent-limits.bicep' = {
@@ -241,6 +271,9 @@ module apimFoundryAgentLimitsDev './model-gateway/apim-foundry-agent-limits.bice
     tenantId: tenant().tenantId
     callerAudience: agentCallerAudience
   }
+  dependsOn: [
+    apimFoundryAgentsApiTest
+  ]
 }
 
 module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bicep' = {
@@ -256,6 +289,9 @@ module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bic
     // agentLimits omitted -> DENY-ALL until the deploy-agent-network workflow supplies the
     // aggregated agents/<name>/agent-network.json allowlist.
   }
+  dependsOn: [
+    apimFoundryAgentLimitsDev
+  ]
 }
 
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
