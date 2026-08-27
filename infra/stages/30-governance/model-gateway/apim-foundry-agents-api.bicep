@@ -62,9 +62,12 @@ var envApiName = '${apiName}-${env}'
 var backendId = 'foundry-agents-${foundryAccountName}-${env}'
 var backendBaseUrl = 'https://${foundryAccountName}.services.ai.azure.com'
 
-// Public path = '<account>/<project>' (per the design). The account/project prefix is only for
-// addressing/routing at the edge; the policy rewrites onto the Foundry agent endpoint path.
-var apiPath = '${foundryAccountName}/${projectName}'
+// Public path = the env-suffixed API name (e.g. 'foundry-agents-dev'), giving each project its
+// OWN distinct edge root (parity with the teams API's 'teams-<env>' path) rather than a shared
+// '<account>/...' prefix. The edge path is only for addressing/routing; the policy rewrites onto
+// the Foundry agent endpoint path using the projectName param (NOT parsed from this path), so the
+// public root and the backend project name are fully decoupled.
+var apiPath = envApiName
 
 resource foundryAgentsBackend 'Microsoft.ApiManagement/service/backends@2024-05-01' = {
   parent: apim
@@ -132,8 +135,11 @@ resource agentPassthroughOperations 'Microsoft.ApiManagement/service/apis/operat
 @description('APIM API resource name (attach the limits policy to this).')
 output apiName string = foundryAgentsApi.name
 
-@description('Public API path (<account>/<project>).')
+@description('Public API path (the env-suffixed API name, e.g. foundry-agents-dev).')
 output apiPath string = foundryAgentsApi.properties.path
+
+@description('Backend Foundry project name (fed to the rewrite policy; decoupled from the edge path).')
+output projectName string = projectName
 
 @description('Backend entity ID the policy targets.')
 output backendId string = backendId

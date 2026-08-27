@@ -16,6 +16,7 @@
     "gatewayModelCapacity": { "value": "${GATEWAY_MODEL_CAPACITY=30}" },
     "gatewayCallerAppId": { "value": "${GATEWAY_CALLER_APP_ID=}" },
     "agentCallerAudience": { "value": "${AGENT_CALLER_AUDIENCE=}" },
+    "deployTestFoundryAgents": { "value": "${DEPLOY_TEST_FOUNDRY_AGENTS=true}" },
     "deployerPublicIp": { "value": "${DEPLOYER_PUBLIC_IP=}" },
     "deployerPrincipalId": { "value": "${AZURE_PRINCIPAL_ID=}" },
     "deployerPrincipalType": { "value": "${DEPLOYER_PRINCIPAL_TYPE=User}" },
