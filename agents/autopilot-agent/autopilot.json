@@ -20,12 +20,6 @@
         "McpServers.Excel.All",
         "McpServers.Calendar.All"
       ]
-    },
-    {
-      "resourceAppId": "2a72489c-aab2-4b65-b93a-a91edccf33b8",
-      "scopes": [
-        "Ado.Mcp.Tools"
-      ]
     }
   ]
 }
