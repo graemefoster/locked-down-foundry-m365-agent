@@ -28,7 +28,8 @@ definition:
 agent_endpoint:
   protocol_configuration:
     responses: {}
-    activity: {}
+    activity:
+      enable_m365_public_endpoint: true
   authorization_schemes:
     - type: Entra
     - type: BotServiceRbac
