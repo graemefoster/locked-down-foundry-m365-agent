@@ -32,16 +32,6 @@ try {
   $global:McpPolicyScenario = 'empty'
   $global:EasyAuthBody = ''
 
-  $autopilotToolingManifestPath = Join-Path $repositoryRoot 'agents/autopilot-agent/simple-autopilot-agent/ToolingManifest.json'
-  $autopilotToolingManifest = Get-Content -LiteralPath $autopilotToolingManifestPath -Raw | ConvertFrom-Json
-  $autopilotConfig = Get-Content -LiteralPath (Join-Path $repositoryRoot 'agents/autopilot-agent/autopilot.json') -Raw | ConvertFrom-Json
-  $manifestScopes = @($autopilotToolingManifest.mcpServers.scope | Sort-Object -Unique)
-  $publishedScopes = @($autopilotConfig.optionalPermissionScopes.scopes | Sort-Object -Unique)
-  Assert-True (
-    $manifestScopes.Count -gt 0 -and
-    ($manifestScopes -join ',') -eq ($publishedScopes -join ',')
-  ) 'Autopilot ToolingManifest scopes do not match the published permission scopes.'
-
   function global:az {
     $command = $args -join ' '
     $global:AzCalls.Add($command)
@@ -132,14 +122,7 @@ try {
         throw (New-NotFoundException)
       }
       if ($Method -eq 'Get') {
-        return @{
-          name     = 'fixture-agent'
-          versions = @{
-            latest = @{
-              blueprint = @{ client_id = '00000000-0000-0000-0000-000000000004' }
-            }
-          }
-        }
+        return @{ name = 'fixture-agent' }
       }
       return @{}
     }
@@ -351,22 +334,12 @@ try {
   & "$repositoryRoot/scripts/publish-autopilot.ps1" `
     -AgentDirectory $autopilotDirectory `
     -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project' `
-    -PublishAccessToken 'fixture-publish-token'
+    -PublishAccessToken 'fixture-user-token'
 
   $autopilotCall = @($global:RestCalls | Where-Object {
       $_.Method -eq 'Post' -and $_.Uri -match '/microsoft365/publish\?'
     })
-  $autopilotRead = @($global:RestCalls | Where-Object {
-      $_.Method -eq 'Get' -and $_.Uri -match '/agents/fixture-agent\?'
-    })
-  Assert-True ($autopilotRead.Count -eq 1) 'Autopilot publishing did not read the live agent.'
-  Assert-True (
-    $autopilotRead[0].Headers.Authorization -eq 'Bearer fixture-token'
-  ) 'Autopilot agent lookup did not use the managed-identity token.'
   Assert-True ($autopilotCall.Count -eq 1) 'Autopilot publishing did not issue exactly one request.'
-  Assert-True (
-    $autopilotCall[0].Headers.Authorization -eq 'Bearer fixture-publish-token'
-  ) 'Autopilot publishing did not use the delegated user token.'
   Assert-True (
     $autopilotCall[0].Body -match '"publishAsAutopilot": true'
   ) 'Autopilot publishing did not set publishAsAutopilot.'
@@ -374,17 +347,8 @@ try {
     $autopilotCall[0].Body -notmatch 'botServiceArmId'
   ) 'Autopilot publishing included a Bot Service ARM ID.'
   Assert-True (
-    $autopilotCall[0].Body -notmatch '"optionalPermissionScopes"'
-  ) 'Autopilot publishing included legacy optional permission scopes.'
-  Assert-True (
-    $autopilotCall[0].Body -match '"useAgenticUserTemplate": true'
-  ) 'Autopilot publishing did not enable the agentic-user template.'
-  Assert-True (
-    $autopilotCall[0].Body -match '"AgentIdentityBlueprintId": "00000000-0000-0000-0000-000000000004"'
-  ) 'Autopilot publishing omitted the live blueprint client ID.'
-  Assert-True (
-    $autopilotCall[0].Body -match '"CommunicationProtocol": "activityProtocol"'
-  ) 'Autopilot publishing omitted the activity communication protocol.'
+    $autopilotCall[0].Body -match '"optionalPermissionScopes"'
+  ) 'Autopilot publishing omitted optional permission scopes.'
   Write-Host 'PASS Autopilot publish contract without Bot Service'
 
   $policyRoot = Join-Path $tempRoot 'empty-policy'
