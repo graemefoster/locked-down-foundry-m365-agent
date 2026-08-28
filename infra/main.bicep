@@ -36,7 +36,7 @@ Foundry Spoke: AI Services, Storage, CosmosDB, AI Search, VM/Bastion
   //hosted agents:
   'northcentralus'
 ])
-param location string = 'eastus'
+param location string = any(resourceGroup().location)
 
 @description('Name for your AI Services resource.')
 param aiServices string = 'aiservices'
@@ -341,7 +341,18 @@ module stage10 'stages/10-platform/10-platform.bicep' = {
 // A free-plan Azure API Center that continuously syncs the stage-10 APIM APIs (incl. the
 // MCP servers) into a discoverable inventory. Runs AFTER stage 10 — the APIM instance must
 // exist first (apimName is threaded from stage 10's output to order this stage).
-module stage11 'stages/11-api-center/11-api-center.bicep' = {
+var apiCenterSupportedLocations = [
+  'australiaeast'
+  'canadacentral'
+  'centralindia'
+  'eastus'
+  'francecentral'
+  'swedencentral'
+  'uksouth'
+  'westeurope'
+]
+
+module stage11 'stages/11-api-center/11-api-center.bicep' = if (contains(apiCenterSupportedLocations, location)) {
   name: 'stage11-api-center-${uniqueSuffix}'
   params: {
     location: location
@@ -618,4 +629,4 @@ output GITHUB_RUNNER_USER string = vmAdminUsername
 output AZURE_CONTAINER_REGISTRY_NAME string = stage10.outputs.acrName
 
 @description('Name of the Azure API Center that inventories the platform APIs (continuously synced from APIM).')
-output AZURE_API_CENTER_NAME string = stage11.outputs.apiCenterName
+output AZURE_API_CENTER_NAME string = contains(apiCenterSupportedLocations, location) ? stage11!.outputs.apiCenterName : ''
