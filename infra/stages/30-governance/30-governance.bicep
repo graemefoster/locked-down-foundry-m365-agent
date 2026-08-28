@@ -78,9 +78,6 @@ param modelSkuName string
 @description('Optional audience the caller Entra token must carry for the foundry-agents API (empty = validate tenant + signature only).')
 param agentCallerAudience string = ''
 
-@description('Deploy the TEST foundry-agents APIM API + token-limit policy. Set false to skip TEST (e.g. to get a green provision past intermittent APIM StandardV2 502s on API create), then re-enable to create it as an isolated calm-plane deployment.')
-param deployTestFoundryAgents bool = true
-
 // One Foundry project connection per governed MCP server, PER project (dev + test). These
 // connections are not used by the Agents capability host, so they run here (stage 30) rather
 // than at project-create time. Each env's project points at its own env-suffixed MCP server.
@@ -250,7 +247,7 @@ module apimFoundryAgentsApiDev './model-gateway/apim-foundry-agents-api.bicep' =
   ]
 }
 
-module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' = if (deployTestFoundryAgents) {
+module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' = {
   name: 'foundry-agents-apim-api-test-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
@@ -258,11 +255,8 @@ module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' 
     foundryAccountName: aiAccountName
     projectName: projectNameTest
   }
-  // Sequenced AFTER the dev limits policy (not immediately after the dev API) so an unrelated
-  // management-plane operation lands between the two API-create PUTs, giving APIM StandardV2 room
-  // to recover instead of hammering it with back-to-back creates (intermittent 502 mitigation).
   dependsOn: [
-    apimFoundryAgentLimitsDev
+    apimFoundryAgentsApiDev
   ]
 }
 
@@ -278,15 +272,15 @@ module apimFoundryAgentLimitsDev './model-gateway/apim-foundry-agent-limits.bice
     callerAudience: agentCallerAudience
   }
   dependsOn: [
-    apimFoundryAgentsApiDev
+    apimFoundryAgentsApiTest
   ]
 }
 
-module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bicep' = if (deployTestFoundryAgents) {
+module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bicep' = {
   name: 'foundry-agent-limits-test-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
-    apiName: apimFoundryAgentsApiTest!.outputs.apiName
+    apiName: apimFoundryAgentsApiTest.outputs.apiName
     env: 'test'
     foundryAccountName: aiAccountName
     projectName: projectNameTest
@@ -296,7 +290,7 @@ module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bic
     // aggregated agents/<name>/agent-network.json allowlist.
   }
   dependsOn: [
-    apimFoundryAgentsApiTest
+    apimFoundryAgentLimitsDev
   ]
 }
 
@@ -362,17 +356,11 @@ output governedServerCount int = apimMcpComplianceAllDev.outputs.governedServerC
 @description('APIM API name for the governed DEV Foundry agent /responses endpoint.')
 output foundryAgentsApiNameDev string = apimFoundryAgentsApiDev.outputs.apiName
 
-@description('APIM API name for the governed TEST Foundry agent /responses endpoint (empty when TEST is toggled off).')
-output foundryAgentsApiNameTest string = deployTestFoundryAgents ? apimFoundryAgentsApiTest!.outputs.apiName : ''
+@description('APIM API name for the governed TEST Foundry agent /responses endpoint.')
+output foundryAgentsApiNameTest string = apimFoundryAgentsApiTest.outputs.apiName
 
-@description('Public path of the governed DEV Foundry agent /responses API (foundry-agents-dev).')
+@description('Public path of the governed DEV Foundry agent /responses API (<account>/<project-dev>).')
 output foundryAgentsApiPathDev string = apimFoundryAgentsApiDev.outputs.apiPath
 
-@description('Public path of the governed TEST Foundry agent /responses API (foundry-agents-test; empty when TEST is toggled off).')
-output foundryAgentsApiPathTest string = deployTestFoundryAgents ? apimFoundryAgentsApiTest!.outputs.apiPath : ''
-
-@description('Backend Foundry project name for the DEV agents API (fed to the rewrite policy).')
-output foundryAgentsProjectNameDev string = apimFoundryAgentsApiDev.outputs.projectName
-
-@description('Backend Foundry project name for the TEST agents API (fed to the rewrite policy; empty when TEST is toggled off).')
-output foundryAgentsProjectNameTest string = deployTestFoundryAgents ? apimFoundryAgentsApiTest!.outputs.projectName : ''
+@description('Public path of the governed TEST Foundry agent /responses API (<account>/<project-test>).')
+output foundryAgentsApiPathTest string = apimFoundryAgentsApiTest.outputs.apiPath

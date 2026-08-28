@@ -96,9 +96,6 @@ param gatewayCallerAppId string = ''
 @description('Optional audience the caller Entra token must carry for the governed foundry-agents /responses API (e.g. api://<clientId>). Empty = validate tenant + signature only.')
 param agentCallerAudience string = ''
 
-@description('Deploy the TEST foundry-agents APIM API + token-limit policy. Set false to get a green provision past intermittent APIM StandardV2 502s on the second (test) API create; re-enable later to create it as an isolated calm-plane deployment.')
-param deployTestFoundryAgents bool = true
-
 @description('Optional provisioning-operator public IP (bare IPv4 or CIDR) to allow into the PUBLIC YARP edge for dev/test, in addition to the Microsoft Teams inbound ranges. Empty (default) = Teams-only. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook). Network layer only — callers still need a valid Entra token + token-limit allowlist entry.')
 param deployerPublicIp string = ''
 
@@ -548,7 +545,6 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelVersion: modelVersion
     modelSkuName: modelSkuName
     agentCallerAudience: agentCallerAudience
-    deployTestFoundryAgents: deployTestFoundryAgents
   }
   dependsOn: [
     stage00
@@ -707,14 +703,10 @@ output FOUNDRY_AGENTS_API_NAME_TEST string = stage30.outputs.foundryAgentsApiNam
 output FOUNDRY_AGENTS_ACCOUNT_NAME string = stage13.outputs.aiAccountName
 @description('Optional caller audience the foundry-agents API validates (empty = tenant + signature only).')
 output FOUNDRY_AGENTS_AUDIENCE string = agentCallerAudience
-@description('Public path of the governed DEV Foundry agent /responses API (foundry-agents-dev).')
+@description('Public path of the governed DEV Foundry agent /responses API (<account>/<project-dev>).')
 output FOUNDRY_AGENTS_API_PATH_DEV string = stage30.outputs.foundryAgentsApiPathDev
-@description('Public path of the governed TEST Foundry agent /responses API (foundry-agents-test).')
+@description('Public path of the governed TEST Foundry agent /responses API (<account>/<project-test>).')
 output FOUNDRY_AGENTS_API_PATH_TEST string = stage30.outputs.foundryAgentsApiPathTest
-@description('Backend Foundry project name for the DEV agents API — the workflow feeds it to the rewrite policy.')
-output FOUNDRY_AGENTS_PROJECT_NAME_DEV string = stage30.outputs.foundryAgentsProjectNameDev
-@description('Backend Foundry project name for the TEST agents API — the workflow feeds it to the rewrite policy.')
-output FOUNDRY_AGENTS_PROJECT_NAME_TEST string = stage30.outputs.foundryAgentsProjectNameTest
 
 // ---- Self-hosted GitHub runner (consumed by the predown hook to deregister on teardown) ----
 

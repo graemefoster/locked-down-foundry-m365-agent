@@ -59,11 +59,11 @@ name: Wire agent network governance (Foundry token limits + YARP edge routes + M
 #
 # Prerequisites (Bicep outputs synced to repo variables by the postprovision hook; run
 # `azd env refresh` if any are missing):
-#   Token limits: AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
-#     FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_PROJECT_NAME, and (optional) FOUNDRY_AGENTS_AUDIENCE.
-#   YARP edge routes: FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME.
+#   Token limits + YARP: AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
+#     FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
+#     FOUNDRY_AGENTS_AUDIENCE.
 #   MCP allowlist: MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT.
-#   Teams audience: TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_PROJECT_NAME,
+#   Teams audience: TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH,
 #     AZURE_AI_PROJECT_ENDPOINT.
 # ---------------------------------------------------------------------------
 on:
@@ -105,30 +105,26 @@ jobs:
           APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
           API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
           ACCOUNT_NAME:    ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
-          PROJECT_NAME:    ${{ vars.FOUNDRY_AGENTS_PROJECT_NAME }}
+          API_PATH:        ${{ vars.FOUNDRY_AGENTS_API_PATH }}
           CALLER_AUDIENCE: ${{ vars.FOUNDRY_AGENTS_AUDIENCE }}
         run: |
-          # When deployTestFoundryAgents=false the TEST foundry-agents API/policy is not provisioned,
-          # so its Bicep outputs (hence these repo variables) are empty. Skip gracefully rather than
-          # fail — re-enable the toggle + reprovision to create it, then re-run this workflow.
-          if ([string]::IsNullOrWhiteSpace($env:API_NAME)) {
-            Write-Host "FOUNDRY_AGENTS_API_NAME is empty for env '$($env:ENV)' -> the foundry-agents API is not deployed for this env (deployTestFoundryAgents=false). Skipping the token-limit policy."
-            exit 0
-          }
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
               [string]::IsNullOrWhiteSpace($env:API_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:PROJECT_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
               [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME, FOUNDRY_AGENTS_PROJECT_NAME and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME, FOUNDRY_AGENTS_API_PATH and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
           }
-          # The policy rewrites onto /api/projects/<project>/agents/... — <project> comes straight from
-          # the dedicated FOUNDRY_AGENTS_PROJECT_NAME repo variable (decoupled from the edge path).
-          $projectName = $env:PROJECT_NAME
+          # The policy rewrites onto /api/projects/<project>/agents/... — derive <project> from the
+          # API path repo variable ('<account>/<project>'), so no extra repo var is needed.
+          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
+          if ([string]::IsNullOrWhiteSpace($projectName)) {
+            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
+          }
 
           # Aggregate every agents/<name>/agent-network.json `tokenLimits` block into one
           # { agents: [ { agentRef, principals } ] } object. agentRef defaults to the folder name;
@@ -294,7 +290,7 @@ jobs:
 
           # EXPLICIT per-agent Foundry ingress (deny-by-default at the edge): one route per agent
           # that sets exposeFoundryApi=true, matching /agents/<name>/{**remainder} and PREPENDING the
-          # governed foundry-agents API path ($p = 'foundry-agents-<env>') before forwarding to APIM
+          # governed foundry-agents API path ($p = '<account>/<project>') before forwarding to APIM
           # (cluster1). Because the agent name is baked into the Match path, an agent that is NOT
           # allowlisted has NO route and is 404'd at YARP — blocked EARLY, before it ever reaches
           # APIM. YARP applies just a PathPrefix, so
@@ -303,7 +299,10 @@ jobs:
           # APIM then meters/throttles the agent and rewrites the tail onto
           # /api/projects/<project>/agents/<name>/endpoint/protocols/... — so every protocol an agent
           # exposes is proxied through the one governed API (no per-agent, per-protocol route).
-          if ($foundryAgents.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
+          if ($foundryAgents.Count -gt 0) {
+            if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
+              throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
+            }
             $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
             foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
               # Env-namespaced KEY + env-prefixed edge path. Strip the '/<env>' edge prefix, then
@@ -315,9 +314,6 @@ jobs:
               $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathRemovePrefix"] = "/$($env:ENV)"
               $desired["ReverseProxy__Routes__${rid}__Transforms__1__PathPrefix"]       = $p
             }
-          }
-          elseif ($foundryAgents.Count -gt 0) {
-            Write-Warning "$($foundryAgents.Count) agent(s) set exposeFoundryApi=true but FOUNDRY_AGENTS_API_PATH is empty for env '$($env:ENV)' -> the foundry-agents API is not deployed here (deployTestFoundryAgents=false). Skipping their edge routes (they stay 404'd at YARP)."
           }
 
           Write-Host "Desired YARP routes for env '$($env:ENV)' ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
@@ -417,30 +413,26 @@ jobs:
           RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
           APIM_NAME:        ${{ vars.TEAMS_APIM_NAME }}
           ACCOUNT_NAME:     ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
-          PROJECT_NAME:     ${{ vars.FOUNDRY_AGENTS_PROJECT_NAME }}
+          API_PATH:         ${{ vars.FOUNDRY_AGENTS_API_PATH }}
           FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
-          # When deployTestFoundryAgents=false the TEST foundry-agents project name output is empty,
-          # so FOUNDRY_AGENTS_PROJECT_NAME is unset for this env — skip the Teams audience pinning
-          # gracefully (re-enable the toggle + reprovision to create it, then re-run this workflow).
-          if ([string]::IsNullOrWhiteSpace($env:PROJECT_NAME)) {
-            Write-Host "FOUNDRY_AGENTS_PROJECT_NAME is empty for env '$($env:ENV)' -> the foundry-agents API is not deployed for this env (deployTestFoundryAgents=false). Skipping the Teams audience allowlist."
-            exit 0
-          }
           if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
               [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
               [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:PROJECT_NAME) -or
+              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
               [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_PROJECT_NAME and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
+            throw "Set repo variables AZURE_RESOURCE_GROUP, TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
           }
           $tenantId = az account show --query tenantId -o tsv
           if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
             throw "Failed to resolve tenant ID from 'az account show'."
           }
-          # apim-teams-api.bicep rewrites onto /api/projects/<project>/... — <project> comes straight
-          # from the dedicated FOUNDRY_AGENTS_PROJECT_NAME repo variable (decoupled from the edge path).
-          $projectName = $env:PROJECT_NAME
+          # apim-teams-api.bicep rewrites onto /api/projects/<project>/... — derive <project> from the
+          # governed foundry-agents API path repo variable ('<account>/<project>'), as the token step does.
+          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
+          if ([string]::IsNullOrWhiteSpace($projectName)) {
+            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
+          }
 
           # Collect the agent NAMES that opt into Teams/M365 (agents/<name>/agent-network.json
           # exposeToM365=true). The folder name is a /teams/<name> URL segment, so restrict it to
