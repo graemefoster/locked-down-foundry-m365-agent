@@ -25,5 +25,4 @@ agent_endpoint:
     activity:
       enable_m365_public_endpoint: true
   authorization_schemes:
-    - type: Entra
     - type: BotServiceRbac

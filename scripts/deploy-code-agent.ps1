@@ -106,7 +106,7 @@ try {
     $uploadUrl
 
   if ($LASTEXITCODE -ne 0) {
-    throw "Code upload failed for '$agentName'."
+    throw "Code upload failed for '$agentName'. Response: $uploadBody"
   }
 }
 finally {
