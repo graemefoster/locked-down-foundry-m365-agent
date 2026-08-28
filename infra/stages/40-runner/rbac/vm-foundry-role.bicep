@@ -3,7 +3,7 @@
   -----------------------
   Grants the runner VM's system-assigned managed identity the Foundry User role on the
   Foundry project. Agent deploys now run from the in-VNet self-hosted GitHub Actions runner
-  (per-agent .github/workflows/deploy-*-agent.yml -> scripts/create-agent.ps1), executing natively
+  (per-agent .github/workflows/deploy-*-agent.yml -> scripts/deploy-*-agent.ps1), executing natively
   on this VM; that script acquires a managed-identity token via IMDS and calls the Agents API, so
   this role assignment must exist before the deploy workflow runs.
 */

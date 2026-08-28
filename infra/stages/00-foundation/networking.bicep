@@ -82,7 +82,8 @@ module foundrySpokeVnet './network/foundry-spoke-vnet.bicep' = {
 module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
   name: 'appservice-spoke-${uniqueSuffix}-deployment'
   params: {
-    location: location
+    // TEMPORARY: East US App Service allocations are unavailable for this subscription.
+    location: 'australiaeast'
     vnetName: '${vnetName}-appservice-spoke'
     firewallPrivateIp: firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp

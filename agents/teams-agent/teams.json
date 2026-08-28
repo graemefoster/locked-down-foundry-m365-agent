@@ -1,0 +1,11 @@
+{
+  "displayName": "Teams Agent",
+  "publishScope": "Shared",
+  "appVersion": "1.0.0",
+  "shortDescription": "Foundry M365 agent",
+  "fullDescription": "A Foundry agent published to Microsoft 365 from a locked-down virtual network.",
+  "developerName": "Azure Developer",
+  "developerWebsiteUrl": "https://azure.microsoft.com",
+  "privacyUrl": "https://privacy.microsoft.com",
+  "termsOfUseUrl": "https://www.microsoft.com/legal/terms-of-use"
+}

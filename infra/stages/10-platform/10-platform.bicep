@@ -30,7 +30,7 @@ param acrName string
 param appInsightsName string
 param apimGatewayUrl string
 
-@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
+@description('Optional provisioning-operator public IP to allow into the public YARP edge. Empty = Teams-only.')
 param deployerPublicIp string = ''
 
 // Storage SKU (computed in main; stage 00 needs it too; used by the storage CMK re-PUT).

@@ -1,484 +1,57 @@
-name: Wire agent network governance (Foundry token limits + YARP edge routes + MCP allowlist)
+name: Apply agent network governance
 
-# ---------------------------------------------------------------------------
-# The single "make the network governance match the repo" workflow. Run it after `azd up` and
-# again whenever you add/remove an agent or edit a manifest — it (re-)applies, in one shot, every
-# governance layer that provisioning intentionally leaves DENY-ALL. `azd up` seeds no agents and
-# applies deny-all everywhere, so nothing is reachable until this runs.
-#
-# It compiles the repo's source-of-truth files into four enforcement points:
-#
-#   1. Foundry token limits (per agent) — aggregates every agents/<name>/agent-network.json
-#      `tokenLimits` block into one allowlist and re-deploys apim-foundry-agent-limits.bicep (the
-#      same module `azd up` runs, but with the real allowlist instead of empty=deny-all). An agent
-#      with no `tokenLimits` stays denied on the Responses API. Caller identity governs metering +
-#      throttling only; the caller's own token is forwarded to Foundry for authorization.
-#
-#   2. YARP edge routes (deny-by-default) — patches the SHARED YARP proxy web app's
-#      ReverseProxy__Routes__* appSettings so ONLY explicitly-wired, per-agent, per-env paths reach
-#      APIM. Edge paths are env-prefixed so dev + test coexist on the one shared proxy:
-#        * exposeToM365=true    -> an explicit /<env>/teams/<agentName> route (the Bot messaging
-#          endpoint). PathSet rewrites it onto the per-env APIM Teams API ('teams-<env>').
-#        * exposeFoundryApi=true -> an explicit /<env>/agents/<agentName>/{**remainder} route (one PER
-#          agent) that YARP strips the '/<env>' prefix from, then prepends (PathPrefix) with the
-#          governed per-env foundry-agents API path before forwarding to APIM. Because the agent name
-#          is baked into the edge path, an agent that is NOT allowlisted has no route and is 404'd at
-#          YARP — blocked EARLY, before it reaches APIM. APIM then reads the agent from the path and
-#          rewrites the tail onto the Foundry agent endpoint, so every protocol (openai/responses,
-#          invocations, …) an agent exposes is proxied through.
-#      The image's baked `route1` {**catch-all} is NEUTERED to a non-routable path so anything not
-#      explicitly wired 404s at the edge. Route keys are env-namespaced (teams_<env>_* /
-#      foundry_<env>_*); the prune preserves the SIBLING env's routes while removing this env's stale
-#      ones (+ legacy unprefixed keys), so removing an agent / flipping a flag removes its route.
-#      cluster1 (-> APIM) + the AI settings are never touched.
-#
-#   3. MCP allowlist (per agent) — resolves the name-only mcp/mcp-policy.json against LIVE agent
-#      identities read from the Foundry DATA PLANE (instance_identity.client_id on the project
-#      endpoint), dropping any name with no matching / identity-less agent, then re-deploys
-#      apim-mcp-compliance-all.bicep so each governed MCP server (mcp/mcp.json) only answers calls
-#      from allowlisted agents. An agent not in the allowlist gets 403 when it tries to enumerate /
-#      call MCP tools. (This is why the step must run AFTER the agents are seeded.)
-#
-#   4. Teams audience allowlist — resolves the exposeToM365 agent NAMES to their bot Microsoft App
-#      IDs (each = the agent identity instance_identity.principal_id, the msaAppId the publish path
-#      gives the Azure Bot Service) from the Foundry DATA PLANE, then re-deploys apim-teams-api.bicep
-#      with `botAppIds` set so the Teams API validate-jwt ALSO pins the token audience (not just the
-#      Bot Framework issuer + serviceurl tenant). No exposeToM365 agent -> empty allowlist =
-#      issuer-only (the provision default). This closes the defense-in-depth gap the provision leaves
-#      open (principal_id only exists after seeding), so it also runs AFTER the agents are seeded.
-#
-# Ordering: token limits + YARP routes only need authoring-time data, so they run first; the MCP +
-# Teams-audience steps read the private Foundry data plane, so they need the agents already seeded.
-# Run the per-agent deploy-*-agent.yml workflows first, then this. Re-run it BEFORE publishing an
-# agent to Teams (_deploy-agent.yml) so its /teams/<name> edge route exists.
-#
-# Runner: reads the PRIVATE Foundry data plane + does control-plane ARM / App Service ops, so it
-# MUST run on the in-VNet self-hosted runner — the VM authenticates with its own managed identity
-# (IMDS, holds Contributor on the resource group). No Microsoft Graph permission is needed.
-# Lockdown: workflow_dispatch only (forks cannot queue) + repository guard.
-#
-# Prerequisites (Bicep outputs synced to repo variables by the postprovision hook; run
-# `azd env refresh` if any are missing):
-#   Token limits + YARP: AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME,
-#     FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH, TEAMS_YARP_WEBAPP_NAME, and (optional)
-#     FOUNDRY_AGENTS_AUDIENCE.
-#   MCP allowlist: MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT.
-#   Teams audience: TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH,
-#     AZURE_AI_PROJECT_ENDPOINT.
-# ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Which environment to apply the network governance to (dev or test)."
-        type: choice
-        required: true
-        default: dev
-        options: [dev, test]
 
 permissions:
   contents: read
 
 jobs:
-  apply-agent-network:
+  apply:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
-    # Selects the per-env GitHub Environment variables (FOUNDRY_AGENTS_API_NAME,
-    # FOUNDRY_AGENTS_API_PATH, MCP_COMPLIANCE_AUDIENCE, AZURE_AI_PROJECT_ENDPOINT, ...) and gates
-    # `test` behind its required reviewers. The `env` input is also passed to the env-suffixed
-    # governance Bicep modules so their backend ids / policies match the per-env APIM APIs.
-    environment: ${{ inputs.environment }}
     steps:
       - uses: actions/checkout@v5
 
-      # az is installed on the Linux worker VM by cloud-init. Authenticate as the VM
-      # managed identity (holds Contributor on the resource group) — no secrets needed.
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
 
-      - name: Aggregate tokenLimits and apply the Foundry agent token-limit policy
+      - name: Apply Foundry token limits
         shell: pwsh
-        env:
-          ENV:             ${{ inputs.environment }}
-          RESOURCE_GROUP:  ${{ vars.AZURE_RESOURCE_GROUP }}
-          APIM_NAME:       ${{ vars.FOUNDRY_AGENTS_APIM_NAME }}
-          API_NAME:        ${{ vars.FOUNDRY_AGENTS_API_NAME }}
-          ACCOUNT_NAME:    ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
-          API_PATH:        ${{ vars.FOUNDRY_AGENTS_API_PATH }}
-          CALLER_AUDIENCE: ${{ vars.FOUNDRY_AGENTS_AUDIENCE }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
-              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:API_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
-              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, FOUNDRY_AGENTS_APIM_NAME, FOUNDRY_AGENTS_API_NAME, FOUNDRY_AGENTS_API_PATH and FOUNDRY_AGENTS_ACCOUNT_NAME (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
-          }
-          $tenantId = az account show --query tenantId -o tsv
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
-            throw "Failed to resolve tenant ID from 'az account show'."
-          }
-          # The policy rewrites onto /api/projects/<project>/agents/... — derive <project> from the
-          # API path repo variable ('<account>/<project>'), so no extra repo var is needed.
-          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
-          if ([string]::IsNullOrWhiteSpace($projectName)) {
-            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
-          }
+          ./scripts/apply-token-limits.ps1 `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.FOUNDRY_AGENTS_APIM_NAME }}" `
+            -ApiName "${{ vars.FOUNDRY_AGENTS_API_NAME }}" `
+            -FoundryAccountName "${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}" `
+            -CallerAudience "${{ vars.FOUNDRY_AGENTS_AUDIENCE }}"
 
-          # Aggregate every agents/<name>/agent-network.json `tokenLimits` block into one
-          # { agents: [ { agentRef, principals } ] } object. agentRef defaults to the folder name;
-          # a manifest may override it (e.g. "*" wildcard). Manifests with no `tokenLimits` are
-          # skipped (that agent stays deny-all on the Responses API). Keys starting with "//" are
-          # comments and ignored.
-          $agents = @()
-          # Strict validation of every principal BEFORE it reaches the Bicep policy generator.
-          # The manifest is repo-controlled (trusted via PR), but the values are interpolated into
-          # APIM policy XML / C# match expressions, so reject anything that could break out of a
-          # string literal or is otherwise malformed. This is the primary injection guard (the
-          # Bicep module also strips quotes/backslashes as defence-in-depth).
-          $emailRe  = '^[^@\s"\\<>]+@[^@\s"\\<>]+\.[^@\s"\\<>]+$'
-          $guidRe   = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-          $refRe    = '^[A-Za-z0-9._*-]+$'
-          $periods  = @('Hourly','Daily','Weekly','Monthly','Yearly')
-          function Test-Principal([object]$p, [string]$src) {
-            $hasEmail = $p.PSObject.Properties.Name -contains 'email' -and -not [string]::IsNullOrWhiteSpace([string]$p.email)
-            $hasAppId = $p.PSObject.Properties.Name -contains 'appId' -and -not [string]::IsNullOrWhiteSpace([string]$p.appId)
-            if (-not ($hasEmail -or $hasAppId)) { throw "${src}: a principal has neither 'email' nor 'appId'." }
-            if ($hasEmail -and ([string]$p.email) -notmatch $emailRe) { throw "${src}: invalid email '$($p.email)'." }
-            if ($hasAppId -and ([string]$p.appId) -notmatch $guidRe) { throw "${src}: 'appId' must be a GUID, got '$($p.appId)'." }
-            $tpm = 0
-            if (-not [int]::TryParse([string]$p.tokensPerMinute, [ref]$tpm) -or $tpm -le 0) {
-              throw "${src}: 'tokensPerMinute' must be a positive integer, got '$($p.tokensPerMinute)'."
-            }
-            if ($p.PSObject.Properties.Name -contains 'tokenQuota') {
-              $tq = 0
-              if (-not [int]::TryParse([string]$p.tokenQuota, [ref]$tq) -or $tq -le 0) {
-                throw "${src}: 'tokenQuota' must be a positive integer, got '$($p.tokenQuota)'."
-              }
-              $period = if ($p.PSObject.Properties.Name -contains 'tokenQuotaPeriod') { [string]$p.tokenQuotaPeriod } else { 'Daily' }
-              if ($periods -notcontains $period) { throw "${src}: 'tokenQuotaPeriod' must be one of $($periods -join ', '), got '$period'." }
-            }
-          }
-
-          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
-            $file = Join-Path $_.FullName 'agent-network.json'
-            if (Test-Path $file) {
-              $doc = Get-Content $file -Raw | ConvertFrom-Json
-              # Per-env schema: read environments.<env>.tokenLimits (a missing block => deny-all).
-              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
-              $tl  = if ($null -ne $envBlock) { $envBlock.tokenLimits } else { $null }
-              if ($null -eq $tl) {
-                Write-Host "$file has no 'tokenLimits' for env '$($env:ENV)' — skipping (that agent stays deny-all on the Responses API)."
-              } else {
-                $principals = @($tl.principals) | Where-Object { $_ -ne $null }
-                if ($principals.Count -eq 0) {
-                  Write-Host "::warning::$file 'tokenLimits' has no 'principals' — skipping (that agent stays deny-all)."
-                } else {
-                  $agentRef = if ($tl.PSObject.Properties.Name -contains 'agentRef' -and
-                                  -not [string]::IsNullOrWhiteSpace([string]$tl.agentRef)) {
-                    [string]$tl.agentRef
-                  } else {
-                    $_.Name
-                  }
-                  if ($agentRef -notmatch $refRe) { throw "${file}: invalid agentRef '$agentRef' (allowed: letters, digits, . _ - *)." }
-                  foreach ($p in $principals) { Test-Principal -p $p -src $file }
-                  $agents += [pscustomobject]@{ agentRef = $agentRef; principals = $principals }
-                  Write-Host "Loaded $($principals.Count) principal(s) for agent '$agentRef' from $file."
-                }
-              }
-            }
-          }
-          if ($agents.Count -eq 0) {
-            Write-Host "::warning::No agents/*/agent-network.json with tokenLimits found — applying DENY-ALL."
-          }
-
-          $merged = [pscustomobject]@{ agents = $agents }
-          $limitsFile = Join-Path $env:RUNNER_TEMP 'agent-limits.json'
-          $merged | ConvertTo-Json -Depth 10 | Set-Content -Path $limitsFile -Encoding utf8
-          Write-Host "Aggregated $($agents.Count) agent allowlist(s) -> $limitsFile."
-
-          $audience = if ([string]::IsNullOrWhiteSpace($env:CALLER_AUDIENCE)) { '' } else { $env:CALLER_AUDIENCE }
-
-          Write-Host "Applying Foundry agent token-limit policy to API '$($env:API_NAME)' on APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)'."
-          az deployment group create `
-            --resource-group $env:RESOURCE_GROUP `
-            --name "foundry-agent-limits-$(Get-Date -Format 'yyyyMMddHHmmss')" `
-            --template-file infra/stages/30-governance/model-gateway/apim-foundry-agent-limits.bicep `
-            --parameters `
-              apimName=$env:APIM_NAME `
-              apiName=$env:API_NAME `
-              foundryAccountName=$env:ACCOUNT_NAME `
-              env=$env:ENV `
-              projectName=$projectName `
-              tenantId=$tenantId `
-              callerAudience=$audience `
-              "agentLimits=@$limitsFile" `
-            --output none
-          if ($LASTEXITCODE -ne 0) { throw "Foundry agent token-limit deployment failed." }
-          Write-Host "Foundry agent token-limit policy applied (aggregated from agents/*/agent-network.json)."
-
-      - name: Wire YARP edge routes (deny-by-default) from agent-network.json
+      - name: Apply YARP routes
         shell: pwsh
-        env:
-          ENV:                 ${{ inputs.environment }}
-          RESOURCE_GROUP:      ${{ vars.AZURE_RESOURCE_GROUP }}
-          YARP_WEBAPP_NAME:    ${{ vars.TEAMS_YARP_WEBAPP_NAME }}
-          FOUNDRY_API_PATH:    ${{ vars.FOUNDRY_AGENTS_API_PATH }}
-          TEAMS_APIM_API_NAME: ${{ vars.TEAMS_APIM_API_NAME }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or [string]::IsNullOrWhiteSpace($env:YARP_WEBAPP_NAME)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP and TEAMS_YARP_WEBAPP_NAME (the postprovision hook syncs them; or run 'azd env refresh')."
-          }
+          ./scripts/apply-yarp-routes.ps1 `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -YarpWebAppName "${{ vars.TEAMS_YARP_WEBAPP_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}" `
+            -TeamsApiName "${{ vars.TEAMS_APIM_API_NAME }}"
 
-          # Agent folder name is used both as a route-id-key segment and a /teams/<name> URL path
-          # segment. Restrict it to characters safe in a URL path AND, after '-'->'_' substitution,
-          # a POSIX-safe env-var name. NO '_' allowed in the folder name itself: the appSetting key
-          # uses '__' as its delimiter, and we substitute the name's '-' to '_' for the key (below),
-          # so an underscore in the name could forge a spurious '__' delimiter.
-          $segRe = '^[A-Za-z0-9.-]+$'
-          $teamsAgents   = @()
-          $foundryAgents = @()
-
-          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
-            $file = Join-Path $_.FullName 'agent-network.json'
-            if (Test-Path $file) {
-              $doc  = Get-Content $file -Raw | ConvertFrom-Json
-              $name = $_.Name
-              # Per-env schema: read environments.<env>.{exposeToM365,exposeFoundryApi}. A missing
-              # env block => the agent has no edge exposure for this environment.
-              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
-              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
-                if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
-                $teamsAgents += $name
-              }
-              if ($null -ne $envBlock -and $envBlock.exposeFoundryApi -eq $true) {
-                if ($name -notmatch $segRe) { throw "${file}: agent folder name '$name' is not a safe route segment (allowed: letters, digits, . -)." }
-                $foundryAgents += $name
-              }
-            }
-          }
-
-          # Teams edge routes forward to the per-env APIM Teams API (path '<apiPath>-<env>'), surfaced
-          # as the per-env TEAMS_APIM_API_NAME variable. Required only if any agent exposes to M365.
-          if ($teamsAgents.Count -gt 0 -and [string]::IsNullOrWhiteSpace($env:TEAMS_APIM_API_NAME)) {
-            throw "An agent sets exposeToM365=true for env '$($env:ENV)' but TEAMS_APIM_API_NAME is not set (the postprovision hook syncs it to the '$($env:ENV)' GitHub Environment; or run 'azd env refresh')."
-          }
-
-          # DESIRED ReverseProxy__Routes__* appSettings (ASP.NET '__' -> ':' config binding). We
-          # manage ONLY the Routes; cluster1 (-> APIM) and the AI settings in the baked config are
-          # left alone. route1 (the image's baked {**catch-all}) is NEUTERED to a non-routable path
-          # so the edge is deny-by-default.
-          # NOTE: the route-id KEY segment must be a POSIX-safe env-var name on Linux App Service
-          # (App Service injects appSettings as container env vars; hyphenated names are unreliable),
-          # so we substitute the agent name's '-' with '_' for the KEY only. The route-id is an
-          # internal YARP dictionary key never seen in a URL; the actual /teams/<name> Match__Path
-          # VALUE keeps the real (hyphenated) agent name.
-          $desired = [ordered]@{}
-          $desired['ReverseProxy__Routes__route1__ClusterId']   = 'cluster1'
-          $desired['ReverseProxy__Routes__route1__Match__Path'] = '/__disabled_no_route__/{**catch-all}'
-
-          foreach ($name in ($teamsAgents | Sort-Object -Unique)) {
-            # Env-namespaced route-id KEY (dev/test coexist on the shared proxy) + env-prefixed edge
-            # path. PathSet rewrites the edge path onto the per-env APIM Teams API ('teams-<env>'),
-            # so /dev/teams/<name> -> /teams-dev/<name> at cluster1 (APIM).
-            $rid = "teams_$($env:ENV)_$($name -replace '-','_')"
-            $desired["ReverseProxy__Routes__${rid}__ClusterId"]              = 'cluster1'
-            $desired["ReverseProxy__Routes__${rid}__Match__Path"]            = "/$($env:ENV)/teams/$name"
-            $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathSet"] = "/$($env:TEAMS_APIM_API_NAME)/$name"
-          }
-
-          # EXPLICIT per-agent Foundry ingress (deny-by-default at the edge): one route per agent
-          # that sets exposeFoundryApi=true, matching /agents/<name>/{**remainder} and PREPENDING the
-          # governed foundry-agents API path ($p = '<account>/<project>') before forwarding to APIM
-          # (cluster1). Because the agent name is baked into the Match path, an agent that is NOT
-          # allowlisted has NO route and is 404'd at YARP — blocked EARLY, before it ever reaches
-          # APIM. YARP applies just a PathPrefix, so
-          #   /agents/teams-agent/endpoint/protocols/openai/responses
-          #     ->  $p/agents/teams-agent/endpoint/protocols/openai/responses
-          # APIM then meters/throttles the agent and rewrites the tail onto
-          # /api/projects/<project>/agents/<name>/endpoint/protocols/... — so every protocol an agent
-          # exposes is proxied through the one governed API (no per-agent, per-protocol route).
-          if ($foundryAgents.Count -gt 0) {
-            if ([string]::IsNullOrWhiteSpace($env:FOUNDRY_API_PATH)) {
-              throw "An agent sets exposeFoundryApi=true but repo variable FOUNDRY_AGENTS_API_PATH is not set (the postprovision hook syncs it; or run 'azd env refresh')."
-            }
-            $p = '/' + $env:FOUNDRY_API_PATH.Trim('/')
-            foreach ($name in ($foundryAgents | Sort-Object -Unique)) {
-              # Env-namespaced KEY + env-prefixed edge path. Strip the '/<env>' edge prefix, then
-              # prepend the governed foundry-agents API path ($p), so
-              #   /dev/agents/<name>/... -> (remove /dev) /agents/<name>/... -> $p/agents/<name>/...
-              $rid = "foundry_$($env:ENV)_$($name -replace '-','_')"
-              $desired["ReverseProxy__Routes__${rid}__ClusterId"]                       = 'cluster1'
-              $desired["ReverseProxy__Routes__${rid}__Match__Path"]                     = "/$($env:ENV)/agents/$name/{**remainder}"
-              $desired["ReverseProxy__Routes__${rid}__Transforms__0__PathRemovePrefix"] = "/$($env:ENV)"
-              $desired["ReverseProxy__Routes__${rid}__Transforms__1__PathPrefix"]       = $p
-            }
-          }
-
-          Write-Host "Desired YARP routes for env '$($env:ENV)' ($($teamsAgents.Count) teams, $($foundryAgents.Count) foundry, catch-all neutered):"
-          $desired.GetEnumerator() | ForEach-Object { Write-Host "  $($_.Key) = $($_.Value)" }
-
-          # Read the current appSettings so we can compute which route settings are now stale.
-          $currentJson = az webapp config appsettings list -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME -o json
-          if ($LASTEXITCODE -ne 0) { throw "Failed to read YARP web app appSettings." }
-          $current = $currentJson | ConvertFrom-Json
-
-          # Apply the desired routes FIRST (set is a merge; it also neuters route1). We deliberately
-          # set-then-prune so a partial failure fails OPEN (stale routes linger) rather than CLOSED
-          # (a failed set after a successful delete would drop every route -> total edge lockout).
-          $settings = @($desired.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" })
-          az webapp config appsettings set -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --settings @settings --output none
-          if ($LASTEXITCODE -ne 0) { throw "Failed to apply YARP edge route settings." }
-
-          # Prune any existing ReverseProxy__Routes__* settings NOT in the desired set, so removing
-          # an agent / flipping a flag removes its route (deny-by-default). Runs after set so the
-          # desired routes are already live before any stale ones are removed.
-          # Prune scope: this env's routes + any LEGACY unprefixed route keys (one-time migration
-          # cleanup from the old single-env schema), but PRESERVE the sibling env's routes — the
-          # YARP proxy is SHARED, so dev and test routes coexist on it. route1 (the neutered
-          # catch-all) is always in $desired, so it is never pruned.
-          $otherEnv = if ($env:ENV -eq 'dev') { 'test' } else { 'dev' }
-          $stale = @($current | Where-Object {
-              $_.name -like 'ReverseProxy__Routes__*' -and
-              -not $desired.Contains($_.name) -and
-              $_.name -notlike "ReverseProxy__Routes__teams_${otherEnv}_*" -and
-              $_.name -notlike "ReverseProxy__Routes__foundry_${otherEnv}_*"
-            } | ForEach-Object { $_.name })
-          if ($stale.Count -gt 0) {
-            Write-Host "Pruning $($stale.Count) stale route setting(s): $($stale -join ', ')"
-            az webapp config appsettings delete -g $env:RESOURCE_GROUP -n $env:YARP_WEBAPP_NAME --setting-names @stale --output none
-            if ($LASTEXITCODE -ne 0) { throw "Failed to prune stale YARP route settings." }
-          }
-          Write-Host "YARP edge routes applied. Anything not explicitly wired now 404s at the proxy."
-
-      # 3. MCP allowlist. Runs LAST because it resolves the name-only mcp/mcp-policy.json against
-      #    LIVE agent identities on the PRIVATE Foundry data plane (needs the agents already seeded).
-      - name: Resolve agent names to AppIds and apply the MCP allowlist policies
+      - name: Apply the MCP allowlist
         shell: pwsh
-        env:
-          ENV:              ${{ inputs.environment }}
-          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
-          APIM_NAME:        ${{ vars.MCP_COMPLIANCE_APIM_NAME }}
-          MCP_AUDIENCE:     ${{ vars.MCP_COMPLIANCE_AUDIENCE }}
-          FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
-              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:MCP_AUDIENCE) -or
-              [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, MCP_COMPLIANCE_APIM_NAME, MCP_COMPLIANCE_AUDIENCE and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
-          }
-          $tenantId = az account show --query tenantId -o tsv
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
-            throw "Failed to resolve tenant ID from 'az account show'."
-          }
+          ./scripts/apply-mcp-policy.ps1 `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.MCP_COMPLIANCE_APIM_NAME }}" `
+            -McpAudience "${{ vars.MCP_COMPLIANCE_AUDIENCE }}"
 
-          # Resolve the name-only mcp/mcp-policy.json against LIVE agent identities read from the
-          # Foundry DATA PLANE (instance_identity.client_id on the project endpoint). Names with no
-          # matching / identity-less agent are dropped (deny-by-default). Needs the private endpoint,
-          # which the in-VNet runner can reach (VM managed identity via IMDS).
-          $resolvedPolicy = Join-Path $env:RUNNER_TEMP 'resolved-mcp-policy.json'
-          Write-Host "Resolving agent names -> AppIds from the Foundry project at '$($env:FOUNDRY_ENDPOINT)'."
-          pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
-            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
-            -ResolvePolicyPath mcp/mcp-policy.json `
-            -OutFile $resolvedPolicy
-          if ($LASTEXITCODE -ne 0) { throw "Agent name resolution failed." }
-          if (-not (Test-Path $resolvedPolicy)) { throw "Resolver did not produce '$resolvedPolicy'." }
-
-          Write-Host "Applying MCP allowlist policies to APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)' for every server in mcp/mcp.json."
-          az deployment group create `
-            --resource-group $env:RESOURCE_GROUP `
-            --name "mcp-compliance-$(Get-Date -Format 'yyyyMMddHHmmss')" `
-            --template-file infra/stages/30-governance/model-gateway/apim-mcp-compliance-all.bicep `
-            --parameters `
-              apimName=$env:APIM_NAME `
-              mcpAudience=$env:MCP_AUDIENCE `
-              env=$env:ENV `
-              tenantId=$tenantId `
-              "mcpPolicy=@$resolvedPolicy" `
-            --output none
-          if ($LASTEXITCODE -ne 0) { throw "MCP compliance deployment failed." }
-          Write-Host "MCP allowlist policies applied (resolved from mcp/mcp-policy.json)."
-
-      # 4. Teams audience allowlist. Runs after the agents are seeded because each bot's App ID is
-      #    the agent identity principal_id, which only exists on the PRIVATE Foundry data plane
-      #    once seeded. Re-deploys ONLY apim-teams-api.bicep against the existing APIM (seconds, not
-      #    a full provision) so the Teams validate-jwt pins the token audience, not just the issuer.
-      - name: Resolve exposeToM365 agents to bot App IDs and pin the Teams APIM audience allowlist
+      - name: Apply Teams bot audiences
         shell: pwsh
-        env:
-          ENV:              ${{ inputs.environment }}
-          RESOURCE_GROUP:   ${{ vars.AZURE_RESOURCE_GROUP }}
-          APIM_NAME:        ${{ vars.TEAMS_APIM_NAME }}
-          ACCOUNT_NAME:     ${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}
-          API_PATH:         ${{ vars.FOUNDRY_AGENTS_API_PATH }}
-          FOUNDRY_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:RESOURCE_GROUP) -or
-              [string]::IsNullOrWhiteSpace($env:APIM_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:ACCOUNT_NAME) -or
-              [string]::IsNullOrWhiteSpace($env:API_PATH) -or
-              [string]::IsNullOrWhiteSpace($env:FOUNDRY_ENDPOINT)) {
-            throw "Set repo variables AZURE_RESOURCE_GROUP, TEAMS_APIM_NAME, FOUNDRY_AGENTS_ACCOUNT_NAME, FOUNDRY_AGENTS_API_PATH and AZURE_AI_PROJECT_ENDPOINT (the postprovision hook syncs them from the Bicep outputs; or run 'azd env refresh')."
-          }
-          $tenantId = az account show --query tenantId -o tsv
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
-            throw "Failed to resolve tenant ID from 'az account show'."
-          }
-          # apim-teams-api.bicep rewrites onto /api/projects/<project>/... — derive <project> from the
-          # governed foundry-agents API path repo variable ('<account>/<project>'), as the token step does.
-          $projectName = ($env:API_PATH.Trim('/') -split '/')[-1]
-          if ([string]::IsNullOrWhiteSpace($projectName)) {
-            throw "Could not derive the project name from FOUNDRY_AGENTS_API_PATH ('$($env:API_PATH)'); expected '<account>/<project>'."
-          }
-
-          # Collect the agent NAMES that opt into Teams/M365 (agents/<name>/agent-network.json
-          # exposeToM365=true). The folder name is a /teams/<name> URL segment, so restrict it to
-          # URL-path-safe characters (same guard as the YARP-route step).
-          $segRe = '^[A-Za-z0-9.-]+$'
-          $teamsAgents = @()
-          Get-ChildItem -Path agents -Directory | Sort-Object Name | ForEach-Object {
-            $file = Join-Path $_.FullName 'agent-network.json'
-            if (Test-Path $file) {
-              $doc = Get-Content $file -Raw | ConvertFrom-Json
-              $envBlock = if ($null -ne $doc.environments) { $doc.environments.($env:ENV) } else { $null }
-              if ($null -ne $envBlock -and $envBlock.exposeToM365 -eq $true) {
-                if ($_.Name -notmatch $segRe) { throw "${file}: agent folder name '$($_.Name)' is not a safe route segment (allowed: letters, digits, . -)." }
-                $teamsAgents += $_.Name
-              }
-            }
-          }
-          $teamsAgents = @($teamsAgents | Sort-Object -Unique)
-
-          # Resolve those names -> bot App IDs (instance_identity.principal_id) on the private data
-          # plane. Empty list => issuer-only audience (the provision default). Names that resolve to
-          # NO live identity are dropped; if names were supplied but NONE resolve the resolver THROWS
-          # (agents not seeded) rather than silently emit an empty (issuer-only) allowlist.
-          $botIdsFile = Join-Path $env:RUNNER_TEMP 'teams-bot-app-ids.json'
-          Write-Host "Resolving $($teamsAgents.Count) exposeToM365 agent name(s) -> bot App IDs from the Foundry project at '$($env:FOUNDRY_ENDPOINT)'."
-          pwsh -NoProfile -File scripts/list-agent-appids.ps1 `
-            -FoundryProjectEndpoint $env:FOUNDRY_ENDPOINT `
-            -ResolveTeamsAudience true `
-            -AgentName ($teamsAgents -join ',') `
-            -OutFile $botIdsFile
-          if ($LASTEXITCODE -ne 0) { throw "Teams bot App ID resolution failed." }
-          if (-not (Test-Path $botIdsFile)) { throw "Resolver did not produce '$botIdsFile'." }
-          $botCount = @((Get-Content $botIdsFile -Raw | ConvertFrom-Json)).Count
-
-          Write-Host "Pinning the Teams APIM audience allowlist ($botCount bot App ID(s)) on APIM '$($env:APIM_NAME)' in RG '$($env:RESOURCE_GROUP)'."
-          az deployment group create `
-            --resource-group $env:RESOURCE_GROUP `
-            --name "teams-audience-$(Get-Date -Format 'yyyyMMddHHmmss')" `
-            --template-file infra/stages/30-governance/model-gateway/apim-teams-api.bicep `
-            --parameters `
-              apimName=$env:APIM_NAME `
-              foundryAccountName=$env:ACCOUNT_NAME `
-              env=$env:ENV `
-              projectName=$projectName `
-              expectedTenantId=$tenantId `
-              "botAppIds=@$botIdsFile" `
-            --output none
-          if ($LASTEXITCODE -ne 0) { throw "Teams audience allowlist deployment failed." }
-          Write-Host "Teams APIM audience allowlist applied ($botCount bot App ID(s); empty = issuer-only)."
+          ./scripts/apply-teams-audiences.ps1 `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.TEAMS_APIM_NAME }}" `
+            -FoundryAccountName "${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}"

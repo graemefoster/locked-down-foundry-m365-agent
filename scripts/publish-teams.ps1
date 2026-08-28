@@ -1,177 +1,156 @@
-<#
-  Publish a seeded Foundry agent to Teams / M365 (runs ON the private VM)
-  ----------------------------------------------------------------------
-  Executed on the locked-down VM (inside the private VNet) by the in-VNet Teams-publish
-  workflow path (scripts/publish-teams-runner.ps1, driven by the publish-teams composite
-  action), because Steps 1/3/4 call the PRIVATE Foundry endpoint that only the VM can reach.
-
-  Ref: https://learn.microsoft.com/azure/foundry/agents/how-to/publish-copilot-virtual-network
-
-  Two modes (the caller needs the agent identity BEFORE it can create the bot):
-
-    -Mode GetIdentity : Step 1 — GET the agent, print instance_identity.principal_id /
-                        client_id as parseable markers for the caller.
-    -Mode Publish     : Step 3 — PATCH the agent to add the `activity` protocol +
-                        BotServiceRbac scheme (keeping responses + Entra), then
-                        Step 4 — POST the Microsoft 365 publish API with the bot ARM ID.
-
-  Step 2 (create the Azure Bot Service) is NOT here — the caller (publish-teams-runner.ps1)
-  does it between the two modes, using the principal_id this script prints in Step 1.
-
-  Idempotent: re-running GetIdentity is read-only; the PATCH is a merge-patch; and a
-  publish of an already-published appVersion ("version already exists") is treated as
-  success. Prints '[publish-teams] Done.' only on success (the host gates on this marker).
-
-  Token: all calls hit the https://ai.azure.com audience. Step 1 (GET) and Step 3 (PATCH)
-  accept ANY valid token — the runner passes the VM managed-identity token for those. Only
-  Step 4 (the M365 publish OBO exchange) needs a delegated USER token; an app-only / MI token
-  has no user context and fails with a bare HTTP 502. The runner therefore forwards the user
-  token only for the Publish mode call (see its TOKEN NOTE).
-#>
 param(
-  [Parameter(Mandatory = $true)]  [ValidateSet('GetIdentity', 'Publish')] [string]$Mode,
-  [Parameter(Mandatory = $true)]  [string]$FoundryProjectEndpoint,
-  [Parameter(Mandatory = $true)]  [string]$AgentName,
-
-  # Publish-only parameters
-  [Parameter(Mandatory = $false)] [string]$BotServiceArmId = '',
-  [Parameter(Mandatory = $false)] [string]$DisplayName = '',
-  [Parameter(Mandatory = $false)] [string]$PublishScope = 'Shared',
-  [Parameter(Mandatory = $false)] [string]$AppVersion = '1.0.0',
-  [Parameter(Mandatory = $false)] [string]$ShortDescription = 'Foundry M365 agent',
-  [Parameter(Mandatory = $false)] [string]$FullDescription = 'A Foundry agent published to Microsoft 365 from a locked-down virtual network.',
-  [Parameter(Mandatory = $false)] [string]$DeveloperName = 'Azure Developer',
-  [Parameter(Mandatory = $false)] [string]$DeveloperWebsiteUrl = 'https://azure.microsoft.com',
-  [Parameter(Mandatory = $false)] [string]$PrivacyUrl = 'https://privacy.microsoft.com',
-  [Parameter(Mandatory = $false)] [string]$TermsOfUseUrl = 'https://www.microsoft.com/legal/terms-of-use',
-
-  # REQUIRED bearer token for the https://ai.azure.com audience. GetIdentity (Step 1) and the
-  # Step 3 PATCH accept any valid token — the runner passes the VM managed-identity token there.
-  # Mode Publish MUST be given a delegated USER token: the Step 4 M365 publish does an
-  # on-behalf-of (OBO) exchange, and an app-only / MI token has no user context and fails with a
-  # bare HTTP 502. The caller (publish-teams composite action) acquires the user token via
-  # device-code sign-in and forwards it for the Publish call only.
-  [Parameter(Mandatory = $true)] [string]$AccessToken
+  [Parameter(Mandatory = $true)] [string]$AgentDirectory,
+  [Parameter(Mandatory = $true)] [string]$FoundryProjectEndpoint,
+  [Parameter(Mandatory = $true)] [string]$ResourceGroup,
+  [Parameter(Mandatory = $true)] [string]$YarpFqdn,
+  [Parameter(Mandatory = $true)] [string]$TenantId,
+  [Parameter(Mandatory = $true)] [string]$BotName,
+  [Parameter(Mandatory = $true)] [string]$PublishAccessToken,
+  [Parameter(Mandatory = $false)] [string]$LogAnalyticsWorkspaceId = ''
 )
+
 $ErrorActionPreference = 'Stop'
 
-# Strip trailing slash so /agents never becomes //agents.
-$FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+$agentPath = Join-Path $AgentDirectory 'agent.yaml'
+$networkPath = Join-Path $AgentDirectory 'network.json'
+$teamsPath = Join-Path $AgentDirectory 'teams.json'
+$botTemplate = Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks/bot-service.bicep'
 
-Write-Host "[publish-teams] Mode=$Mode Agent=$AgentName"
-Write-Host "[publish-teams] Endpoint: $FoundryProjectEndpoint"
-
-if ([string]::IsNullOrWhiteSpace($AccessToken)) {
-  throw '[publish-teams] -AccessToken is required: pass a delegated USER token for the https://ai.azure.com audience. The Microsoft 365 publish step does an on-behalf-of exchange and rejects app-only / managed-identity tokens with HTTP 502.'
-}
-$token = $AccessToken.Trim()
-Write-Host '[publish-teams] Using caller-supplied user access token.'
-$authHeader = @{ Authorization = "Bearer $token" }
-
-if ($Mode -eq 'GetIdentity') {
-  # --- Step 1: get the agent identity ---
-  $agent = Invoke-RestMethod `
-    -Method Get `
-    -Uri "$FoundryProjectEndpoint/agents/$AgentName`?api-version=v1" `
-    -Headers ($authHeader + @{ 'Content-Type' = 'application/json' })
-
-  $principalId = $agent.instance_identity.principal_id
-  $clientId    = $agent.instance_identity.client_id
-  if ([string]::IsNullOrWhiteSpace($principalId)) {
-    throw "[publish-teams] Agent '$AgentName' has no instance_identity.principal_id (agent.identity is null). See the Foundry agent migration guide."
+foreach ($path in @($agentPath, $networkPath, $teamsPath, $botTemplate)) {
+  if (-not (Test-Path -LiteralPath $path)) {
+    throw "Required file not found: $path"
   }
+}
 
-  # Parseable markers the host hook greps for.
-  Write-Host "[publish-teams] PRINCIPAL_ID=$principalId"
-  Write-Host "[publish-teams] CLIENT_ID=$clientId"
-  Write-Host '[publish-teams] Done.'
+$network = Get-Content -LiteralPath $networkPath -Raw | ConvertFrom-Json
+$teams = Get-Content -LiteralPath $teamsPath -Raw | ConvertFrom-Json
+# The agent definition is authored in YAML; read just the name with yq (installed on the runner).
+$agentName = (& yq -r '.name' $agentPath)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($agentName)) {
+  throw "Could not read the agent name from '$agentPath' (is yq installed on the runner?)."
+}
+
+if ($network.exposeToM365 -ne $true) {
+  Write-Host "Teams publishing is disabled for '$agentName'."
   return
 }
 
-# --- Mode Publish ---
-if ([string]::IsNullOrWhiteSpace($BotServiceArmId)) {
-  throw '[publish-teams] Publish mode requires -BotServiceArmId.'
+$FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+$agentUrl = "$FoundryProjectEndpoint/agents/$agentName`?api-version=v1"
+
+Write-Host "Publishing '$agentName' to Teams / Microsoft 365."
+
+$managedIdentityToken = az account get-access-token `
+  --resource https://ai.azure.com `
+  --query accessToken `
+  --output tsv
+
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($managedIdentityToken)) {
+  throw "Could not acquire the VM managed-identity token."
+}
+if ([string]::IsNullOrWhiteSpace($PublishAccessToken)) {
+  throw "A delegated user token is required for Microsoft 365 publishing."
 }
 
-# --- Step 3: enable the activity protocol + BotServiceRbac (keep responses + Entra) ---
-Write-Host '[publish-teams] Step 3: enabling activity protocol + BotServiceRbac...'
-$patchBody = @{
-  agent_endpoint = @{
-    protocol_configuration = @{
-      responses = @{}
-      activity  = @{}
-    }
-    authorization_schemes = @(
-      @{ type = 'Entra' }
-      @{ type = 'BotServiceRbac' }
-    )
-  }
-} | ConvertTo-Json -Depth 10 -Compress
+Write-Host "Step 1: reading the agent identity."
 
-Invoke-RestMethod `
-  -Method Patch `
-  -Uri "$FoundryProjectEndpoint/agents/$AgentName`?api-version=v1" `
-  -Headers ($authHeader + @{ 'Content-Type' = 'application/merge-patch+json'; 'Foundry-Features' = 'AgentEndpoints=V1Preview' }) `
-  -Body $patchBody | Out-Null
-Write-Host '[publish-teams] Step 3 complete.'
+$liveAgent = Invoke-RestMethod `
+  -Method Get `
+  -Uri $agentUrl `
+  -Headers @{ Authorization = "Bearer $managedIdentityToken" }
 
-# --- Step 4: publish to Microsoft 365 ---
-Write-Host "[publish-teams] Step 4: publishing (scope=$PublishScope, version=$AppVersion)..."
+$botAppId = $liveAgent.instance_identity.principal_id
+if ([string]::IsNullOrWhiteSpace($botAppId)) {
+  throw "Agent '$agentName' has no instance_identity.principal_id."
+}
+
+Write-Host "Step 2: deploying the Azure Bot Service."
+
+$displayName = if ($teams.displayName) { $teams.displayName } else { $agentName }
+$botResourceName = "$BotName-$agentName"
+$messagingEndpoint = "https://$YarpFqdn/teams/$agentName"
+
+$botServiceArmId = az deployment group create `
+  --resource-group $ResourceGroup `
+  --name "bot-$agentName" `
+  --template-file $botTemplate `
+  --parameters `
+    botName=$botResourceName `
+    displayName="$displayName" `
+    msaAppId=$botAppId `
+    tenantId=$TenantId `
+    endpoint=$messagingEndpoint `
+    logAnalyticsWorkspaceId=$LogAnalyticsWorkspaceId `
+  --query 'properties.outputs.botServiceArmId.value' `
+  --output tsv
+
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botServiceArmId)) {
+  throw "Azure Bot Service deployment failed for '$agentName'."
+}
+
+# The activity protocol + BotServiceRbac/Entra authorization schemes are declared in the agent's
+# agent.yaml (agent_endpoint) and applied by the deploy script's serve step, so there is no longer
+# a publish-time protocol patch here.
+
+Write-Host "Step 3: publishing the Microsoft 365 app."
+
+$appVersion = if ($teams.appVersion) { $teams.appVersion } else { '1.0.0' }
 $publishBody = @{
-  botServiceArmId     = $BotServiceArmId
-  publishScope        = $PublishScope
+  botServiceArmId     = $botServiceArmId
+  publishScope        = if ($teams.publishScope) { $teams.publishScope } else { 'Shared' }
   publishAsAutopilot  = $false
-  appVersion          = $AppVersion
-  shortDescription    = $ShortDescription
-  fullDescription     = $FullDescription
-  developerName       = $DeveloperName
-  developerWebsiteUrl = $DeveloperWebsiteUrl
-  privacyUrl          = $PrivacyUrl
-  termsOfUseUrl       = $TermsOfUseUrl
-}
-if (-not [string]::IsNullOrWhiteSpace($DisplayName)) {
-  $publishBody['agentDisplayName'] = $DisplayName
-}
-$publishJson = $publishBody | ConvertTo-Json -Depth 10 -Compress
+  appVersion          = $appVersion
+  agentDisplayName    = $displayName
+  shortDescription    = $teams.shortDescription
+  fullDescription     = $teams.fullDescription
+  developerName       = $teams.developerName
+  developerWebsiteUrl = $teams.developerWebsiteUrl
+  privacyUrl          = $teams.privacyUrl
+  termsOfUseUrl       = $teams.termsOfUseUrl
+} | ConvertTo-Json -Depth 10
 
-# The microsoft365/publish orchestration is a long-running server-side flow that can
-# return transient 5xx (502/503/504) while it spins up. Retry those with backoff;
-# treat "version already exists" as an idempotent success and surface the response
-# body for any other terminal error so it is actually diagnosable.
-$maxAttempts = 5
-$published   = $false
-for ($attempt = 1; $attempt -le $maxAttempts -and -not $published; $attempt++) {
+$publishUrl = "$FoundryProjectEndpoint/agents/$agentName/microsoft365/publish?api-version=v1"
+$published = $false
+
+for ($attempt = 1; $attempt -le 5 -and -not $published; $attempt++) {
   try {
-    $result = Invoke-RestMethod `
+    $response = Invoke-RestMethod `
       -Method Post `
-      -Uri "$FoundryProjectEndpoint/agents/$AgentName/microsoft365/publish?api-version=v1" `
-      -Headers ($authHeader + @{ 'Content-Type' = 'application/json' }) `
-      -Body $publishJson
-    Write-Host "[publish-teams] Published. titleId=$($result.titleId)"
+      -Uri $publishUrl `
+      -Headers @{
+        Authorization  = "Bearer $PublishAccessToken"
+        'Content-Type' = 'application/json'
+      } `
+      -Body $publishBody
+
+    Write-Host "Published Microsoft 365 title $($response.titleId)."
     $published = $true
   }
   catch {
-    $status = $null
-    if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
-    $detail = ''
-    if ($_.ErrorDetails -and $_.ErrorDetails.Message) { $detail = $_.ErrorDetails.Message }
-
-    # Re-publishing an existing appVersion is a no-op success for our idempotency purposes.
-    if ($detail -match 'version already exists') {
-      Write-Host "[publish-teams] appVersion '$AppVersion' already published - treating as success. Increment TEAMS_APP_VERSION to publish user-facing changes."
-      $published = $true
+    $statusCode = if ($_.Exception.Response) {
+      [int]$_.Exception.Response.StatusCode
     }
-    elseif ($status -in 502, 503, 504 -and $attempt -lt $maxAttempts) {
-      $wait = [math]::Min(30, [math]::Pow(2, $attempt))
-      Write-Host "[publish-teams] Publish attempt $attempt returned HTTP $status (transient). Retrying in ${wait}s..."
-      Start-Sleep -Seconds $wait
+    elseif ($_.Exception.StatusCode) {
+      [int]$_.Exception.StatusCode
     }
     else {
-      Write-Host "[publish-teams] Publish failed (HTTP $status) after $attempt attempt(s)."
-      if ($detail) { Write-Host "[publish-teams] Response body: $detail" }
+      0
+    }
+    $detail = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
+
+    if ($detail -match 'version already exists') {
+      Write-Host "Microsoft 365 app version '$appVersion' is already published."
+      $published = $true
+    }
+    elseif ($statusCode -in 502, 503, 504 -and $attempt -lt 5) {
+      $delay = [Math]::Min(30, [Math]::Pow(2, $attempt))
+      Write-Host "Publish returned HTTP $statusCode. Retrying in $delay seconds."
+      Start-Sleep -Seconds $delay
+    }
+    else {
       throw
     }
   }
 }
 
-Write-Host '[publish-teams] Done.'
+Write-Host "Teams / Microsoft 365 publishing finished for '$agentName'."

@@ -22,7 +22,7 @@
   The runner PAT is a secret, so it is prompted with hidden input (only when you enable the
   runner and have not already set it) and written to the gitignored azd env. You can also set
   it non-interactively with `azd env set GITHUB_RUNNER_PAT <fine-grained-PAT>`. See
-  docs/github-runner.md.
+  docs/operations.md.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -64,7 +64,7 @@ if (Test-AzdEnvKeySet 'GITHUB_RUNNER_REPO_URL') {
 }
 else {
   Write-Host 'Optional: install a self-hosted GitHub Actions runner on the in-VNet Linux VM'
-  Write-Host '          so deployments run inside the VNet (see docs/github-runner.md).'
+  Write-Host '          so deployments run inside the VNet (see docs/operations.md).'
   $repoUrl = (Read-Host 'GitHub repo URL for the self-hosted runner (blank = skip)').Trim()
   azd env set GITHUB_RUNNER_REPO_URL $repoUrl | Out-Null
   if ([string]::IsNullOrWhiteSpace($repoUrl)) {
@@ -79,7 +79,7 @@ else {
       Write-Host '       (it is stored in Key Vault, never in the repo). Create one at'
       Write-Host '       https://github.com/settings/personal-access-tokens with this repo as'
       Write-Host '       the resource and the "Administration: read & write" permission.'
-      Write-Host '  See docs/github-runner.md for the full setup.'
+      Write-Host '  See docs/operations.md for the full setup.'
       $secure = Read-Host '  Paste the fine-grained PAT (input hidden; blank = skip runner)' -AsSecureString
       $pat = [System.Net.NetworkCredential]::new('', $secure).Password
       if ([string]::IsNullOrWhiteSpace($pat)) {
@@ -99,7 +99,7 @@ else {
 #    from their laptop is blocked at the network layer. Offer to punch THIS machine's current
 #    public IP through as an Allow rule. Off by default (blank key recorded so it is remembered):
 #    the IP is only a network-layer gate — the caller STILL needs a valid Entra token + an
-#    agent-network.json allowlist entry to reach a Foundry agent, so this does not weaken auth.
+#    network.json allowlist entry to reach a Foundry agent, so this does not weaken auth.
 if (Test-AzdEnvKeySet 'DEPLOYER_PUBLIC_IP') {
   $existing = azd env get-value DEPLOYER_PUBLIC_IP
   $shown = if ([string]::IsNullOrWhiteSpace($existing)) { '(none)' } else { $existing }

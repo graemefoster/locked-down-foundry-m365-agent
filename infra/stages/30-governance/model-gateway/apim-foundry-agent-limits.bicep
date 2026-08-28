@@ -14,7 +14,7 @@
        non-OpenAI protocols (…/invocations) carry no usage and simply emit no metric, but
        remain fully AUTH-gated (validate-jwt + the deny-by-default allowlist below).
     3. deny-by-default llm-token-limit — a <choose> whose <when> branches each match ONE
-       (agent, caller) pair from agents/<name>/agent-network.json and apply that pair's token budget
+       (agent, caller) pair from agents/<name>/network.json and apply that pair's token budget
        (tokens-per-minute, optional token-quota). Any caller/agent not listed falls through
        to <otherwise> and is rejected 403. Allowed callers fall past the <choose> to the
        backend routing (APIM MI -> Foundry over the private endpoint).
@@ -24,7 +24,7 @@
   /agents/<name>/... tail onto /api/projects/<project>/agents/<name>/endpoint/protocols/... .
 
   Config-as-data: the allowlist is name-only + human-authored per agent
-  (agents/<name>/agent-network.json). The deploy-agent-network workflow AGGREGATES every agent-network.json
+  (agents/<name>/network.json). The deploy-agent-network workflow aggregates every network.json
   into one `agentLimits` object and passes it here; 'azd provision' omits it (default {}) so a
   fresh environment is DENY-ALL until the workflow runs — the same posture as MCP compliance.
   Unlike MCP, NO data-plane resolution is needed: caller identities (emails / appids) are known
@@ -44,9 +44,6 @@ param apiName string = 'foundry-agents'
 
 @description('Name of the primary Foundry (Cognitive Services) account — used to derive the backend entity ID (must match the api module).')
 param foundryAccountName string
-
-@description('Environment token (e.g. "dev" / "test") that suffixes the backend id so it matches the env-suffixed backend created by apim-foundry-agents-api.bicep.')
-param env string
 
 @description('Name of the primary Foundry project — used to build the backend rewrite path (/api/projects/<project>/agents/...).')
 param projectName string
@@ -74,7 +71,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   }
 }
 
-var backendId = 'foundry-agents-${foundryAccountName}-${env}'
+var backendId = 'foundry-agents-${foundryAccountName}'
 var metricNs = agentLimits.?metricNamespace ?? metricNamespace
 var agents = agentLimits.?agents ?? []
 
@@ -97,7 +94,7 @@ var callerAppIdVar = '((string)context.Variables[&quot;callerAppId&quot;])'
 var callerAgentVar = '((string)context.Variables[&quot;callerAgent&quot;])'
 
 // --- Normalise the config before building XML ------------------------------------------------
-// Defence-in-depth (the deploy-agent-network workflow ALSO validates agent-network.json before calling
+// Defence-in-depth (the deploy-agent-network workflow also validates network.json before calling
 // this module): lowercase + strip the characters that could break out of the C# string literals /
 // XML attributes the values are interpolated into. As well as the C# delimiters (" and backslash)
 // we strip the XML markup characters & < > — because APIM decodes XML entities (e.g. &quot;) to their
@@ -144,7 +141,8 @@ var orderedAgents = concat(filter(normalizedAgents, a => !a.isWildcard), filter(
 var branchLists = map(orderedAgents, a => map(a.principals, p => format(
   '      <when condition="@({0})">\n        <llm-token-limit counter-key="fatl:{1}:{2}" tokens-per-minute="{3}"{4} estimate-prompt-tokens="true" remaining-tokens-header-name="x-tokens-remaining" tokens-consumed-header-name="x-tokens-consumed" />\n      </when>\n',
   // {0} full match condition: [agent AND] principal
-  concat(
+  format(
+    '{0}{1}',
     (a.isWildcard ? '' : '${callerAgentVar} == &quot;${a.agentRef}&quot; && '),
     ((p.hasEmail && p.hasAppId)
       ? '(${callerEmailVar} == &quot;${p.email}&quot; && ${callerAppIdVar} == &quot;${p.appId}&quot;)'
@@ -165,7 +163,7 @@ var whenBranches = join(flatten(branchLists), '')
 
 // DENY-BY-DEFAULT 403. Reused wrapped in <otherwise> when there ARE allow branches, and standalone
 // (no <choose>) when there are NONE — an APIM <choose> with only <otherwise> is INVALID.
-var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"caller_not_permitted","message":"This caller identity is not authorized (or has no token budget) for this agent. Add it under the agent in agents/&lt;name&gt;/agent-network.json and re-run the deploy-agent-network workflow."}</set-body>\n        </return-response>'
+var denyResponseXml = '<return-response>\n          <set-status code="403" reason="Forbidden" />\n          <set-header name="Content-Type" exists-action="override">\n            <value>application/json</value>\n          </set-header>\n          <set-body>{"error":"caller_not_permitted","message":"This caller identity is not authorized (or has no token budget) for this agent. Add it under the agent in agents/&lt;name&gt;/network.json and re-run the deploy-agent-network workflow."}</set-body>\n        </return-response>'
 
 var governanceXml = empty(flatten(branchLists))
   ? '    ${denyResponseXml}\n'

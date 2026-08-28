@@ -21,7 +21,7 @@ param location string = resourceGroup().location
 param bastionSubnetId string
 
 @description('Name of the Bastion host.')
-param bastionName string = 'agent-vnet-test-bastion'
+param bastionName string = 'agent-vnet-bastion'
 
 resource bastionPublicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
   name: '${bastionName}-pip'

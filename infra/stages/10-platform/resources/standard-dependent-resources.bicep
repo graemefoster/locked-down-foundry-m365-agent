@@ -155,11 +155,11 @@ resource queue 'Microsoft.Storage/storageAccounts/queueServices@2025-06-01' exis
   parent: storage
 
   resource AgentInputQueue 'queues' = {
-    name: 'inputqueuetest'
+    name: 'inputqueue'
   }
 
   resource AgentOutputQueue 'queues' = {
-    name: 'outputqueuetest'
+    name: 'outputqueue'
   }
 }
 
@@ -229,4 +229,3 @@ output cosmosDBSubscriptionId string = subscription().subscriptionId
 
 output storagePrincipalId string = storage.identity.principalId
 output aiSearchPrincipalId string = aiSearch.identity.principalId
-

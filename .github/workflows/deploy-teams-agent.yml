@@ -1,11 +1,4 @@
-name: Deploy teams-agent (VNet self-hosted)
-
-# Thin caller for the teams-agent prompt agent (agents/teams-agent/agent.yaml). All the work lives
-# in the reusable .github/workflows/_deploy-agent.yml, which promotes this one agent build-once
-# through dev then test (test gated by the `test` GitHub Environment's required reviewers).
-#
-# Teams / M365 publishing is now a SEPARATE pipeline (publish-teams-teams-agent.yml) - run it after
-# the agent has been promoted.
+name: Deploy teams-agent
 on:
   workflow_dispatch:
 
@@ -16,4 +9,4 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-agent.yml
     with:
-      manifest-path: agents/teams-agent/agent.yaml
+      agent-manifest: agents/teams-agent/agent.yaml

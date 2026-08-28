@@ -16,19 +16,16 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'appservice-scm-common.ps1')
 
 $resourceGroup = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
-$mcpAppDev     = Get-RequiredEnv 'MCP_WEBAPP_NAME_DEV'
-$mcpAppTest    = Get-RequiredEnv 'MCP_WEBAPP_NAME_TEST'
+$mcpApp        = Get-RequiredEnv 'MCP_WEBAPP_NAME'
 $yarpApp       = Get-RequiredEnv 'TEAMS_YARP_WEBAPP_NAME'
 $ipCidr        = Get-DeployerIpCidr
 
 Write-Host "[predeploy] Opening SCM sites for deployer $ipCidr (rg '$resourceGroup')."
 
-# Both MCP apps (dev + test) are fully private at rest: enable public access first, THEN scope
-# SCM to the deployer IP, for each env-suffixed web app.
-foreach ($mcpApp in @($mcpAppDev, $mcpAppTest)) {
-  Set-WebAppPublicNetworkAccess -ResourceGroup $resourceGroup -Name $mcpApp -State 'Enabled'
-  Open-ScmForDeployer -ResourceGroup $resourceGroup -Name $mcpApp -IpCidr $ipCidr
-}
+# The MCP app is fully private at rest: enable public access first, THEN scope SCM to the
+# deployer IP.
+Set-WebAppPublicNetworkAccess -ResourceGroup $resourceGroup -Name $mcpApp -State 'Enabled'
+Open-ScmForDeployer -ResourceGroup $resourceGroup -Name $mcpApp -IpCidr $ipCidr
 
 # YARP main site stays public (Teams ingress); only its SCM site is opened for the deployer.
 Open-ScmForDeployer -ResourceGroup $resourceGroup -Name $yarpApp -IpCidr $ipCidr

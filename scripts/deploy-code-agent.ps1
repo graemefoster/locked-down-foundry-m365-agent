@@ -1,115 +1,175 @@
-<#
-  deploy-code-agent.ps1  (runs ON the private VNet self-hosted runner)
-  -------------------------------------------------------------------
-  CODE (source-zip) deploy for a HOSTED Foundry agent - the alternative to the container-image
-  path (create-agent.ps1 + a prebuilt definition.image). Instead of pulling an image from an ACR,
-  Foundry receives the `dotnet publish` output as a multipart zip upload (code_configuration) and
-  runs it on its managed dotnet runtime. This path never touches an ACR, so it sidesteps the
-  private-ACR provisioning issue that blocks the image variant in the locked-down environment.
-
-  It create-or-updates the agent with a single multipart POST: a brand-new agent is created via
-  POST /agents (name carried in the metadata part, version 1), and an existing agent gets a new
-  version via POST /agents/{name}/versions. (Foundry has no upsert endpoint - POST /agents/{name}
-  404s for an agent that does not yet exist - so this mirrors the JSON path in create-agent.ps1,
-  choosing the URL from a by-name existence check.) It does NOT route traffic - that stays
-  publish-agent.ps1's job (called after this by the workflow).
-
-  The multipart body has two parts, matching the Foundry code-deploy contract:
-    * metadata : application/json - the { name, definition, description } object (from agent.yaml)
-    * code     : application/zip  - the publish-output zip (binaries at the archive root)
-  plus the headers Foundry-Features: HostedAgents=V1Preview, x-ms-agent-name and
-  x-ms-code-zip-sha256 (SHA-256 of the zip, integrity check).
-
-  PowerShell 7 (pwsh), cross-platform. Uses the VM managed identity via IMDS (Get-FoundryToken),
-  shared with create-agent.ps1 / publish-agent.ps1 through foundry-agent-common.ps1.
-#>
 param(
-  [Parameter(Mandatory = $true)] [string]$MetadataJsonPath,
+  [Parameter(Mandatory = $true)] [string]$AgentJsonPath,
   [Parameter(Mandatory = $true)] [string]$ZipPath,
   [Parameter(Mandatory = $true)] [string]$FoundryProjectEndpoint,
-  [Parameter(Mandatory = $false)][string]$ApiVersion = '2025-11-15-preview'
+  [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
+
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'foundry-agent-common.ps1')
+
+if (-not (Test-Path -LiteralPath $AgentJsonPath)) {
+  throw "Agent JSON not found: $AgentJsonPath"
+}
+if (-not (Test-Path -LiteralPath $ZipPath)) {
+  throw "Agent zip not found: $ZipPath"
+}
 
 $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+$agent = Get-Content -LiteralPath $AgentJsonPath -Raw | ConvertFrom-Json
+$agentName = $agent.name
 
-if (-not (Test-Path -LiteralPath $MetadataJsonPath)) { throw "[deploy-code-agent] metadata JSON not found: $MetadataJsonPath" }
-if (-not (Test-Path -LiteralPath $ZipPath))          { throw "[deploy-code-agent] code zip not found: $ZipPath" }
-
-$metadata = Get-Content -LiteralPath $MetadataJsonPath -Raw | ConvertFrom-Json
-$name = $metadata.name
-if ([string]::IsNullOrWhiteSpace($name)) { throw "[deploy-code-agent] metadata has no 'name'." }
-if ($null -eq $metadata.definition)      { throw "[deploy-code-agent] metadata has no 'definition'." }
-
-$sha = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$zipInfo = Get-Item -LiteralPath $ZipPath
-Write-Host "[deploy-code-agent] Endpoint: $FoundryProjectEndpoint (api-version $ApiVersion)"
-Write-Host "[deploy-code-agent] Agent   : $name"
-Write-Host "[deploy-code-agent] Zip     : $ZipPath ($([math]::Round($zipInfo.Length/1MB,2)) MiB, sha256=$sha)"
-
-$token = Get-FoundryToken
-Write-Host '[deploy-code-agent] Token acquired.'
-
-# Foundry has NO create-or-update endpoint: POST /agents/{name} 404s for a brand-new agent
-# ("Agent doesn't exist"). Mirror the JSON path (create-agent.ps1) instead — a by-name lookup
-# decides between CREATE (POST /agents, name carried in the metadata part) and a new VERSION
-# (POST /agents/{name}/versions). An explicit 404 from Get-AgentByName means "absent".
-$existingAgent = Get-AgentByName -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion -Name $name
-if ($null -ne $existingAgent) {
-  $uri = "$FoundryProjectEndpoint/agents/$name/versions`?api-version=$ApiVersion"
-  Write-Host "[deploy-code-agent] Agent '$name' exists - uploading a new version."
-} else {
-  $uri = "$FoundryProjectEndpoint/agents`?api-version=$ApiVersion"
-  Write-Host "[deploy-code-agent] Agent '$name' does not exist - creating."
+if ([string]::IsNullOrWhiteSpace($agentName)) {
+  throw "Agent JSON has no 'name': $AgentJsonPath"
+}
+if ($null -eq $agent.definition.code_configuration) {
+  throw "Agent '$agentName' has no definition.code_configuration."
+}
+if ($agent.definition.environment_variables.PSObject.Properties.Name -contains 'FOUNDRY_PROJECT_ENDPOINT') {
+  $agent.definition.environment_variables.FOUNDRY_PROJECT_ENDPOINT = $FoundryProjectEndpoint
 }
 
-# Build the multipart body with explicit per-part Content-Types (Invoke-RestMethod -Form cannot set
-# the metadata part to application/json), using System.Net.Http (built into PowerShell 7).
-$client  = [System.Net.Http.HttpClient]::new()
-$client.Timeout = [TimeSpan]::FromMinutes(10)
-$content = [System.Net.Http.MultipartFormDataContent]::new()
+Write-Host "Deploying code agent '$agentName' to $FoundryProjectEndpoint"
 
-$metaBytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $MetadataJsonPath).Path)
-$metaPart  = [System.Net.Http.ByteArrayContent]::new($metaBytes)
-$metaPart.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::new('application/json')
-$content.Add($metaPart, 'metadata')
+$token = az account get-access-token `
+  --resource https://ai.azure.com `
+  --query accessToken `
+  --output tsv
 
-$zipBytes = [System.IO.File]::ReadAllBytes((Resolve-Path -LiteralPath $ZipPath).Path)
-$zipPart  = [System.Net.Http.ByteArrayContent]::new($zipBytes)
-$zipPart.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::new('application/zip')
-$content.Add($zipPart, 'code', 'agent.zip')
-
-$req = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Post, $uri)
-$req.Headers.Authorization = [System.Net.Http.Headers.AuthenticationHeaderValue]::new('Bearer', $token)
-$req.Headers.Add('Foundry-Features', 'HostedAgents=V1Preview')
-$req.Headers.Add('x-ms-agent-name', $name)
-$req.Headers.Add('x-ms-code-zip-sha256', $sha)
-$req.Content = $content
-
-Write-Host "[deploy-code-agent] Uploading code -> POST $uri"
-$resp     = $client.SendAsync($req).GetAwaiter().GetResult()
-$respBody = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-if (-not $resp.IsSuccessStatusCode) {
-  throw "[deploy-code-agent] upload failed (HTTP $([int]$resp.StatusCode)). Response: $respBody"
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+  throw "Could not acquire a Foundry token. Run 'az login --identity' first."
 }
-Write-Host "[deploy-code-agent] Upload accepted (HTTP $([int]$resp.StatusCode))."
 
-# Resolve the version this upload produced (response shape varies: version object vs agent object).
-$version = $null
+$headers = @{ Authorization = "Bearer $token" }
+$agentUrl = "$FoundryProjectEndpoint/agents/$agentName`?api-version=$ApiVersion"
+$existingAgent = $null
+
 try {
-  $doc = $respBody | ConvertFrom-Json
-  if ($doc.version)                        { $version = [string]$doc.version }
-  elseif ($doc.versions.latest.version)    { $version = [string]$doc.versions.latest.version }
-} catch { }
-if ([string]::IsNullOrWhiteSpace($version)) {
-  $version = [string](Get-LatestAgentVersion -Token $token -Endpoint $FoundryProjectEndpoint -ApiVersion $ApiVersion -Name $name)
+  $existingAgent = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers $headers
 }
-if ([string]::IsNullOrWhiteSpace($version)) { throw "[deploy-code-agent] Could not resolve the created version." }
+catch {
+  $statusCode = if ($_.Exception.Response) {
+    [int]$_.Exception.Response.StatusCode
+  }
+  elseif ($_.Exception.StatusCode) {
+    [int]$_.Exception.StatusCode
+  }
+  else {
+    0
+  }
+  if ($statusCode -ne 404) {
+    throw
+  }
+}
 
-Write-Host "[deploy-code-agent] Agent '$name' -> version $version."
-if ($env:GITHUB_OUTPUT) {
-  "agent-name=$name"       | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-  "agent-version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+$uploadUrl = if ($null -eq $existingAgent) {
+  Write-Host "Agent does not exist. Creating it with the code package."
+  "$FoundryProjectEndpoint/agents?api-version=$ApiVersion"
 }
-Write-Host "[deploy-code-agent] Done. agent-name=$name agent-version=$version"
+else {
+  Write-Host "Agent exists. Uploading a new code version."
+  "$FoundryProjectEndpoint/agents/$agentName/versions?api-version=$ApiVersion"
+}
+
+$metadata = [ordered]@{
+  name       = $agentName
+  definition = $agent.definition
+}
+if ($null -ne $agent.description) { $metadata.description = $agent.description }
+if ($null -ne $agent.metadata) { $metadata.metadata = $agent.metadata }
+if ($null -ne $agent.agent_endpoint) { $metadata.agent_endpoint = $agent.agent_endpoint }
+if ($null -ne $agent.digital_worker_type) { $metadata.digital_worker_type = $agent.digital_worker_type }
+
+$metadataJson = $metadata | ConvertTo-Json -Depth 30
+$zipHash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) "agent-metadata-$([guid]::NewGuid().ToString('N')).json"
+$foundryFeatures = if ($agent.digital_worker_type -eq 'm365') {
+  'HostedAgents=V1Preview,DigitalWorker=V1Preview'
+}
+else {
+  'HostedAgents=V1Preview'
+}
+
+try {
+  $metadataJson | Set-Content -LiteralPath $metadataPath -Encoding utf8
+
+  $uploadBody = curl `
+    --fail-with-body `
+    --silent `
+    --show-error `
+    --request POST `
+    --header "Authorization: Bearer $token" `
+    --header "Foundry-Features: $foundryFeatures" `
+    --header "x-ms-agent-name: $agentName" `
+    --header "x-ms-code-zip-sha256: $zipHash" `
+    --form "metadata=@$metadataPath;type=application/json" `
+    --form "code=@$((Resolve-Path -LiteralPath $ZipPath).Path);type=application/zip" `
+    $uploadUrl
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "Code upload failed for '$agentName'."
+  }
+}
+finally {
+  Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+}
+
+$response = $uploadBody | ConvertFrom-Json
+$agentVersion = if ($response.version) {
+  [string]$response.version
+}
+elseif ($response.versions.latest.version) {
+  [string]$response.versions.latest.version
+}
+else {
+  $versions = Invoke-RestMethod `
+    -Method Get `
+    -Uri "$FoundryProjectEndpoint/agents/$agentName/versions?api-version=$ApiVersion" `
+    -Headers $headers
+  [string](@($versions.data.version | ForEach-Object { [int]$_ }) | Measure-Object -Maximum).Maximum
+}
+
+if ([string]::IsNullOrWhiteSpace($agentVersion)) {
+  throw "Could not resolve the version created for '$agentName'."
+}
+
+# Serve the new version AND assert the endpoint protocol/authorization configuration from the
+# manifest in a single agent_endpoint merge-patch. Declaring 'agent_endpoint' in agent.yaml (e.g.
+# the 'activity' protocol + BotServiceRbac for a Teams agent) means publishing no longer has to
+# patch the protocol on separately.
+$agentEndpoint = [ordered]@{
+  version_selector = @{
+    version_selection_rules = @(
+      @{
+        agent_version      = $agentVersion
+        traffic_percentage = 100
+        type               = 'FixedRatio'
+      }
+    )
+  }
+}
+if ($null -ne $agent.agent_endpoint) {
+  if ($null -ne $agent.agent_endpoint.protocol_configuration) {
+    $agentEndpoint.protocol_configuration = $agent.agent_endpoint.protocol_configuration
+  }
+  if ($null -ne $agent.agent_endpoint.authorization_schemes) {
+    $agentEndpoint.authorization_schemes = $agent.agent_endpoint.authorization_schemes
+  }
+}
+
+$publishBody = @{ agent_endpoint = $agentEndpoint } | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+  -Method Patch `
+  -Uri $agentUrl `
+  -Headers @{
+    Authorization  = "Bearer $token"
+    'Content-Type' = 'application/merge-patch+json'
+  } `
+  -Body $publishBody | Out-Null
+
+if ($env:GITHUB_OUTPUT) {
+  "agent-name=$agentName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+  "agent-version=$agentVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+}
+
+Write-Host "Agent '$agentName' is serving code version $agentVersion."

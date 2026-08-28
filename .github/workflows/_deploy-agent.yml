@@ -1,32 +1,10 @@
-name: Deploy Foundry agent (reusable, build-once -> dev -> test)
+name: Deploy prompt agent
 
-# ---------------------------------------------------------------------------
-# Reusable, SINGLE-AGENT deploy pipeline for a Foundry prompt agent, called by the thin
-# per-agent workflows (deploy-teams-agent.yml). One run promotes ONE agent through dev then test.
-#
-# Build-once / promote model:
-#   * build       - normalizes agents/<name>/agent.yaml -> agent.json ONCE (NO env-specific values
-#                   injected) and uploads it as a workflow artifact. This single artifact moves
-#                   through the environments.
-#   * deploy-dev  - (environment: dev) downloads the artifact, injects the DEV MCP server_url /
-#                   endpoint from the `dev` GitHub Environment variables, create-or-update + publish
-#                   against the dev project's PRIVATE endpoint.
-#   * deploy-test - (environment: test, needs: deploy-dev) same, against the test project. The
-#                   `test` GitHub Environment carries required reviewers, so promotion is a gate.
-#
-# Teams / M365 publishing is NO LONGER part of this pipeline - it is a separate, independently
-# gated pipeline (publish-teams.yml) run after an agent is promoted.
-#
-# Posture A gate: every job runs on the in-VNet self-hosted runner (the only host that can reach
-# the PRIVATE Foundry endpoints). Callers are workflow_dispatch-only + repository-guarded so fork
-# code can never execute on the VM. create-agent / publish-agent authenticate as the VM managed
-# identity via IMDS (no `az login` needed).
-# ---------------------------------------------------------------------------
 on:
   workflow_call:
     inputs:
-      manifest-path:
-        description: "Path to the agent manifest (agents/<name>/agent.yaml)."
+      agent-manifest:
+        description: Path to the prompt agent YAML manifest (agents/<name>/agent.yaml).
         type: string
         required: true
 
@@ -34,146 +12,24 @@ permissions:
   contents: read
 
 jobs:
-  # --- build ONCE: normalize the manifest (no env injection) + upload it as an artifact ---------
-  build:
+  deploy:
     if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
     runs-on: [self-hosted, vnet, foundry-private]
     steps:
       - uses: actions/checkout@v5
 
-      # yq is installed by cloud-init on the in-VNet Linux runner
-      # (infra/stages/40-runner/resources/cloud-init-linux-vm.yaml).
-      - name: Convert agent.yaml -> agent.json (no env injection)
-        env:
-          MANIFEST: ${{ inputs.manifest-path }}
-        run: |
-          if ! command -v yq >/dev/null 2>&1; then
-            echo "::error::yq is required to convert the manifest but was not found on the runner. Re-run 'azd provision' so cloud-init installs it."
-            exit 1
-          fi
-          if [ ! -f "$MANIFEST" ]; then
-            echo "::error::Manifest not found: $MANIFEST"
-            exit 1
-          fi
-          yq -o=json '.' "$MANIFEST" > agent.json
-          name="$(yq -r '.name' "$MANIFEST")"
-          if [ -z "$name" ] || [ "$name" = "null" ]; then
-            echo "::error::Manifest '$MANIFEST' has no 'name'."
-            exit 1
-          fi
-          echo "Normalized manifest for agent '$name' (per-env values are injected at deploy time):"
-          cat agent.json
+      - name: Normalize the manifest (yq)
+        shell: bash
+        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
 
-      - name: Upload agent manifest artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-manifest
-          path: agent.json
-          retention-days: 7
-          if-no-files-found: error
-
-  # --- deploy to dev -----------------------------------------------------------
-  deploy-dev:
-    needs: build
-    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
-    runs-on: [self-hosted, vnet, foundry-private]
-    environment: dev
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download agent manifest artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: agent-manifest
-
-      - name: Inject the dev MCP server_url (yq)
-        env:
-          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
-        run: |
-          if grep -q '"type": "mcp"' agent.json; then
-            if [ -z "$VAR_MCP_URL" ]; then
-              echo "::error::The manifest has an MCP tool but the dev environment variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL_DEV)."
-              exit 1
-            fi
-            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
-            echo "Injected dev MCP server_url: $VAR_MCP_URL"
-          fi
-
-      - name: Resolve dev Foundry endpoint
-        id: cfg
+      - name: Sign in with the VM managed identity
         shell: pwsh
-        env:
-          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
-        run: |
-          $endpoint = $env:VAR_ENDPOINT
-          if ([string]::IsNullOrWhiteSpace($endpoint)) {
-            throw "The dev environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_DEV; or run 'azd env refresh')."
-          }
-          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        run: az login --identity --output none
 
-      - name: Create or update agent (dev)
-        id: create
-        uses: ./.github/actions/create-agent
-        with:
-          agent-json: agent.json
-          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
-
-      - name: Publish agent version (dev)
-        uses: ./.github/actions/publish-agent
-        with:
-          agent-name: ${{ steps.create.outputs.agent-name }}
-          agent-version: ${{ steps.create.outputs.agent-version }}
-          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
-
-  # --- promote to test (gated by the `test` environment's required reviewers) ------------------
-  deploy-test:
-    needs: deploy-dev
-    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
-    runs-on: [self-hosted, vnet, foundry-private]
-    environment: test
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download agent manifest artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: agent-manifest
-
-      - name: Inject the test MCP server_url (yq)
-        env:
-          VAR_MCP_URL: ${{ vars.MCP_SERVER_URL }}
-        run: |
-          if grep -q '"type": "mcp"' agent.json; then
-            if [ -z "$VAR_MCP_URL" ]; then
-              echo "::error::The manifest has an MCP tool but the test environment variable MCP_SERVER_URL is not set (the postprovision hook syncs it from MCP_GATEWAY_URL_TEST)."
-              exit 1
-            fi
-            MCP_URL="$VAR_MCP_URL" yq -i -o=json '(.definition.tools[] | select(.type == "mcp")).server_url = strenv(MCP_URL)' agent.json
-            echo "Injected test MCP server_url: $VAR_MCP_URL"
-          fi
-
-      - name: Resolve test Foundry endpoint
-        id: cfg
+      - name: Deploy and publish the prompt agent
         shell: pwsh
-        env:
-          VAR_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
-          $endpoint = $env:VAR_ENDPOINT
-          if ([string]::IsNullOrWhiteSpace($endpoint)) {
-            throw "The test environment variable AZURE_AI_PROJECT_ENDPOINT is not set (the postprovision hook syncs it from AZURE_AI_PROJECT_ENDPOINT_TEST; or run 'azd env refresh')."
-          }
-          "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Create or update agent (test)
-        id: create
-        uses: ./.github/actions/create-agent
-        with:
-          agent-json: agent.json
-          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
-
-      - name: Publish agent version (test)
-        uses: ./.github/actions/publish-agent
-        with:
-          agent-name: ${{ steps.create.outputs.agent-name }}
-          agent-version: ${{ steps.create.outputs.agent-version }}
-          foundry-endpoint: ${{ steps.cfg.outputs.endpoint }}
+          ./scripts/deploy-prompt-agent.ps1 `
+            -AgentJsonPath agent.json `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -McpServerUrl "${{ vars.MCP_SERVER_URL }}"

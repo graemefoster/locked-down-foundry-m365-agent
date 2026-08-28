@@ -1,11 +1,4 @@
-name: Publish teams-agent to Teams / M365 (VNet self-hosted)
-
-# Thin caller for the Teams / M365 publish of teams-agent (agents/teams-agent/agent.yaml). All the
-# work lives in the reusable .github/workflows/publish-teams.yml, which publishes to Teams in dev
-# then test, each gated by that env's agents/teams-agent/agent-network.json environments.<env>
-# .exposeToM365 flag AND the `test` GitHub Environment's required reviewers.
-#
-# Run this AFTER deploy-teams-agent.yml has promoted the agent to the target environment(s).
+name: Publish teams-agent to Teams / M365
 on:
   workflow_dispatch:
 
@@ -16,4 +9,4 @@ jobs:
   publish:
     uses: ./.github/workflows/publish-teams.yml
     with:
-      manifest-path: agents/teams-agent/agent.yaml
+      agent-directory: agents/teams-agent

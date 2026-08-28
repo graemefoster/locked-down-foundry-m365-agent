@@ -563,8 +563,8 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
           // PowerPlatform-specific tag, and NSGs are L3/L4 so they cannot filter by FQDN/SNI.
           // We accept this at the NSG only because all egress is force-tunnelled (UDR
           // 0.0.0.0/0) through the Azure Firewall, where an SNI application rule can pin the
-          // exact FQDN. See docs/NETWORKING.md "Known limitation: Agent 365 telemetry egress".
-          description: 'A365 observability telemetry to agent365.svc.cloud.microsoft (AFD anycast). tighten at firewall via SNI. See docs/NETWORKING.md.'
+          // exact FQDN. See docs/architecture.md.
+          description: 'A365 observability telemetry to agent365.svc.cloud.microsoft (AFD anycast). Tighten at the firewall via SNI. See docs/architecture.md.'
         }
       }
       {

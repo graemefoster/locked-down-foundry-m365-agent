@@ -1,7 +1,7 @@
 /*
   VM -> Cognitive Services OpenAI User RBAC
   -----------------------------------------
-  Grants the dev VM's system-assigned managed identity the "Cognitive Services OpenAI
+  Grants the Linux runner VM's system-assigned managed identity the "Cognitive Services OpenAI
   User" role on the AI Services (Foundry) account.
 
   WHY THIS IS NEEDED (separate from Foundry User):

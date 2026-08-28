@@ -1,75 +1,187 @@
-# Architecture deep dive
+# Architecture
 
-> **Cross-cutting foundation** (underpins all three levels). Part of the
-> [locked-down Foundry agent](../README.md) reference implementation.
+This repository deploys one network-isolated Azure AI Foundry environment. Infrastructure and
+application code are deployed with `azd`; private data-plane operations run in GitHub Actions
+on the in-VNet self-hosted runner.
 
-Resource-by-resource detail. For the rule-by-rule networking reference see
-[NETWORKING.md](./NETWORKING.md); for deployment steps see [deployment.md](./deployment.md).
-
-## Core Foundry concepts
-
-- **Foundry account** (`Microsoft.CognitiveServices`, kind `AIServices`) — the top-level
-  resource that holds connections and networking/policy config.
-- **Foundry project** — an isolated workspace inside the account. All agents in a project share
-  the same file storage, thread (conversation) storage, and search indexes; data is isolated
-  between projects. The project is the unit of sharing and isolation.
-- **Bring-Your-Own (BYO) data plane** — agents are stateful, and their state lives in **your
-  own** resources, not Microsoft-managed ones: **Storage** (files), **AI Search** (vector
-  stores), **Cosmos DB** (threads/history). Locking down the agent means locking down all three.
-
-## Resources created
-
-Everything is created with **public network access disabled**, private endpoints, managed
-identity (no stored credentials), and TLS 1.2+.
-
-| Resource | Type | Notable config |
-|---|---|---|
-| Azure AI Foundry | `Microsoft.CognitiveServices/accounts` (AIServices, S0) | Custom subdomain, network ACLs deny-by-default, system-assigned MI, CMK. |
-| Model deployment | `.../accounts/deployments` | Name/format/version/SKU/capacity from `model*` params. |
-| Azure AI Search | `Microsoft.Search/searchServices` (standard) | AAD auth (401 challenge), system MI, semantic search off, CMK (service-level key, enforced). |
-| Storage | `Microsoft.Storage/storageAccounts` (StorageV2, ZRS/GRS) | Blob + Queue, block public blob access, SharedKey disabled (force AAD). |
-| Cosmos DB | `Microsoft.DocumentDB/databaseAccounts` (SQL API) | Session consistency, local auth disabled, single region. |
-| Key Vault, ACR | | Private, used for CMK + container builds. |
-
-Containers are provisioned automatically during the capability-host process: two Storage blob
-containers (`<workspaceId>-azureml-blobstore`, `<workspaceId>-agents-blobstore`) and three
-Cosmos containers (`<projectWorkspaceId>-{thread-message,system-thread-message,agent-entity}-store`).
-
-## Private DNS zones
-
-| Resource | Private DNS zone(s) |
-|---|---|
-| Azure AI Foundry | `privatelink.cognitiveservices.azure.com`, `privatelink.openai.azure.com`, `privatelink.services.ai.azure.com` |
-| Azure AI Search | `privatelink.search.windows.net` |
-| Azure Cosmos DB | `privatelink.documents.azure.com` |
-| Azure Storage (blob) | `privatelink.blob.core.windows.net` |
-| Azure API Management | `privatelink.azure-api.net` |
-
-## Key RBAC role assignments
-
-System-assigned managed identities are granted least-privilege data-plane roles:
-
-- **AI Search** — Search Index Data Contributor, Search Service Contributor.
-- **Storage** — Storage Blob Data Owner (+ Storage Queue Data Contributor if the Azure Function
-  tool is enabled); the auto-provisioned blobstores get Blob Data Contributor / Owner.
-- **Cosmos DB** — Cosmos DB Operator + Built-in Data Contributor.
-
-## Module structure
+## Topology
 
 ```text
-infra/
-├── main.bicep                  # Thin orchestrator: params + stage calls + azd outputs
-├── main.parameters.json        # azd parameter file (${VAR=default} env bindings)
-└── stages/                     # Sequential stages (deps: 00 ← 10 ← 13 ← 15 ← 20 ← 30 ← 40)
-    ├── 00-foundation/          # Networking (hub + spokes, DNS resolver, firewall, flow logs) + observability
-    ├── 10-platform/            # Key Vault, ACR, Cosmos/Storage/Search, App Service + YARP, APIM/provider Foundry, PEs, Storage + Search CMK
-    ├── 13-foundry/             # Foundry account + model + PE, KV/App Insights RBAC, account CMK
-    ├── 15-foundry-project/     # AI project + BYO connections, project RBAC, Agents capability host
-    ├── 20-workload-mcp/        # MCP web app, app registration, builtin-auth, APIM MCP servers
-    ├── 30-governance/          # MCP connections, APIM policies/compliance/lockdown, RAI guardrail, Teams API, firewall rules
-    └── 40-runner/              # Linux worker VM (+ optional Windows dev VM / Bastion), runner RBAC, PAT secret, runner extension
+Operator workstation
+  ├─ azd / Azure CLI ──> Azure Resource Manager
+  └─ GitHub CLI ───────> repository variables and workflow dispatch
+
+GitHub Actions
+  └─ trusted-only self-hosted Linux runner in the Foundry spoke
+       ├─ private Foundry endpoint
+       ├─ private APIM endpoint
+       ├─ private Key Vault and ACR endpoints
+       └─ Azure control plane through managed identity
+
+Teams / Microsoft 365
+  └─ Bot Connector
+       └─ public YARP App Service, restricted to Microsoft Teams source ranges
+            └─ private APIM Teams API
+                 └─ private Foundry activity protocol endpoint
+
+Web or OBO caller
+  └─ public YARP App Service
+       └─ private APIM Foundry Agents API
+            └─ private Foundry agent endpoint
 ```
 
-Each stage co-locates the Bicep modules it owns under category subfolders (`network/`,
-`foundry/`, `rbac/`, `resources/`, `encryption/`, `gateway/`, `governance/`, `model-gateway/`) —
-there is no shared `infra/modules/` tree.
+The network is divided into a hub and workload spokes:
+
+| Network area | Purpose |
+|---|---|
+| Hub | Azure Firewall and private DNS resolution. |
+| Foundry spoke | Foundry agent subnet, private endpoints, Linux runner, and optional Windows dev VM. |
+| App Service spoke | Outbound VNet integration for the YARP edge. |
+| APIM spoke | APIM outbound VNet integration, APIM private endpoint, and provider Foundry private endpoint. |
+
+There is no direct spoke-to-spoke trust path. User-defined routes keep the firewall as the
+network choke point.
+
+## Platform components
+
+- **Primary Foundry account and project** host the deployed agents.
+- **BYO state stores** use private Cosmos DB, Azure AI Search, and Storage resources when the
+  standard agent tier is selected.
+- **Provider Foundry account** supplies the model exposed through APIM.
+- **Private APIM** is the common policy enforcement point for models, MCP, Foundry agent API
+  traffic, and Teams activities.
+- **MCP App Service** hosts the sample MCP server behind APIM.
+- **YARP App Service** is the only public ingress. Its application routes are generated from
+  `agents/*/network.json`; the baked catch-all route is disabled.
+- **Linux worker VM** hosts the persistent GitHub Actions runner.
+- **Windows dev VM and Bastion** are optional diagnostic resources. They are not another
+  deployment environment.
+
+The standard agent tier adds private Cosmos DB, Search, and Storage resources for agent state.
+The basic tier uses Microsoft-managed state stores while retaining the same private Foundry,
+gateway, runner, and ingress design.
+
+## Identities
+
+| Actor | Identity | Uses |
+|---|---|---|
+| `azd` host | Operator's Azure CLI and GitHub CLI sessions | Provisioning, application deployment, repository-variable sync, runner deregistration, and teardown. |
+| Linux runner | VM managed identity | Foundry agent deployment, Azure control-plane changes, ACR access, governance, and evaluation. |
+| Foundry/project resources | Managed identities | Access to private state stores, Key Vault, model connections, and dependent services. |
+| APIM | System-assigned managed identity | Keyless calls to the provider Foundry account and Azure control-plane discovery where configured. |
+| Teams publisher | VM managed identity plus a delegated user token | Managed identity for agent and Bot Service operations; delegated token only for the Microsoft 365 publish API. |
+
+Secrets are not embedded in agent configuration. The runner bootstrap reads its registration
+credential from Key Vault, and deployment workflows use managed identity.
+
+## Trust boundaries
+
+### Operator boundary
+
+The operator runs `azd` from a trusted workstation or trusted CI context. The host can reach
+Azure and GitHub control planes but does not need access to the private Foundry data plane.
+
+### Runner boundary
+
+The self-hosted runner has private network reach and privileged managed-identity roles. It is
+therefore restricted to trusted, manually dispatched repository workflows. Pull-request jobs
+must not target the `self-hosted`, `vnet`, or `foundry-private` labels.
+
+### Public ingress boundary
+
+YARP accepts only configured routes. The Teams route is additionally restricted to Microsoft
+Teams published source ranges. Requests then pass through APIM authentication and policy before
+reaching Foundry.
+
+### Private service boundary
+
+Foundry, APIM, Key Vault, ACR, Cosmos DB, Search, Storage, and the MCP service use private
+endpoints where applicable. Private DNS resolves service names to private addresses inside the
+network.
+
+## Routing
+
+### Teams
+
+```text
+/teams/<agentName>
+  -> YARP
+  -> APIM Teams API
+  -> /api/projects/<project>/agents/<agentName>/endpoint/protocols/activityProtocol
+```
+
+The Azure Bot Service resource is registration and channel configuration; it is not a data-path
+hop. APIM validates the Bot Framework token, configured bot audience, issuer, and deployment
+tenant before forwarding the original request to Foundry.
+
+### Foundry agent API
+
+```text
+/agents/<agentName>/{**remainder}
+  -> YARP
+  -> APIM Foundry Agents API
+  -> private Foundry project endpoint
+```
+
+Only agents with `exposeFoundryApi: true` receive a route. Token-limit policy is
+deny-by-default for callers not listed in that agent's `network.json`.
+
+### MCP
+
+```text
+agent -> firewall -> private APIM MCP API -> private MCP App Service
+```
+
+The workflow injects `MCP_SERVER_URL` into prompt-agent MCP tools at deployment time. APIM
+validates the agent identity and applies the per-server allowlist and request rate from
+`mcp/mcp-policy.json`.
+
+### Models
+
+```text
+agent -> firewall -> private APIM inference API -> provider Foundry private endpoint
+```
+
+APIM validates the caller and uses its managed identity for the provider backend. Model
+discovery and inference stay on the private route.
+
+## Security invariants
+
+These properties are intentional and should not be weakened:
+
+1. `azd` is the only infrastructure and application deployment path.
+2. Agent deployment, governance, evaluation, and Teams publishing are workflow-only operations
+   on the private self-hosted runner.
+3. Public network access is disabled for private platform services.
+4. The Foundry agent subnet and Azure Firewall are deny-by-default.
+5. YARP, APIM Foundry policies, APIM MCP policies, and Teams audience policies are
+   deny-by-default.
+6. Authentication uses managed identity except for the delegated user token required by the
+   Microsoft 365 publish API.
+7. Foundry and supported state stores use customer-managed keys and least-privilege RBAC.
+8. APIM policy changes are applied serially to avoid conflicting management-plane writes.
+9. The runner executes trusted repository workflows only.
+10. Agent configuration uses unsuffixed names and variables for the single environment.
+
+## Governance and observability notes
+
+- The Responsible AI guardrail is an Azure Policy **Audit** initiative. It reports model
+  deployments whose content-filter configuration is weaker than the configured baseline; it
+  does not block deployment.
+- Agent 365 telemetry resolves through Azure Front Door. The agent subnet therefore permits the
+  required Front Door service tag, while Azure Firewall narrows the effective destination to
+  the configured Agent 365 telemetry hostname.
+- Firewall diagnostics and APIM telemetry are the primary runtime evidence for denied or failed
+  paths. VNet flow logs depend on the flow-log storage account remaining writable by the Azure
+  service.
+
+## Deployment ownership
+
+| Concern | Supported owner |
+|---|---|
+| Azure resources and MCP/YARP application code | `azd up`, `azd provision`, and `azd deploy` |
+| Prompt agents | `_deploy-agent.yml` and `scripts/deploy-prompt-agent.ps1` |
+| Source-zip agents | `_deploy-code-agent.yml` and `scripts/deploy-code-agent.ps1` |
+| Container-image agents | `_deploy-hosted-agent.yml` and `scripts/deploy-image-agent.ps1` |
+| Teams publishing | `publish-teams.yml` and `scripts/publish-teams.ps1` |
+| Runtime governance | `deploy-agent-network.yml` and its four explicit `apply-*.ps1` steps |

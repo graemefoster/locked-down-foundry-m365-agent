@@ -36,7 +36,8 @@ resource appService 'Microsoft.Web/sites@2025-03-01' existing = [
 resource appServicePrivateEndpoint 'Microsoft.Network/privateEndpoints@2024-05-01' = [
   for (appServiceWebAppName, i) in appServiceWebAppNames: {
     name: '${appServiceWebAppName}-private-endpoint'
-    location: resourceGroup().location
+    // TEMPORARY: keep the private endpoint colocated with the Australia East App Service spoke.
+    location: 'australiaeast'
     properties: {
       subnet: { id: appServicePeSubnet.id }
       privateLinkServiceConnections: [

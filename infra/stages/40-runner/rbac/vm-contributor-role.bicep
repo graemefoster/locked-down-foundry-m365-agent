@@ -1,7 +1,7 @@
 /*
   VM -> Contributor (resource group) RBAC
   ---------------------------------------
-  Grants the dev VM's system-assigned managed identity the Contributor role over the
+  Grants the Linux runner VM's system-assigned managed identity the Contributor role over the
   resource group, so the self-hosted GitHub Actions runner (which runs AS the VM MI)
   can perform control-plane work for representative end-to-end deployments — notably
   creating the Azure Bot Service used by the Teams / M365 publish flow — directly from

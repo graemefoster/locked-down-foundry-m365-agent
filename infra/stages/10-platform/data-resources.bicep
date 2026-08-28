@@ -20,7 +20,7 @@ param appInsightsName string
 // Deterministic gateway URL (threaded so no dependency on the APIM module).
 param apimGatewayUrl string
 
-@description('Optional provisioning-operator public IP to allow into the public YARP edge (dev/test). Empty = Teams-only.')
+@description('Optional provisioning-operator public IP to allow into the public YARP edge. Empty = Teams-only.')
 param deployerPublicIp string = ''
 
 // From stage 00.
@@ -58,7 +58,8 @@ module aiDependencies './resources/standard-dependent-resources.bicep' = if (dep
 module appService './gateway/app-service.bicep' = {
   name: 'appServiceDeployment'
   params: {
-    location: location
+    // TEMPORARY: East US App Service allocations are unavailable for this subscription.
+    location: 'australiaeast'
     logAnalyticsId: logAnalyticsId
     aspName: appServicePlanName
     appInsightsName: appInsightsName
