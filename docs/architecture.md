@@ -134,7 +134,8 @@ agent -> firewall -> private APIM MCP API -> private MCP App Service
 
 The workflow injects `MCP_SERVER_URL` into prompt-agent MCP tools at deployment time. APIM
 validates the agent identity and applies the per-server allowlist and request rate from
-`mcp/mcp-policy.json`.
+`mcp/mcp-policy.json`. The private MCP App Service Easy Auth configuration independently
+restricts access to the union of agent identities resolved from that policy.
 
 ### Models
 

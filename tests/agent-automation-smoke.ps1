@@ -29,6 +29,8 @@ try {
   $global:UploadedMetadata = ''
   $global:PromptScenario = 'create'
   $global:VersionResponse = @{ version = '2' }
+  $global:McpPolicyScenario = 'empty'
+  $global:EasyAuthBody = ''
 
   function global:az {
     $command = $args -join ' '
@@ -38,14 +40,26 @@ try {
     if ($command -match 'account get-access-token') {
       return 'fixture-token'
     }
-    if ($command -match 'account show') {
+    if ($command -match 'account show.*--query tenantId') {
       return '00000000-0000-0000-0000-000000000001'
+    }
+    if ($command -match 'account show.*--query id') {
+      return '00000000-0000-0000-0000-000000000002'
     }
     if ($command -match 'acr show') {
       return 'fixture.azurecr.io'
     }
     if ($command -match 'webapp config appsettings list') {
       return '[{"name":"ReverseProxy__Routes__old__Match__Path","value":"/old"}]'
+    }
+    if ($command -match 'rest --method get .*authsettingsV2') {
+      return '{"properties":{"globalValidation":{"requireAuthentication":true},"identityProviders":{"azureActiveDirectory":{"enabled":true,"validation":{"allowedAudiences":["api://fixture"],"defaultAuthorizationPolicy":{"allowedPrincipals":{}}}}}}}'
+    }
+    if ($command -match 'rest --method put .*authsettingsV2') {
+      $bodyArgument = @($args | Where-Object { $_ -like '@*' })[0]
+      if ($bodyArgument) {
+        $global:EasyAuthBody = Get-Content -LiteralPath $bodyArgument.Substring(1) -Raw
+      }
     }
   }
 
@@ -97,12 +111,25 @@ try {
       Body    = $Body
     })
 
+    if ($Uri -match '/agents/fixture-agent\?' -and $global:McpPolicyScenario -eq 'resolved') {
+      return @{
+        name              = 'fixture-agent'
+        instance_identity = @{ client_id = '00000000-0000-0000-0000-000000000003' }
+      }
+    }
     if ($Uri -match '/agents/fixture-agent\?') {
       if ($Method -eq 'Get' -and $global:PromptScenario -eq 'create') {
         throw (New-NotFoundException)
       }
       if ($Method -eq 'Get') {
-        return @{ name = 'fixture-agent' }
+        return @{
+          name     = 'fixture-agent'
+          versions = @{
+            latest = @{
+              blueprint = @{ client_id = '00000000-0000-0000-0000-000000000004' }
+            }
+          }
+        }
       }
       return @{}
     }
@@ -114,6 +141,9 @@ try {
     }
     if ($Uri -match '/versions\?' -and $Method -eq 'Get') {
       return @{ data = @(@{ version = '4' }) }
+    }
+    if ($Uri -match '/agents\?' -and $Method -eq 'Get' -and $global:McpPolicyScenario -eq 'resolved') {
+      return @{ data = @(@{ name = 'fixture-agent' }); has_more = $false }
     }
     if ($Uri -match '/agents\?' -and $Method -eq 'Get') {
       return @{ data = @(); has_more = $false }
@@ -326,6 +356,15 @@ try {
   Assert-True (
     $autopilotCall[0].Body -match '"optionalPermissionScopes"'
   ) 'Autopilot publishing omitted optional permission scopes.'
+  Assert-True (
+    $autopilotCall[0].Body -match '"useAgenticUserTemplate": true'
+  ) 'Autopilot publishing did not enable the agentic-user template.'
+  Assert-True (
+    $autopilotCall[0].Body -match '"AgentIdentityBlueprintId": "00000000-0000-0000-0000-000000000004"'
+  ) 'Autopilot publishing omitted the live blueprint client ID.'
+  Assert-True (
+    $autopilotCall[0].Body -match '"CommunicationProtocol": "activityProtocol"'
+  ) 'Autopilot publishing omitted the activity communication protocol.'
   Write-Host 'PASS Autopilot publish contract without Bot Service'
 
   $policyRoot = Join-Path $tempRoot 'empty-policy'
@@ -343,6 +382,7 @@ try {
       -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project' `
       -ResourceGroup 'fixture-rg' `
       -ApimName 'fixture-apim' `
+      -McpWebAppName 'fixture-mcp-app' `
       -McpAudience 'api://fixture'
   }
   finally {
@@ -352,7 +392,55 @@ try {
   Assert-True (
     @($global:AzCalls | Where-Object { $_ -match 'apim-mcp-compliance-all\.bicep' }).Count -eq 1
   ) 'Empty MCP policy did not deploy the deny-all policy.'
-  Write-Host 'PASS empty MCP policy applies deny-all'
+  Assert-True (
+    $global:EasyAuthBody -match '"allowedPrincipals"\s*:\s*\{\s*\}'
+  ) 'Empty MCP policy did not keep Easy Auth deny-all.'
+  Write-Host 'PASS empty MCP policy applies APIM and Easy Auth deny-all'
+
+  $resolvedPolicyRoot = Join-Path $tempRoot 'resolved-policy'
+  New-Item -ItemType Directory -Path (Join-Path $resolvedPolicyRoot 'mcp') -Force | Out-Null
+  @{
+    renewalPeriodSeconds = 60
+    servers = @(
+      @{
+        name = 'mcp'
+        agents = @(
+          @{ name = 'fixture-agent'; requestsPerMinute = 10 }
+        )
+      }
+    )
+  } |
+    ConvertTo-Json -Depth 10 |
+    Set-Content -LiteralPath (Join-Path $resolvedPolicyRoot 'mcp/mcp-policy.json')
+
+  $global:McpPolicyScenario = 'resolved'
+  $global:EasyAuthBody = ''
+  $global:RestCalls.Clear()
+  $global:AzCalls.Clear()
+  Push-Location $resolvedPolicyRoot
+  try {
+    & "$repositoryRoot/scripts/apply-mcp-policy.ps1" `
+      -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project' `
+      -ResourceGroup 'fixture-rg' `
+      -ApimName 'fixture-apim' `
+      -McpWebAppName 'fixture-mcp-app' `
+      -McpAudience 'api://fixture'
+  }
+  finally {
+    Pop-Location
+  }
+
+  $easyAuth = $global:EasyAuthBody | ConvertFrom-Json
+  $authorizationPolicy = $easyAuth.properties.identityProviders.azureActiveDirectory.validation.defaultAuthorizationPolicy
+  Assert-True (
+    @($authorizationPolicy.allowedApplications).Count -eq 1 -and
+    $authorizationPolicy.allowedApplications[0] -eq '00000000-0000-0000-0000-000000000003'
+  ) 'Resolved MCP policy did not apply the agent application to Easy Auth.'
+  Assert-True (
+    $authorizationPolicy.PSObject.Properties.Name -notcontains 'allowedPrincipals'
+  ) 'Resolved MCP policy retained the deny-all Easy Auth principal requirement.'
+  Write-Host 'PASS resolved MCP policy applies APIM and Easy Auth agent allowlists'
+  $global:McpPolicyScenario = 'empty'
 
   $routeRoot = Join-Path $tempRoot 'routes'
   $routeAgentDirectory = Join-Path $routeRoot 'agents/fixture-agent'

@@ -44,6 +44,7 @@ jobs:
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
             -ApimName "${{ vars.MCP_COMPLIANCE_APIM_NAME }}" `
+            -McpWebAppName "${{ vars.MCP_WEBAPP_NAME }}" `
             -McpAudience "${{ vars.MCP_COMPLIANCE_AUDIENCE }}"
 
       - name: Apply Teams bot audiences

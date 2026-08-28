@@ -233,6 +233,8 @@ Rules:
 - `renewalPeriodSeconds` and every `requestsPerMinute` value must be positive.
 - The governance workflow resolves each agent name to its live
   `instance_identity.client_id`.
+- Resolved identities are applied to both the per-server APIM policy and the MCP App Service
+  Easy Auth client-application allowlist.
 - An unresolved or identity-less agent is omitted and remains denied.
 - An agent not listed for a server receives `403`; permission on one server does not grant
   access to another.
