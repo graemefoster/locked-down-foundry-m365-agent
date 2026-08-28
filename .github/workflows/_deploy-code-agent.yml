@@ -8,11 +8,11 @@ on:
         type: string
         required: true
       build-context:
-        description: Docker context or dotnet project directory.
+        description: Docker context, dotnet project directory, or Python source directory.
         type: string
         required: true
       build-method:
-        description: docker or dotnet.
+        description: docker, dotnet, or python.
         type: string
         required: false
         default: docker
@@ -29,7 +29,13 @@ on:
       entry-dll:
         description: Entry DLL expected in the publish output.
         type: string
-        required: true
+        required: false
+        default: ''
+      entry-file:
+        description: Python entry file expected in the source archive.
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -73,9 +79,14 @@ jobs:
           dotnet publish "${{ inputs.build-context }}" -c Release -o publish
           if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
-      - name: Create the source zip
+      - name: Create the compiled source zip
+        if: inputs.build-method != 'python'
         shell: pwsh
         run: |
+          if ([string]::IsNullOrWhiteSpace("${{ inputs.entry-dll }}")) {
+            throw "entry-dll is required for '${{ inputs.build-method }}' builds."
+          }
+
           $entryDll = Join-Path publish "${{ inputs.entry-dll }}"
           if (-not (Test-Path -LiteralPath $entryDll)) {
             throw "Publish output does not contain '${{ inputs.entry-dll }}'."
@@ -89,6 +100,26 @@ jobs:
           finally {
             Pop-Location
           }
+
+      - name: Create the Python source zip
+        if: inputs.build-method == 'python'
+        shell: pwsh
+        run: |
+          $context = "${{ inputs.build-context }}"
+          $entryFile = "${{ inputs.entry-file }}"
+          if ([string]::IsNullOrWhiteSpace($entryFile)) {
+            throw "entry-file is required for Python builds."
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $context $entryFile))) {
+            throw "Python source does not contain '$entryFile'."
+          }
+
+          git archive `
+            --format=zip `
+            --output=agent.zip `
+            "HEAD:$context"
+
+          if ($LASTEXITCODE -ne 0) { throw "Could not create the Python source zip." }
 
       - name: Normalize the manifest (yq)
         shell: bash

@@ -76,10 +76,18 @@ $metadata = [ordered]@{
 }
 if ($null -ne $agent.description) { $metadata.description = $agent.description }
 if ($null -ne $agent.metadata) { $metadata.metadata = $agent.metadata }
+if ($null -ne $agent.agent_endpoint) { $metadata.agent_endpoint = $agent.agent_endpoint }
+if ($null -ne $agent.digital_worker_type) { $metadata.digital_worker_type = $agent.digital_worker_type }
 
 $metadataJson = $metadata | ConvertTo-Json -Depth 30
 $zipHash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) "agent-metadata-$([guid]::NewGuid().ToString('N')).json"
+$foundryFeatures = if ($agent.digital_worker_type -eq 'm365') {
+  'HostedAgents=V1Preview,DigitalWorker=V1Preview'
+}
+else {
+  'HostedAgents=V1Preview'
+}
 
 try {
   $metadataJson | Set-Content -LiteralPath $metadataPath -Encoding utf8
@@ -90,7 +98,7 @@ try {
     --show-error `
     --request POST `
     --header "Authorization: Bearer $token" `
-    --header 'Foundry-Features: HostedAgents=V1Preview' `
+    --header "Foundry-Features: $foundryFeatures" `
     --header "x-ms-agent-name: $agentName" `
     --header "x-ms-code-zip-sha256: $zipHash" `
     --form "metadata=@$metadataPath;type=application/json" `

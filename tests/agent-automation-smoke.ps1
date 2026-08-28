@@ -118,6 +118,9 @@ try {
     if ($Uri -match '/agents\?' -and $Method -eq 'Get') {
       return @{ data = @(); has_more = $false }
     }
+    if ($Uri -match '/microsoft365/publish\?' -and $Method -eq 'Post') {
+      return @{ titleId = 'fixture-title' }
+    }
 
     throw "Unexpected REST call: $Method $Uri"
   }
@@ -169,8 +172,16 @@ try {
   $codeAgentPath = Join-Path $tempRoot 'code-agent.json'
   $zipPath = Join-Path $tempRoot 'agent.zip'
   @{
-    name       = 'fixture-agent'
-    definition = @{
+    name                = 'fixture-agent'
+    metadata            = @{ enableVnextExperience = 'true' }
+    digital_worker_type = 'm365'
+    agent_endpoint      = @{
+      protocol_configuration = @{
+        activity = @{ enable_m365_public_endpoint = $true }
+      }
+      authorization_schemes = @(@{ type = 'BotServiceRbac' })
+    }
+    definition          = @{
       kind = 'hosted'
       code_configuration = @{
         runtime     = 'dotnet_10'
@@ -199,6 +210,15 @@ try {
   Assert-True (
     $global:UploadedMetadata -match 'https://fixture.services.ai.azure.com/api/projects/project'
   ) 'Code deploy did not inject FOUNDRY_PROJECT_ENDPOINT into the hosted agent metadata.'
+  Assert-True (
+    $global:UploadedMetadata -match '"digital_worker_type": "m365"'
+  ) 'Code deploy omitted the M365 digital-worker type.'
+  Assert-True (
+    $global:UploadedMetadata -match '"enable_m365_public_endpoint": true'
+  ) 'Code deploy omitted the M365 public activity endpoint.'
+  Assert-True (
+    $global:CurlCalls[0] -match 'DigitalWorker=V1Preview'
+  ) 'Code deploy omitted the digital-worker feature header.'
   Assert-True (
     @($global:RestCalls | Where-Object {
         $_.Method -eq 'Patch' -and $_.Body -match '"agent_version": "3"'
@@ -268,6 +288,45 @@ try {
 
   Assert-True ($global:RestCalls.Count -eq 0) 'Teams-disabled publishing made a REST request.'
   Write-Host 'PASS Teams-disabled short-circuit'
+
+  $autopilotDirectory = Join-Path $tempRoot 'autopilot'
+  New-Item -ItemType Directory -Path $autopilotDirectory | Out-Null
+  'name: fixture-agent' |
+    Set-Content -LiteralPath (Join-Path $autopilotDirectory 'agent.yaml')
+  @{
+    displayName              = 'Fixture Autopilot'
+    publishScope             = 'Tenant'
+    appVersion               = '1.0.0'
+    canRespondWithoutMention = $true
+    optionalPermissionScopes = @(
+      @{
+        resourceAppId = '00000000-0000-0000-0000-000000000002'
+        scopes        = @('Fixture.Scope')
+      }
+    )
+  } | ConvertTo-Json -Depth 10 |
+    Set-Content -LiteralPath (Join-Path $autopilotDirectory 'autopilot.json')
+
+  $global:RestCalls.Clear()
+  & "$repositoryRoot/scripts/publish-autopilot.ps1" `
+    -AgentDirectory $autopilotDirectory `
+    -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project' `
+    -PublishAccessToken 'fixture-user-token'
+
+  $autopilotCall = @($global:RestCalls | Where-Object {
+      $_.Method -eq 'Post' -and $_.Uri -match '/microsoft365/publish\?'
+    })
+  Assert-True ($autopilotCall.Count -eq 1) 'Autopilot publishing did not issue exactly one request.'
+  Assert-True (
+    $autopilotCall[0].Body -match '"publishAsAutopilot": true'
+  ) 'Autopilot publishing did not set publishAsAutopilot.'
+  Assert-True (
+    $autopilotCall[0].Body -notmatch 'botServiceArmId'
+  ) 'Autopilot publishing included a Bot Service ARM ID.'
+  Assert-True (
+    $autopilotCall[0].Body -match '"optionalPermissionScopes"'
+  ) 'Autopilot publishing omitted optional permission scopes.'
+  Write-Host 'PASS Autopilot publish contract without Bot Service'
 
   $policyRoot = Join-Path $tempRoot 'empty-policy'
   New-Item -ItemType Directory -Path (Join-Path $policyRoot 'mcp') -Force | Out-Null
