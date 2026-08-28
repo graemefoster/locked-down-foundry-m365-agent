@@ -166,8 +166,8 @@ The steps intentionally do not use a common helper module or composite action.
 
 - Token limits are compiled from every `agents/*/network.json`.
 - YARP routes are regenerated and stale agent routes are removed.
-- MCP agent names are resolved to live Foundry identity client IDs before APIM policy is
-  applied.
+- MCP agent names are resolved to live Foundry identity client IDs before the APIM policy and
+  MCP App Service Easy Auth allowlist are applied.
 - Teams audiences are resolved from agents enabled for Microsoft 365.
 
 An omitted agent or principal remains denied. APIM writes remain serialized to prevent
