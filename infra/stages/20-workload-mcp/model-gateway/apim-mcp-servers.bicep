@@ -17,9 +17,6 @@
 @description('Name of the existing APIM instance hosting the MCP APIs.')
 param apimName string
 
-@description('Environment token (e.g. "dev" / "test") that suffixes each MCP API + Foundry connection name so dev and test are isolated on the shared APIM instance.')
-param env string
-
 @description('Map of { <serverName>: <mcpWebAppFqdn> } flowed from the deployment. Every server in mcp/mcp.json MUST have a matching key here (the FQDN is generated at provision time, so it cannot live in the config file).')
 param serverFqdns object
 
@@ -28,20 +25,20 @@ param mcpConfig object = loadJsonContent('../../../../mcp/mcp.json')
 
 // One APIM MCP API + backend per configured server. Backend path is /<name> by
 // convention unless the entry supplies an explicit `backendPath`.
+@batchSize(1)
 module mcpApis 'apim-mcp-api.bicep' = [for server in mcpConfig.servers: {
-  name: 'mcp-api-${server.name}-${env}-deployment'
+  name: 'mcp-api-${server.name}-deployment'
   params: {
     apimName: apimName
     serverName: server.name
-    env: env
     mcpWebAppFqdn: serverFqdns[server.name]
     backendPath: server.?backendPath ?? '/${server.name}'
   }
 }]
 
-@description('The MCP servers exposed on APIM, as [{ name, connectionName, url }] — url is the gateway URL Foundry connects to; connectionName is the Foundry project connection name (defaults to the server name), env-suffixed so dev/test connections do not collide.')
+@description('The MCP servers exposed on APIM, as [{ name, connectionName, url }] — url is the gateway URL Foundry connects to; connectionName is the Foundry project connection name (defaults to the server name).')
 output servers array = [for (server, i) in mcpConfig.servers: {
   name: server.name
-  connectionName: '${server.?connectionName ?? server.name}-${env}'
+  connectionName: server.?connectionName ?? server.name
   url: mcpApis[i].outputs.mcpGatewayUrl
 }]

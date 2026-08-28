@@ -3,10 +3,10 @@ Stage 30 — GOVERNANCE.
 
 Everything that governs the platform + workload AFTER they exist: the Foundry project's
 MCP connections, the APIM model-gateway API/policy/connection wiring, the Teams inbound API
-(optional), the RAI guardrail audit policy (+ its non-compliant demo, optional), the APIM
+(always deployed), the RAI guardrail audit policy (+ its non-compliant demo, optional), the APIM
 lockdown that flips public access OFF, and the cross-spoke gateway firewall rules.
 
-Depends only downward on stages 00/10/20 (their outputs are threaded in as params). Two hard
+Depends only downward on stages 00/10/13/15/20 (their outputs are threaded in as params). Two hard
 orderings are preserved from the flat template:
   * apimLockdown runs STRICTLY LAST — after every APIM API/policy write (api-policy,
     teams-api, mcp-compliance) — because it forbids further public-plane writes once
@@ -25,23 +25,17 @@ param apimName string
 param providerAccountId string
 param gatewayUrl string
 
-// ---- stage 15 (per-env Foundry project) facts ----
-@description('Dev Foundry project name.')
-param projectNameDev string
-@description('Test Foundry project name.')
-param projectNameTest string
-@description('Dev Foundry project resource id (caller pinned in the shared model-gateway provider policy — dev is the primary).')
-param projectIdDev string
+// ---- stage 15 (Foundry project) facts ----
+@description('Foundry project name.')
+param projectName string
+@description('Foundry project resource id (caller pinned in the shared model-gateway provider policy).')
+param projectId string
 
-// ---- stage 20 (per-env MCP workload) facts ----
-@description('Governed MCP servers for DEV (from stage 20): each { connectionName, url } — the APIM MCP gateway servers.')
-param serversDev array
-@description('Governed MCP servers for TEST (from stage 20).')
-param serversTest array
-@description('DEV MCP app-registration audience (from stage 20) the agent token is minted for.')
-param mcpAudienceDev string
-@description('TEST MCP app-registration audience (from stage 20).')
-param mcpAudienceTest string
+// ---- stage 20 (MCP workload) facts ----
+@description('Governed MCP servers from stage 20: each { connectionName, url } — the APIM MCP gateway servers.')
+param servers array
+@description('MCP app-registration audience from stage 20 the agent token is minted for.')
+param mcpAudience string
 
 // ---- stage 00 (foundation) facts ----
 param modelGatewayApimSubnetId string
@@ -61,10 +55,8 @@ param foundryPeSubnetCidr string
 param appServicePeSubnetCidr string
 
 // ---- Teams / M365 publish ----
-@description('DEV bot Microsoft App IDs allowed as APIM validate-jwt audiences on the dev Teams API. Empty = validate the Bot Framework issuer only.')
-param teamsBotAppIdsDev array = []
-@description('TEST bot Microsoft App IDs allowed as APIM validate-jwt audiences on the test Teams API.')
-param teamsBotAppIdsTest array = []
+@description('Bot Microsoft App IDs allowed as APIM validate-jwt audiences on the Teams API. Empty = validate the Bot Framework issuer only.')
+param teamsBotAppIds array = []
 
 // ---- RAI guardrail (optional) ----
 param enableRaiGuardrailPolicy bool
@@ -78,35 +70,20 @@ param modelSkuName string
 @description('Optional audience the caller Entra token must carry for the foundry-agents API (empty = validate tenant + signature only).')
 param agentCallerAudience string = ''
 
-// One Foundry project connection per governed MCP server, PER project (dev + test). These
-// connections are not used by the Agents capability host, so they run here (stage 30) rather
-// than at project-create time. Each env's project points at its own env-suffixed MCP server.
-var mcpConnectionsDev = map(serversDev, srv => {
+// One Foundry project connection per governed MCP server. These connections are not used by
+// the Agents capability host, so they run here (stage 30) rather than at project-create time.
+var mcpConnections = map(servers, srv => {
   name: srv.connectionName
   url: '${srv.url}/'
-  audience: mcpAudienceDev
-})
-var mcpConnectionsTest = map(serversTest, srv => {
-  name: srv.connectionName
-  url: '${srv.url}/'
-  audience: mcpAudienceTest
+  audience: mcpAudience
 })
 
-module projectMcpConnectionsDev './foundry/project-mcp-connections.bicep' = {
-  name: 'project-mcp-connections-dev-${uniqueSuffix}-deployment'
+module projectMcpConnections './foundry/project-mcp-connections.bicep' = {
+  name: 'project-mcp-connections-${uniqueSuffix}-deployment'
   params: {
     accountName: aiAccountName
-    projectName: projectNameDev
-    mcpConnections: mcpConnectionsDev
-  }
-}
-
-module projectMcpConnectionsTest './foundry/project-mcp-connections.bicep' = {
-  name: 'project-mcp-connections-test-${uniqueSuffix}-deployment'
-  params: {
-    accountName: aiAccountName
-    projectName: projectNameTest
-    mcpConnections: mcpConnectionsTest
+    projectName: projectName
+    mcpConnections: mcpConnections
   }
 }
 
@@ -133,14 +110,13 @@ module nonCompliantModelDemo './governance/noncompliant-model-demo.bicep' = if (
 
 // MCP per-agent rate-limit compliance policies — reflect mcp/mcp-policy.json into a policy on
 // each MCP server's API so each agent's tool calls are throttled by AppId (deny-by-default,
-// per server). Applied PER ENV here at provision time so a fresh environment starts compliant;
-// the deploy-agent-network workflow re-applies THIS SAME module (per env) after the JSON changes.
-module apimMcpComplianceAllDev './model-gateway/apim-mcp-compliance-all.bicep' = {
-  name: 'mcp-compliance-all-dev-${uniqueSuffix}-deployment'
+// per server). Applied here at provision time so a fresh deployment starts compliant; the
+// deploy-agent-network workflow re-applies this same module after the JSON changes.
+module apimMcpComplianceAll './model-gateway/apim-mcp-compliance-all.bicep' = {
+  name: 'mcp-compliance-all-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
-    env: 'dev'
-    mcpAudience: mcpAudienceDev
+    mcpAudience: mcpAudience
     tenantId: tenant().tenantId
   }
 }
@@ -151,20 +127,7 @@ module apimMcpComplianceAllDev './model-gateway/apim-mcp-compliance-all.bicep' =
 // (BadGateway). They are therefore chained end-to-end via dependsOn so exactly one APIM
 // config change is in flight at a time (same conservative sequencing the firewall RCGs and
 // apimLockdown already use). The chain is:
-//   mcpComplianceDev -> mcpComplianceTest -> apiPolicy -> teamsDev -> teamsTest
-//     -> foundryAgentsApiDev -> foundryAgentsApiTest -> foundryAgentLimitsDev -> foundryAgentLimitsTest
-module apimMcpComplianceAllTest './model-gateway/apim-mcp-compliance-all.bicep' = {
-  name: 'mcp-compliance-all-test-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apimName
-    env: 'test'
-    mcpAudience: mcpAudienceTest
-    tenantId: tenant().tenantId
-  }
-  dependsOn: [
-    apimMcpComplianceAllDev
-  ]
-}
+//   mcpCompliance -> apiPolicy -> teamsApi -> foundryAgentsApi -> foundryAgentLimits -> lockdown.
 
 module apimApiPolicy './model-gateway/apim-api-policy.bicep' = {
   name: 'model-gateway-apim-api-${uniqueSuffix}-deployment'
@@ -173,20 +136,19 @@ module apimApiPolicy './model-gateway/apim-api-policy.bicep' = {
     backendBaseUrl: providerBackendBaseUrl
     providerAccountResourceId: providerAccountId
     projectMiClientId: gatewayCallerAppId
-    callerProjectResourceId: projectIdDev
+    callerProjectResourceId: projectId
   }
   dependsOn: [
-    apimMcpComplianceAllTest
+    apimMcpComplianceAll
   ]
 }
 
-// Advertise APIM to the DEV (primary) Foundry project as an ApiManagement connection. The
-// shared model-gateway provider passthrough is a single instance pinned to the primary project.
+// Advertise APIM to the Foundry project as an ApiManagement connection.
 module apimConnection './model-gateway/apim-connection.bicep' = {
   name: 'model-gateway-connection-${uniqueSuffix}-deployment'
   params: {
     aiFoundryName: aiAccountName
-    projectName: projectNameDev
+    projectName: projectName
     connectionName: modelGatewayConnectionName
     apimGatewayUrl: gatewayUrl
     apiPath: apimApiPolicy.outputs.apiPath
@@ -194,16 +156,15 @@ module apimConnection './model-gateway/apim-connection.bicep' = {
   }
 }
 
-// APIM Teams / M365 inbound API + policy, PER ENV (validate Bot Framework JWT, forward to the
-// per-env project's agent activityProtocol endpoint on the primary Foundry PE). Always deployed.
-module apimTeamsApiDev './model-gateway/apim-teams-api.bicep' = {
-  name: 'teams-apim-api-dev-${uniqueSuffix}-deployment'
+// APIM Teams / M365 inbound API + policy (validate Bot Framework JWT, forward to the
+// project's agent activityProtocol endpoint on the primary Foundry PE). Always deployed.
+module apimTeamsApi './model-gateway/apim-teams-api.bicep' = {
+  name: 'teams-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
-    env: 'dev'
     foundryAccountName: aiAccountName
-    projectName: projectNameDev
-    botAppIds: teamsBotAppIdsDev
+    projectName: projectName
+    botAppIds: teamsBotAppIds
     expectedTenantId: tenant().tenantId
   }
   dependsOn: [
@@ -211,87 +172,34 @@ module apimTeamsApiDev './model-gateway/apim-teams-api.bicep' = {
   ]
 }
 
-module apimTeamsApiTest './model-gateway/apim-teams-api.bicep' = {
-  name: 'teams-apim-api-test-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apimName
-    env: 'test'
-    foundryAccountName: aiAccountName
-    projectName: projectNameTest
-    botAppIds: teamsBotAppIdsTest
-    expectedTenantId: tenant().tenantId
-  }
-  dependsOn: [
-    apimTeamsApiDev
-  ]
-}
-
-// APIM Foundry agent /responses inbound API (structure) + token-governance policy, PER ENV. The
+// APIM Foundry agent /responses inbound API (structure) + token-governance policy. The
 // API is created once here; the deny-by-default token-limit + llm-emit-token-metric policy is
 // applied with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
-// per-env agents/<name>/agent-network.json by the deploy-agent-network workflow. Always deployed.
-// APIM Foundry agent /responses inbound API (structure) + token-governance policy, PER ENV. The
-// API is created once here; the deny-by-default token-limit + llm-emit-token-metric policy is
-// applied with an EMPTY allowlist at provision (deny-all) and re-applied with the aggregated
-// per-env agents/<name>/agent-network.json by the deploy-agent-network workflow. Always deployed.
-module apimFoundryAgentsApiDev './model-gateway/apim-foundry-agents-api.bicep' = {
-  name: 'foundry-agents-apim-api-dev-${uniqueSuffix}-deployment'
+// agents/<name>/network.json by the deploy-agent-network workflow. Always deployed.
+module apimFoundryAgentsApi './model-gateway/apim-foundry-agents-api.bicep' = {
+  name: 'foundry-agents-apim-api-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
-    env: 'dev'
     foundryAccountName: aiAccountName
-    projectName: projectNameDev
+    projectName: projectName
   }
   dependsOn: [
-    apimTeamsApiTest
+    apimTeamsApi
   ]
 }
 
-module apimFoundryAgentsApiTest './model-gateway/apim-foundry-agents-api.bicep' = {
-  name: 'foundry-agents-apim-api-test-${uniqueSuffix}-deployment'
+module apimFoundryAgentLimits './model-gateway/apim-foundry-agent-limits.bicep' = {
+  name: 'foundry-agent-limits-${uniqueSuffix}-deployment'
   params: {
     apimName: apimName
-    env: 'test'
+    apiName: apimFoundryAgentsApi.outputs.apiName
     foundryAccountName: aiAccountName
-    projectName: projectNameTest
-  }
-  dependsOn: [
-    apimFoundryAgentsApiDev
-  ]
-}
-
-module apimFoundryAgentLimitsDev './model-gateway/apim-foundry-agent-limits.bicep' = {
-  name: 'foundry-agent-limits-dev-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apimName
-    apiName: apimFoundryAgentsApiDev.outputs.apiName
-    env: 'dev'
-    foundryAccountName: aiAccountName
-    projectName: projectNameDev
-    tenantId: tenant().tenantId
-    callerAudience: agentCallerAudience
-  }
-  dependsOn: [
-    apimFoundryAgentsApiTest
-  ]
-}
-
-module apimFoundryAgentLimitsTest './model-gateway/apim-foundry-agent-limits.bicep' = {
-  name: 'foundry-agent-limits-test-${uniqueSuffix}-deployment'
-  params: {
-    apimName: apimName
-    apiName: apimFoundryAgentsApiTest.outputs.apiName
-    env: 'test'
-    foundryAccountName: aiAccountName
-    projectName: projectNameTest
+    projectName: projectName
     tenantId: tenant().tenantId
     callerAudience: agentCallerAudience
     // agentLimits omitted -> DENY-ALL until the deploy-agent-network workflow supplies the
-    // aggregated agents/<name>/agent-network.json allowlist.
+    // aggregated agents/<name>/network.json allowlist.
   }
-  dependsOn: [
-    apimFoundryAgentLimitsDev
-  ]
 }
 
 // Phase 2 lockdown: flip APIM publicNetworkAccess to 'Disabled' now that the inbound
@@ -305,13 +213,7 @@ module apimLockdown './model-gateway/apim-lockdown.bicep' = {
     apimOutboundSubnetId: modelGatewayApimSubnetId
   }
   dependsOn: [
-    apimApiPolicy
-    apimTeamsApiDev
-    apimTeamsApiTest
-    apimMcpComplianceAllDev
-    apimMcpComplianceAllTest
-    apimFoundryAgentLimitsDev
-    apimFoundryAgentLimitsTest
+    apimFoundryAgentLimits
   ]
 }
 
@@ -344,23 +246,14 @@ output nonCompliantDeploymentName string = enableNonCompliantModelDemo ? nonComp
 @description('Model reference (connection/model) advertised to the second, model-gateway agent.')
 output agentModelReference string = apimConnection.outputs.agentModelReference
 
-@description('APIM DEV Teams inbound API name.')
-output teamsApiNameDev string = apimTeamsApiDev.outputs.apiName
+@description('APIM Teams inbound API name.')
+output teamsApiName string = apimTeamsApi.outputs.apiName
 
-@description('APIM TEST Teams inbound API name.')
-output teamsApiNameTest string = apimTeamsApiTest.outputs.apiName
+@description('Number of MCP servers governed by the applied compliance policies.')
+output governedServerCount int = apimMcpComplianceAll.outputs.governedServerCount
 
-@description('Number of MCP servers governed by the applied compliance policies (per env; same count).')
-output governedServerCount int = apimMcpComplianceAllDev.outputs.governedServerCount
+@description('APIM API name for the governed Foundry agent /responses endpoint.')
+output foundryAgentsApiName string = apimFoundryAgentsApi.outputs.apiName
 
-@description('APIM API name for the governed DEV Foundry agent /responses endpoint.')
-output foundryAgentsApiNameDev string = apimFoundryAgentsApiDev.outputs.apiName
-
-@description('APIM API name for the governed TEST Foundry agent /responses endpoint.')
-output foundryAgentsApiNameTest string = apimFoundryAgentsApiTest.outputs.apiName
-
-@description('Public path of the governed DEV Foundry agent /responses API (<account>/<project-dev>).')
-output foundryAgentsApiPathDev string = apimFoundryAgentsApiDev.outputs.apiPath
-
-@description('Public path of the governed TEST Foundry agent /responses API (<account>/<project-test>).')
-output foundryAgentsApiPathTest string = apimFoundryAgentsApiTest.outputs.apiPath
+@description('Public path of the governed Foundry agent /responses API (<account>/<project>).')
+output foundryAgentsApiPath string = apimFoundryAgentsApi.outputs.apiPath

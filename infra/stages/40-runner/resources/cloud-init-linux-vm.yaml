@@ -4,7 +4,7 @@
 #
 # This is the ONLY shell script in the repo — deliberately. Everything downstream
 # (agent seeding, Teams publish, workflow steps) stays in PowerShell and runs on
-# the `pwsh` installed here, which is cross-platform. See docs/github-runner.md.
+# the `pwsh` installed here, which is cross-platform. See docs/operations.md.
 #
 # Installed:
 #   pwsh        - runs scripts/*.ps1 via `az vm run-command` and in workflow steps
@@ -24,8 +24,6 @@
 #                 Unix mode bits (PowerShell Compress-Archive / .NET ZipFile do NOT), keeping
 #                 bundled native executables (e.g. the GitHub Copilot CLI) executable after Foundry
 #                 extracts the code_configuration zip
-#   yq          - agent.yaml -> agent.json in the reusable deploy-agent.yml (this is why
-#                 that conversion no longer needs a separate GitHub-hosted job)
 #
 # The runner bootstrap (bootstrap-github-runner.sh) blocks on `cloud-init status
 # --wait`, so the managed Run Command can never race this.
@@ -69,16 +67,6 @@ runcmd:
     - |
       set -euxo pipefail
       curl -fsSL https://aka.ms/InstallAzureCLIDeb | bash
-  # yq (mikefarah) — the apt package is a different, incompatible CLI, so take the
-  # official static binary. GitHub releases are already reachable (the runner
-  # tarball comes from there too).
-  - - bash
-    - -c
-    - |
-      set -euxo pipefail
-      curl -fsSL -o /usr/local/bin/yq \
-        "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
-      chmod 0755 /usr/local/bin/yq
   # docker buildx (mobyproject) — the official CLI-plugin binary from GitHub releases (the
   # `docker.io` apt package ships no buildx). Installed system-wide so every user's `docker`
   # finds it. Required so hosted-agent image builds use BuildKit and push OCI media types

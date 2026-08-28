@@ -7,7 +7,7 @@ param aspName string
 @description('APIM gateway base URL (e.g. https://apim-xxx.azure-api.net) the YARP proxy forwards Teams traffic to.')
 param apimGatewayUrl string = ''
 
-@description('Optional public IP (bare IPv4 or CIDR) of the provisioning operator to allow into the public YARP edge for dev/test, IN ADDITION to the Microsoft Teams inbound ranges. Empty (default) = Teams-only, no operator hole. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook).')
+@description('Optional public IP (bare IPv4 or CIDR) of the provisioning operator to allow into the public YARP edge, IN ADDITION to the Microsoft Teams inbound ranges. Empty (default) = Teams-only, no operator hole. Set opt-in via DEPLOYER_PUBLIC_IP (preprovision hook).')
 param deployerPublicIp string = ''
 
 // Microsoft Teams "Required" published IP ranges — the source ranges the Bot Channel Adapter
@@ -46,7 +46,7 @@ var teamsInboundIpRules = [
   }
 ]
 // Opt-in: allow the provisioning operator's own public IP into the PUBLIC YARP edge so they can
-// reach the /agents/<name> and /teams/<name> routes for dev/test. This is only the NETWORK layer:
+// reach the /agents/<name> and /teams/<name> routes. This is only the NETWORK layer:
 // a caller still needs a valid Entra token (audience https://ai.azure.com) AND to be in the
 // deny-by-default token-limit allowlist to actually invoke an agent through APIM. Empty = no rule.
 var deployerIpRules = empty(deployerPublicIp)
@@ -57,7 +57,7 @@ var deployerIpRules = empty(deployerPublicIp)
         action: 'Allow'
         priority: 90
         name: 'AllowDeployerIp'
-        description: 'Opt-in operator public IP (dev/test YARP edge access)'
+        description: 'Opt-in operator public IP (YARP edge access)'
       }
     ]
 var yarpIpRestrictions = concat(teamsInboundIpRules, deployerIpRules)
@@ -66,7 +66,7 @@ resource appInsights 'Microsoft.Insights/components@2020-02-02' existing = {
   name: appInsightsName
 }
 
-resource aspTest 'Microsoft.Web/serverfarms@2022-09-01' = {
+resource appServicePlan 'Microsoft.Web/serverfarms@2022-09-01' = {
   name: aspName
   location: location
   sku: {
@@ -91,7 +91,7 @@ resource webApp 'Microsoft.Web/sites@2025-03-01' = {
     'azd-service-name': 'gateway'
   }
   properties: {
-    serverFarmId: aspTest.id
+    serverFarmId: appServicePlan.id
     siteConfig: {
       // .NET code stack (was a DOCKER image). Source lives in apps/sample-gateway (net10 YARP);
       // azd publishes and zip-deploys it.
@@ -153,6 +153,6 @@ resource appDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-previe
 }
 
 
-output aspId string = aspTest.id
+output aspId string = appServicePlan.id
 output yarpWebAppFqdn string = webApp.properties.defaultHostName
 output yarpWebAppName string = webApp.name

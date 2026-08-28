@@ -1,7 +1,7 @@
 /*
   Azure Bot Service for a Teams / M365-published Foundry agent
   ------------------------------------------------------------
-  Deployed by the in-VNet Teams-publish path (scripts/publish-teams-runner.ps1) via
+  Deployed by the in-VNet Teams-publish path (scripts/publish-teams.ps1) via
   `az deployment group create`, running on the VM as its managed identity (Contributor
   on the resource group). It lives in hooks/ for historical reasons; it is control-plane
   (ARM) work and is NOT wired into infra/main.bicep because its `msaAppId` (the agent

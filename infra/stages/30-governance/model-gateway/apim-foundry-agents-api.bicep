@@ -7,7 +7,7 @@
   (validate-jwt + llm-emit-token-metric + deny-by-default llm-token-limit + the
   path-preserving rewrite to the Foundry agent endpoint) is authored by the sibling
   apim-foundry-agent-limits.bicep so the deploy-agent-network workflow can re-apply
-  just the policy after agents/<name>/agent-network.json changes — exactly the split
+  just the policy after agents/<name>/network.json changes — exactly the split
   used by the MCP api (structure) + apim-mcp-compliance (policy) pair.
 
     Web tier / user  --Entra JWT-->  THIS APIM API (/<foundry>/<proj>/agents/<name>/...)
@@ -46,20 +46,13 @@ param projectName string
 @description('APIM API resource name (stable id the policy module attaches to). The public PATH is derived separately from the account/project.')
 param apiName string = 'foundry-agents'
 
-@description('Environment token (e.g. "dev" / "test") that suffixes the APIM API name + backend id so the two per-project passthroughs on the shared account do not collide.')
-param env string
-
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 }
 
-// Env-suffixed so dev + test each get a distinct API + backend on the shared APIM instance,
-// even though they front the SAME Foundry account (different projects).
-var envApiName = '${apiName}-${env}'
-
 // First-class backend for the primary Foundry account data plane. The policy targets it by ID
 // and rewrites to the Responses path; APIM forwards over VNet integration -> firewall -> PE.
-var backendId = 'foundry-agents-${foundryAccountName}-${env}'
+var backendId = 'foundry-agents-${foundryAccountName}'
 var backendBaseUrl = 'https://${foundryAccountName}.services.ai.azure.com'
 
 // Public path = '<account>/<project>' (per the design). The account/project prefix is only for
@@ -79,7 +72,7 @@ resource foundryAgentsBackend 'Microsoft.ApiManagement/service/backends@2024-05-
 
 resource foundryAgentsApi 'Microsoft.ApiManagement/service/apis@2024-05-01' = {
   parent: apim
-  name: envApiName
+  name: apiName
   properties: {
     displayName: 'Foundry agent passthrough (governed)'
     path: apiPath

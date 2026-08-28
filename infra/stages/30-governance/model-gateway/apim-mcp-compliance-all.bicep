@@ -21,9 +21,6 @@ param apimName string
 @description('Audience the MCP AgenticIdentityToken is minted for (the MCP app registration audience). Shared across servers for now; flowed from the deployment.')
 param mcpAudience string
 
-@description('Environment token (e.g. "dev" / "test") threaded to each per-server compliance policy so it attaches to the env-suffixed MCP API (`<serverName>-<env>`).')
-param env string
-
 @description('Entra tenant ID the caller token must be issued by.')
 param tenantId string = subscription().tenantId
 
@@ -46,11 +43,10 @@ var effectivePolicy = empty(mcpPolicy)
 // by serverName itself, so the whole resolved policy is threaded in.
 @batchSize(1)
 module policies 'apim-mcp-compliance.bicep' = [for server in mcpConfig.servers: {
-  name: 'mcp-compliance-${server.name}-${env}-deployment'
+  name: 'mcp-compliance-${server.name}-deployment'
   params: {
     apimName: apimName
     serverName: server.name
-    env: env
     mcpAudience: mcpAudience
     tenantId: tenantId
     mcpPolicy: effectivePolicy

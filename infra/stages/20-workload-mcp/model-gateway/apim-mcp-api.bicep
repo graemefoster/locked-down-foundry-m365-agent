@@ -32,25 +32,20 @@ param apimName string
 @description('MCP server name. Used verbatim as the APIM API name + path, and (by convention) as the backend path.')
 param serverName string
 
-@description('Environment token (e.g. "dev" / "test") that suffixes the APIM API name + path + backend id so dev and test are isolated on the shared APIM instance.')
-param env string
-
 @description('FQDN of the MCP web app (private endpoint), e.g. mcp-xxxx.azurewebsites.net. Flowed in dynamically from the deployment (see main.bicep serverFqdns) - never stored in mcp/mcp.json.')
 param mcpWebAppFqdn string
 
 @description('Path on the backend MCP web app where the streamable-HTTP MCP endpoint is served. Defaults to /<serverName> by convention.')
 param backendPath string = '/${serverName}'
 
-// The APIM API name + path are env-suffixed so the two environments (dev/test) expose distinct
-// MCP server endpoints through the single shared APIM instance.
-var apiName = '${serverName}-${env}'
+var apiName = serverName
 
 resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 }
 
-// Backend id is namespaced by server + env so multiple MCP servers / environments never collide.
-var backendId = 'mcp-server-backend-${serverName}-${env}'
+// Backend id is namespaced by server so multiple MCP servers never collide.
+var backendId = 'mcp-server-backend-${serverName}'
 // The backend MCP container (Express) serves the streamable-HTTP MCP endpoint at its path, NOT at
 // root. APIM's type:mcp proxy forwards the MCP protocol to the backend `url` verbatim (it does
 // NOT append the endpoint uriTemplate), so the backend url MUST include the path - with a bare
@@ -76,7 +71,7 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
   parent: apim
   name: apiName
   properties: union({
-    displayName: 'MCP Server Gateway (${serverName} ${env})'
+    displayName: 'MCP Server Gateway (${serverName})'
     description: 'Enterprise MCP server exposed through the APIM AI gateway. Proxies to the private MCP web app with pass-through AgenticIdentityToken auth.'
     path: apiName
     protocols: [
@@ -102,5 +97,5 @@ resource mcpApi 'Microsoft.ApiManagement/service/apis@2024-06-01-preview' = {
 
 output apiName string = mcpApi.name
 output apiPath string = apiName
-@description('Full MCP server URL through the APIM gateway, e.g. https://<apim>.azure-api.net/<serverName>-<env>')
+@description('Full MCP server URL through the APIM gateway, e.g. https://<apim>.azure-api.net/<serverName>')
 output mcpGatewayUrl string = '${apim.properties.gatewayUrl}/${apiName}'

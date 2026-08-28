@@ -49,9 +49,7 @@ function Get-OptionalEnv {
 $subscriptionId = Get-OptionalEnv 'AZURE_SUBSCRIPTION_ID'
 $resourceGroup  = Get-OptionalEnv 'AZURE_RESOURCE_GROUP'
 $accountName    = Get-OptionalEnv 'AZURE_AI_ACCOUNT_NAME'
-$projectNameDev  = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME_DEV'
-$projectNameTest = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME_TEST'
-$projectNames    = @($projectNameDev, $projectNameTest) | Where-Object { $_ }
+$projectName    = Get-OptionalEnv 'AZURE_AI_PROJECT_NAME'
 
 # --- Phase 0: deregister the self-hosted GitHub runner (best-effort) ----------------------
 # Runs first, and independently of Foundry state, so a stale runner is always cleaned up even
@@ -137,19 +135,19 @@ if ([string]::IsNullOrWhiteSpace($subscriptionId) -or [string]::IsNullOrWhiteSpa
 }
 
 $hasAccount = -not [string]::IsNullOrWhiteSpace($accountName)
-$hasProject = $projectNames.Count -gt 0
+$hasProject = -not [string]::IsNullOrWhiteSpace($projectName)
 
 if (-not $hasAccount -and -not $hasProject) {
   Write-Warning "[predown] No Foundry account/project names available (run 'azd env refresh'). Assuming Foundry is not provisioned; skipping capability-host cleanup."
   exit 0
 }
 
-# The blocking capability hosts are created at PROJECT scope, so we MUST know at least one project.
+# The blocking capability host is created at PROJECT scope, so we MUST know the project.
 if (-not $hasProject) {
-  throw "[predown] AZURE_AI_ACCOUNT_NAME is set but AZURE_AI_PROJECT_NAME_DEV/_TEST are missing. Cannot delete the project-scope capability hosts. Run 'azd env refresh' and retry 'azd down'."
+  throw "[predown] AZURE_AI_ACCOUNT_NAME is set but AZURE_AI_PROJECT_NAME is missing. Cannot delete the project-scope capability host. Run 'azd env refresh' and retry 'azd down'."
 }
 if (-not $hasAccount) {
-  throw "[predown] AZURE_AI_PROJECT_NAME_DEV/_TEST is set but AZURE_AI_ACCOUNT_NAME is missing. Cannot build the capability-host resource path. Run 'azd env refresh' and retry 'azd down'."
+  throw "[predown] AZURE_AI_PROJECT_NAME is set but AZURE_AI_ACCOUNT_NAME is missing. Cannot build the capability-host resource path. Run 'azd env refresh' and retry 'azd down'."
 }
 
 $basePath = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup/providers/Microsoft.CognitiveServices/accounts/$accountName"
@@ -218,15 +216,13 @@ function Remove-CapabilityHosts {
 
 $capHostIds = @()
 
-# --- Phase 1: PROJECT-scope capability hosts (both dev + test projects) ------------------
-# Each env's project has its OWN project-scope capability host on the shared account; both must
-# be gone before the account-scope host (and the account itself) can be deleted.
-foreach ($projectName in $projectNames) {
-  $projectPath = "$basePath/projects/$projectName"
-  $projectIds = Get-CapabilityHostIds -Path $projectPath -Scope "project '$projectName'"
-  Remove-CapabilityHosts -Ids $projectIds -Scope "project '$projectName'"
-  $capHostIds += $projectIds
-}
+# --- Phase 1: PROJECT-scope capability host ----------------------------------------------
+# The project-scope capability host must be gone before the account-scope host (and account)
+# can be deleted.
+$projectPath = "$basePath/projects/$projectName"
+$projectIds = Get-CapabilityHostIds -Path $projectPath -Scope "project '$projectName'"
+Remove-CapabilityHosts -Ids $projectIds -Scope "project '$projectName'"
+$capHostIds += $projectIds
 
 # --- Phase 2: ACCOUNT-scope capability hosts ---------------------------------------------
 $accountIds = Get-CapabilityHostIds -Path $basePath -Scope 'account'

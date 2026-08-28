@@ -8,7 +8,7 @@
   this module once per server in mcp/mcp.json, threading in the resolved policy.
 
   The policy is name-only in the repo (mcp/mcp-policy.json). Agent names are resolved
-  to AppIds at DEPLOY time (deploy-agent-network workflow -> scripts/list-agent-appids.ps1)
+  to AppIds at deploy time (deploy-agent-network workflow -> scripts/apply-mcp-policy.ps1)
   because agent identities don't exist until the agents are seeded post-provision. The
   resolved (AppId-enriched) policy is passed in via the mcpPolicy parameter; 'azd provision'
   passes a deny-all default because it runs before any agent exists.
@@ -42,11 +42,8 @@
 @description('Name of the existing APIM instance hosting the MCP API.')
 param apimName string
 
-@description('MCP server name = the base APIM API name; the actual API is env-suffixed (see apiName).')
+@description('MCP server name, which is also the APIM API name.')
 param serverName string
-
-@description('Environment token (e.g. "dev" / "test"). The APIM MCP API this policy attaches to is `<serverName>-<env>` (matches apim-mcp-api.bicep).')
-param env string
 
 @description('Audience the MCP AgenticIdentityToken is minted for (the MCP app registration audience, e.g. api://<clientId>). Flowed in from the deployment; shared across servers for now.')
 param mcpAudience string
@@ -61,7 +58,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-05-01' existing = {
   name: apimName
 
   resource mcpApi 'apis@2024-06-01-preview' existing = {
-    name: '${serverName}-${env}'
+    name: serverName
   }
 }
 

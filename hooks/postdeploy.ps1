@@ -17,8 +17,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'appservice-scm-common.ps1')
 
 $resourceGroup = Get-RequiredEnv 'AZURE_RESOURCE_GROUP'
-$mcpAppDev     = Get-RequiredEnv 'MCP_WEBAPP_NAME_DEV'
-$mcpAppTest    = Get-RequiredEnv 'MCP_WEBAPP_NAME_TEST'
+$mcpApp        = Get-RequiredEnv 'MCP_WEBAPP_NAME'
 $yarpApp       = Get-RequiredEnv 'TEAMS_YARP_WEBAPP_NAME'
 
 Write-Host "[postdeploy] Re-locking SCM sites (rg '$resourceGroup')."
@@ -26,10 +25,8 @@ Write-Host "[postdeploy] Re-locking SCM sites (rg '$resourceGroup')."
 # YARP: just remove the temporary SCM allow rule (main site stays the public Teams ingress).
 Close-ScmForDeployer -ResourceGroup $resourceGroup -Name $yarpApp
 
-# Both MCP apps (dev + test): remove the SCM allow rule, then take each app private again.
-foreach ($mcpApp in @($mcpAppDev, $mcpAppTest)) {
-  Close-ScmForDeployer -ResourceGroup $resourceGroup -Name $mcpApp
-  Set-WebAppPublicNetworkAccess -ResourceGroup $resourceGroup -Name $mcpApp -State 'Disabled'
-}
+# MCP app: remove the SCM allow rule, then take the app private again.
+Close-ScmForDeployer -ResourceGroup $resourceGroup -Name $mcpApp
+Set-WebAppPublicNetworkAccess -ResourceGroup $resourceGroup -Name $mcpApp -State 'Disabled'
 
-Write-Host '[postdeploy] SCM sites re-locked; the MCP apps are private again.'
+Write-Host '[postdeploy] SCM sites re-locked; the MCP app is private again.'

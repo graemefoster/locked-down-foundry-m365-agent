@@ -29,9 +29,6 @@ param projectDescription string
 param displayName string
 param projectCapHost string
 
-@description('Short per-project discriminator (e.g. dev/test) appended to the BYO connection names so each project owns uniquely-named Cosmos/Storage/Search connections on the shared account.')
-param connectionEnv string
-
 @description('Deploy the STANDARD agent tier: BYO connections + project capability host + BYO data-plane RBAC. False = BASIC tier: project only (agents run on the account capability host + Microsoft-managed stores).')
 param deployStandardAgent bool
 
@@ -80,8 +77,6 @@ module aiProject './foundry/foundry-project.bicep' = {
     projectDescription: projectDescription
     displayName: displayName
     location: location
-
-    connectionEnv: connectionEnv
 
     aiSearchName: aiSearchName
     aiSearchServiceResourceGroupName: aiSearchServiceResourceGroupName

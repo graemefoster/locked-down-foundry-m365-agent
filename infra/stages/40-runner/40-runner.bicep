@@ -24,8 +24,7 @@ param vmSubnetName string
 
 // ---- stage 10 (platform) facts ----
 param aiAccountName string
-param projectNameDev string
-param projectNameTest string
+param projectName string
 param keyVaultName string
 
 // ---- VM admin ----
@@ -73,7 +72,7 @@ module vmModule './resources/vm.bicep' = if (deployWindowsVm) {
   name: 'vm-deployment-${uniqueSuffix}'
   params: {
     location: location
-    vmName: 'test-vm-${uniqueSuffix}'
+    vmName: 'dev-vm-${uniqueSuffix}'
     virtualNetworkName: foundrySpokeVnetName
     subnetName: vmSubnetName
     adminPassword: vmAdminPassword
@@ -92,26 +91,16 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
 // ==================== AGENT DEPLOY: VM RBAC ====================
 
 // Agent deploys run from the in-VNet self-hosted GitHub Actions runner (the per-agent
-// .github/workflows/deploy-*-agent.yml workflows), which execute scripts/create-agent.ps1 natively
+// .github/workflows/deploy-*-agent.yml workflows), which execute the focused deployment scripts natively
 // on the private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows
 // dev VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
-// needs
-// Foundry User on BOTH projects (dev + test) so the on-VM script can acquire a token and call
-// the Agents API against either environment — that RBAC is provisioned here.
-module vmFoundryRoleDev './rbac/vm-foundry-role.bicep' = {
-  name: 'vm-foundry-role-dev-${uniqueSuffix}'
+// needs Foundry User on the project so the on-VM scripts can acquire a token and call the
+// Agents API — that RBAC is provisioned here.
+module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
+  name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
     accountName: aiAccountName
-    projectName: projectNameDev
-    vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
-  }
-}
-
-module vmFoundryRoleTest './rbac/vm-foundry-role.bicep' = {
-  name: 'vm-foundry-role-test-${uniqueSuffix}'
-  params: {
-    accountName: aiAccountName
-    projectName: projectNameTest
+    projectName: projectName
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
   }
 }
@@ -127,7 +116,7 @@ module vmFoundryRoleTest './rbac/vm-foundry-role.bicep' = {
 // The PAT is REQUIRED: without it there is no secret to seed into Key Vault, so the on-VM
 // bootstrap would 404 reading `gh-runner-pat` and fail provisioning. There is no point
 // deploying the runner half — so a repo URL supplied without a PAT simply skips the runner
-// (no RBAC, no PAT secret, no Run Command) rather than failing. See docs/github-runner.md.
+// (no RBAC, no PAT secret, no Run Command) rather than failing. See docs/operations.md.
 var installGithubRunner = !empty(githubRunnerRepoUrl) && !empty(githubRunnerPat)
 
 module vmKeyVaultSecretsRole './rbac/vm-keyvault-secrets-role.bicep' = if (installGithubRunner) {

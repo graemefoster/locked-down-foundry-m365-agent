@@ -19,9 +19,6 @@ param projectName string
 param projectDescription string
 param displayName string
 
-@description('Short per-project discriminator (e.g. dev/test) appended to the BYO connection names. Foundry connection names share one namespace per account, so each project must name its Cosmos/Storage/Search connections uniquely even when they target the same shared resource.')
-param connectionEnv string
-
 param aiSearchName string
 param aiSearchServiceResourceGroupName string
 param aiSearchServiceSubscriptionId string
@@ -75,7 +72,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
   resource project_connection_cosmosdb_account 'connections@2025-04-01-preview' = if (deployStandardAgent) {
-    name: '${cosmosDBName}-${connectionEnv}'
+    name: cosmosDBName
     properties: {
       category: 'CosmosDB'
       target: cosmosDBAccount.properties.documentEndpoint
@@ -91,7 +88,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
   resource project_connection_azure_storage 'connections@2025-04-01-preview' = if (deployStandardAgent) {
-    name: '${azureStorageName}-${connectionEnv}'
+    name: azureStorageName
     properties: {
       category: 'AzureStorageAccount'
       target: storageAccount.properties.primaryEndpoints.blob
@@ -107,7 +104,7 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
   resource project_connection_azureai_search 'connections@2025-04-01-preview' = if (deployStandardAgent) {
-    name: '${aiSearchName}-${connectionEnv}'
+    name: aiSearchName
     properties: {
       category: 'CognitiveSearch'
       target: 'https://${aiSearchName}.search.windows.net'
@@ -147,7 +144,7 @@ output projectWorkspaceId string = project.properties.internalId
 #disable-next-line BCP053
 output projectEndpoint string = project.properties.endpoints['AI Foundry API']
 
-// return the BYO connection names (per-project unique: <resource>-<connectionEnv>)
-output cosmosDBConnection string = '${cosmosDBName}-${connectionEnv}'
-output azureStorageConnection string = '${azureStorageName}-${connectionEnv}'
-output aiSearchConnection string = '${aiSearchName}-${connectionEnv}'
+// Return the BYO connection names. Resource names already include the deployment's uniqueSuffix.
+output cosmosDBConnection string = cosmosDBName
+output azureStorageConnection string = azureStorageName
+output aiSearchConnection string = aiSearchName

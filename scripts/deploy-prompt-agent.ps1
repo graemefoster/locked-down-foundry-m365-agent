@@ -1,7 +1,7 @@
 param(
   [Parameter(Mandatory = $true)] [string]$AgentJsonPath,
-  [Parameter(Mandatory = $true)] [string]$ZipPath,
   [Parameter(Mandatory = $true)] [string]$FoundryProjectEndpoint,
+  [Parameter(Mandatory = $false)] [string]$McpServerUrl = '',
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
 
@@ -9,9 +9,6 @@ $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path -LiteralPath $AgentJsonPath)) {
   throw "Agent JSON not found: $AgentJsonPath"
-}
-if (-not (Test-Path -LiteralPath $ZipPath)) {
-  throw "Agent zip not found: $ZipPath"
 }
 
 $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
@@ -21,14 +18,21 @@ $agentName = $agent.name
 if ([string]::IsNullOrWhiteSpace($agentName)) {
   throw "Agent JSON has no 'name': $AgentJsonPath"
 }
-if ($null -eq $agent.definition.code_configuration) {
-  throw "Agent '$agentName' has no definition.code_configuration."
-}
-if ($agent.definition.environment_variables.PSObject.Properties.Name -contains 'FOUNDRY_PROJECT_ENDPOINT') {
-  $agent.definition.environment_variables.FOUNDRY_PROJECT_ENDPOINT = $FoundryProjectEndpoint
+if ($null -eq $agent.definition) {
+  throw "Agent JSON has no 'definition': $AgentJsonPath"
 }
 
-Write-Host "Deploying code agent '$agentName' to $FoundryProjectEndpoint"
+$mcpTools = @($agent.definition.tools | Where-Object { $_.type -eq 'mcp' })
+if ($mcpTools.Count -gt 0) {
+  if ([string]::IsNullOrWhiteSpace($McpServerUrl)) {
+    throw "Agent '$agentName' uses MCP, but no MCP server URL was supplied."
+  }
+  foreach ($tool in $mcpTools) {
+    $tool | Add-Member -NotePropertyName server_url -NotePropertyValue $McpServerUrl -Force
+  }
+}
+
+Write-Host "Deploying prompt agent '$agentName' to $FoundryProjectEndpoint"
 
 $token = az account get-access-token `
   --resource https://ai.azure.com `
@@ -39,7 +43,11 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
   throw "Could not acquire a Foundry token. Run 'az login --identity' first."
 }
 
-$headers = @{ Authorization = "Bearer $token" }
+$headers = @{
+  Authorization = "Bearer $token"
+  'Content-Type' = 'application/json'
+}
+
 $agentUrl = "$FoundryProjectEndpoint/agents/$agentName`?api-version=$ApiVersion"
 $existingAgent = $null
 
@@ -61,51 +69,38 @@ catch {
   }
 }
 
-$uploadUrl = if ($null -eq $existingAgent) {
-  Write-Host "Agent does not exist. Creating it with the code package."
-  "$FoundryProjectEndpoint/agents?api-version=$ApiVersion"
+if ($null -eq $existingAgent) {
+  Write-Host "Agent does not exist. Creating it."
+
+  $body = [ordered]@{
+    name       = $agentName
+    definition = $agent.definition
+  }
+  if ($null -ne $agent.description) { $body.description = $agent.description }
+  if ($null -ne $agent.metadata) { $body.metadata = $agent.metadata }
+
+  $response = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$FoundryProjectEndpoint/agents?api-version=$ApiVersion" `
+    -Headers $headers `
+    -Body ($body | ConvertTo-Json -Depth 30)
 }
 else {
-  Write-Host "Agent exists. Uploading a new code version."
-  "$FoundryProjectEndpoint/agents/$agentName/versions?api-version=$ApiVersion"
-}
+  Write-Host "Agent exists. Creating a version if the definition changed."
 
-$metadata = [ordered]@{
-  name       = $agentName
-  definition = $agent.definition
-}
-if ($null -ne $agent.description) { $metadata.description = $agent.description }
-if ($null -ne $agent.metadata) { $metadata.metadata = $agent.metadata }
-
-$metadataJson = $metadata | ConvertTo-Json -Depth 30
-$zipHash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$metadataPath = Join-Path ([System.IO.Path]::GetTempPath()) "agent-metadata-$([guid]::NewGuid().ToString('N')).json"
-
-try {
-  $metadataJson | Set-Content -LiteralPath $metadataPath -Encoding utf8
-
-  $uploadBody = curl `
-    --fail-with-body `
-    --silent `
-    --show-error `
-    --request POST `
-    --header "Authorization: Bearer $token" `
-    --header 'Foundry-Features: HostedAgents=V1Preview' `
-    --header "x-ms-agent-name: $agentName" `
-    --header "x-ms-code-zip-sha256: $zipHash" `
-    --form "metadata=@$metadataPath;type=application/json" `
-    --form "code=@$((Resolve-Path -LiteralPath $ZipPath).Path);type=application/zip" `
-    $uploadUrl
-
-  if ($LASTEXITCODE -ne 0) {
-    throw "Code upload failed for '$agentName'."
+  $body = [ordered]@{
+    definition = $agent.definition
   }
-}
-finally {
-  Remove-Item -LiteralPath $metadataPath -Force -ErrorAction SilentlyContinue
+  if ($null -ne $agent.description) { $body.description = $agent.description }
+  if ($null -ne $agent.metadata) { $body.metadata = $agent.metadata }
+
+  $response = Invoke-RestMethod `
+    -Method Post `
+    -Uri "$FoundryProjectEndpoint/agents/$agentName/versions?api-version=$ApiVersion" `
+    -Headers $headers `
+    -Body ($body | ConvertTo-Json -Depth 30)
 }
 
-$response = $uploadBody | ConvertFrom-Json
 $agentVersion = if ($response.version) {
   [string]$response.version
 }
@@ -129,9 +124,9 @@ $publishBody = @{
     version_selector = @{
       version_selection_rules = @(
         @{
-          agent_version      = $agentVersion
+          agent_version     = $agentVersion
           traffic_percentage = 100
-          type               = 'FixedRatio'
+          type              = 'FixedRatio'
         }
       )
     }
@@ -152,4 +147,4 @@ if ($env:GITHUB_OUTPUT) {
   "agent-version=$agentVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 }
 
-Write-Host "Agent '$agentName' is serving code version $agentVersion."
+Write-Host "Agent '$agentName' is serving version $agentVersion."
