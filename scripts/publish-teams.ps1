@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$agentPath = Join-Path $AgentDirectory 'agent.json'
+$agentPath = Join-Path $AgentDirectory 'agent.yaml'
 $networkPath = Join-Path $AgentDirectory 'network.json'
 $teamsPath = Join-Path $AgentDirectory 'teams.json'
 $botTemplate = Join-Path (Split-Path $PSScriptRoot -Parent) 'hooks/bot-service.bicep'
@@ -22,10 +22,13 @@ foreach ($path in @($agentPath, $networkPath, $teamsPath, $botTemplate)) {
   }
 }
 
-$agent = Get-Content -LiteralPath $agentPath -Raw | ConvertFrom-Json
 $network = Get-Content -LiteralPath $networkPath -Raw | ConvertFrom-Json
 $teams = Get-Content -LiteralPath $teamsPath -Raw | ConvertFrom-Json
-$agentName = $agent.name
+# The agent definition is authored in YAML; read just the name with yq (installed on the runner).
+$agentName = (& yq -r '.name' $agentPath)
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($agentName)) {
+  throw "Could not read the agent name from '$agentPath' (is yq installed on the runner?)."
+}
 
 if ($network.exposeToM365 -ne $true) {
   Write-Host "Teams publishing is disabled for '$agentName'."
@@ -85,32 +88,11 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($botServiceArmId)) {
   throw "Azure Bot Service deployment failed for '$agentName'."
 }
 
-Write-Host "Step 3: enabling the activity protocol."
+# The activity protocol + BotServiceRbac/Entra authorization schemes are declared in the agent's
+# agent.yaml (agent_endpoint) and applied by the deploy script's serve step, so there is no longer
+# a publish-time protocol patch here.
 
-$protocolBody = @{
-  agent_endpoint = @{
-    protocol_configuration = @{
-      responses = @{}
-      activity  = @{}
-    }
-    authorization_schemes = @(
-      @{ type = 'Entra' }
-      @{ type = 'BotServiceRbac' }
-    )
-  }
-} | ConvertTo-Json -Depth 10
-
-Invoke-RestMethod `
-  -Method Patch `
-  -Uri $agentUrl `
-  -Headers @{
-    Authorization      = "Bearer $managedIdentityToken"
-    'Content-Type'     = 'application/merge-patch+json'
-    'Foundry-Features' = 'AgentEndpoints=V1Preview'
-  } `
-  -Body $protocolBody | Out-Null
-
-Write-Host "Step 4: publishing the Microsoft 365 app."
+Write-Host "Step 3: publishing the Microsoft 365 app."
 
 $appVersion = if ($teams.appVersion) { $teams.appVersion } else { '1.0.0' }
 $publishBody = @{

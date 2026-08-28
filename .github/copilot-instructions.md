@@ -24,7 +24,7 @@ role only.
 | `infra/` | Bicep infrastructure consumed by `azd`. |
 | `azure.yaml` | `azd` services and lifecycle hooks. |
 | `hooks/` | Host-side `azd` lifecycle operations. |
-| `agents/<name>/agent.json` | Canonical deployment definition for every prompt, source-zip, or image agent. |
+| `agents/<name>/agent.yaml` | Canonical deployment definition for every prompt, source-zip, or image agent. Deploy workflows normalize it to JSON with `yq` before the REST scripts consume it. |
 | `agents/<name>/network.json` | Optional YARP exposure and Foundry token-limit policy. |
 | `agents/<name>/teams.json` | Optional Teams/Microsoft 365 catalog metadata. |
 | `mcp/mcp.json` | MCP servers exposed through APIM. |
@@ -33,8 +33,9 @@ role only.
 | `.github/workflows/` | Caller and reusable workflows for agent operations. |
 | `docs/` | Canonical architecture, operations, configuration, and troubleshooting docs. |
 
-Internal application-source `agent.yaml` files are not deployment manifests. Do not add
-environment-suffixed agent manifests or repository variables.
+The deployment manifest is `agents/<name>/agent.yaml`. An `agent.yaml` that lives inside an
+application source project is source metadata for that application, not a deployment manifest. Do
+not add environment-suffixed agent manifests or repository variables.
 
 ## Agent automation
 
@@ -66,7 +67,7 @@ Reusable workflows are separated by operation:
 3. apply the MCP policy;
 4. apply Teams audiences.
 
-The nightly evaluation workflow reads `agents/teams-agent/agent.json`.
+The nightly evaluation workflow reads `agents/teams-agent/agent.yaml`.
 
 ## Variables and routes
 

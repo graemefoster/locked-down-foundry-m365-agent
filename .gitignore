@@ -8,9 +8,9 @@
 !infra/bicepconfig.json
 # ...and the agent evaluation datasets (input data for the nightly eval workflow).
 !agents/**/eval-data.json
-# ...and deployed agent configuration consumed by the agent workflows.
-!agents/**/agent.json
-!agents/**/agent-image.json
+# ...and deployed agent configuration consumed by the agent workflows. The agent definition is
+# authored as agents/<name>/agent.yaml (not ignored) and normalized to agent.json by yq at deploy
+# time; that generated agent.json is a build artifact and stays ignored.
 !agents/**/network.json
 !agents/**/teams.json
 # ...and the MCP gateway config + per-agent rate-limit config (source of truth compiled into APIM).

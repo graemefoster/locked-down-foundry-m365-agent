@@ -139,7 +139,7 @@ If the same `appVersion` is already published, increment `teams.json` and rerun.
 
 Publishing requires all of the following:
 
-- `agent.json`;
+- `agent.yaml`;
 - `network.json` with `exposeToM365: true`;
 - `teams.json`;
 - a successful governance run;

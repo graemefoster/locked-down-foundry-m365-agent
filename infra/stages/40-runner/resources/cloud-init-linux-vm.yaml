@@ -20,6 +20,9 @@
 #                 compression"), so we install the buildx plugin and build OCI images.
 #   python3-*   - the microsoft/ai-agent-evals action pip-installs into a venv
 #   git, jq     - actions/checkout and general workflow plumbing
+#   yq          - normalizes the YAML agent manifests (agents/<name>/agent.yaml) to JSON at deploy
+#                 time (`yq -o=json`) for the REST deploy scripts, and injects per-deploy values
+#                 (e.g. the MCP server_url) into the normalized JSON. jq cannot read YAML.
 #   zip, unzip  - the CODE-agent deploy zips the publish output with the `zip` CLI so it stores
 #                 Unix mode bits (PowerShell Compress-Archive / .NET ZipFile do NOT), keeping
 #                 bundled native executables (e.g. the GitHub Copilot CLI) executable after Foundry
@@ -79,3 +82,13 @@ runcmd:
       curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx \
         "https://github.com/docker/buildx/releases/download/v0.19.3/buildx-v0.19.3.linux-amd64"
       chmod 0755 /usr/local/lib/docker/cli-plugins/docker-buildx
+  # yq (mikefarah) — the standalone Go binary from GitHub releases. Used by the agent deploy
+  # workflows to convert the YAML agent manifests to JSON (`yq -o=json`) and to inject per-deploy
+  # values into the normalized JSON. Installed system-wide so every workflow step finds it on PATH.
+  - - bash
+    - -c
+    - |
+      set -euxo pipefail
+      curl -fsSL -o /usr/local/bin/yq \
+        "https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64"
+      chmod 0755 /usr/local/bin/yq

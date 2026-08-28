@@ -20,7 +20,7 @@ lanes, environment-suffixed resources, or GitHub Environments.
 
 - [ ] Add a small prompt-agent template.
 - [ ] Add source-zip and container-image agent templates.
-- [ ] Validate `agent.json`, `network.json`, `teams.json`, `mcp.json`, and `mcp-policy.json`
+- [ ] Validate `agent.yaml`, `network.json`, `teams.json`, `mcp.json`, and `mcp-policy.json`
   against committed schemas in CI.
 - [ ] Add a rollback workflow that republishes a selected existing agent version.
 

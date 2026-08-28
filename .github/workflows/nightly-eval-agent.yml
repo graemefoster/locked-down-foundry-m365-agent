@@ -53,7 +53,10 @@ jobs:
           }
 
           if ([string]::IsNullOrWhiteSpace($agentIds)) {
-            $agent = Get-Content agents/teams-agent/agent.json -Raw | ConvertFrom-Json
+            $agentName = (& yq -r '.name' agents/teams-agent/agent.yaml)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($agentName)) {
+              throw "Could not read the agent name from agents/teams-agent/agent.yaml."
+            }
             $token = az account get-access-token `
               --resource https://ai.azure.com `
               --query accessToken `
@@ -65,15 +68,15 @@ jobs:
 
             $versions = Invoke-RestMethod `
               -Method Get `
-              -Uri "$endpoint/agents/$($agent.name)/versions?api-version=2025-11-15-preview" `
+              -Uri "$endpoint/agents/$agentName/versions?api-version=2025-11-15-preview" `
               -Headers @{ Authorization = "Bearer $token" }
 
             $latest = @($versions.data.version | ForEach-Object { [int]$_ } | Sort-Object -Descending)[0]
             if ($null -eq $latest) {
-              throw "No versions found for agent '$($agent.name)'."
+              throw "No versions found for agent '$agentName'."
             }
 
-            $agentIds = "$($agent.name):$latest"
+            $agentIds = "$agentName:$latest"
           }
 
           "endpoint=$endpoint" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append

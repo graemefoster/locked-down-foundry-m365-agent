@@ -6,49 +6,45 @@ Each deployable agent has a directory under `agents/`:
 
 ```text
 agents/<name>/
-├── agent.json       # required
+├── agent.yaml       # required
 ├── network.json     # optional
 └── teams.json       # optional
 ```
 
-`agent.json` is the canonical deployment manifest for prompt, source-zip, and container-image
-agents. An `agent.yaml` inside an application source project is source metadata for that
-application; workflows must not treat it as the deployment manifest.
+`agent.yaml` is the canonical deployment manifest for prompt, source-zip, and container-image
+agents. Deploy workflows normalize it to JSON with `yq` (`yq -o=json`) on the in-VNet runner before
+the REST deploy scripts consume it. An `agent.yaml` inside an application source project is source
+metadata for that application; workflows must not treat it as the deployment manifest.
 
 Use unsuffixed values. There are no dev/test variants of agent files, routes, or repository
 variables.
 
-## `agent.json`
+## `agent.yaml`
 
 All modes require:
 
 - a non-empty `name`;
 - a `definition`;
-- optional `description` and `metadata`.
+- optional `description` and `metadata`;
+- optional top-level `agent_endpoint` (endpoint protocol/authorization configuration).
 
 Keep the directory name and agent `name` aligned.
 
 ### Prompt agent
 
-```json
-{
-  "object": "agent.version",
-  "name": "weather-agent",
-  "description": "Answers weather questions through the governed MCP connection.",
-  "definition": {
-    "kind": "prompt",
-    "model": "model-gateway/gpt-5.4-mini",
-    "instructions": "Answer clearly and concisely.",
-    "tools": [
-      {
-        "type": "mcp",
-        "server_label": "weather",
-        "project_connection_id": "weather",
-        "require_approval": "never"
-      }
-    ]
-  }
-}
+```yaml
+object: agent.version
+name: weather-agent
+description: Answers weather questions through the governed MCP connection.
+definition:
+  kind: prompt
+  model: model-gateway/gpt-5.4-mini
+  instructions: Answer clearly and concisely.
+  tools:
+    - type: mcp
+      server_label: weather
+      project_connection_id: weather
+      require_approval: "never"
 ```
 
 Do not commit a generated `server_url`. `scripts/deploy-prompt-agent.ps1` injects
@@ -56,36 +52,47 @@ Do not commit a generated `server_url`. `scripts/deploy-prompt-agent.ps1` inject
 `project_connection_id` remains in the file because it supplies the agentic identity
 connection.
 
+### Agent endpoint (protocols and authorization)
+
+An optional top-level `agent_endpoint` block declares the endpoint protocols and authorization
+schemes. It is applied by the deploy script's serve step (the single `agent_endpoint` merge-patch
+that also selects the served version), so Teams/Microsoft 365 publishing no longer patches the
+activity protocol on separately. A Teams-published agent declares:
+
+```yaml
+agent_endpoint:
+  protocol_configuration:
+    responses: {}
+    activity: {}
+  authorization_schemes:
+    - type: Entra
+    - type: BotServiceRbac
+```
+
+Omit `agent_endpoint` entirely for agents that only need version routing; the serve step then
+patches `version_selector` alone.
+
 ### Hosted source-zip agent
 
-```json
-{
-  "object": "agent.version",
-  "name": "support-agent",
-  "description": "Hosted source-zip agent.",
-  "definition": {
-    "kind": "hosted",
-    "protocol_versions": [
-      {
-        "protocol": "responses",
-        "version": "2.0.0"
-      }
-    ],
-    "cpu": "0.5",
-    "memory": "1Gi",
-    "code_configuration": {
-      "runtime": "dotnet_10",
-      "entry_point": [
-        "dotnet",
-        "Support.Agent.dll"
-      ],
-      "dependency_resolution": "bundled"
-    },
-    "environment_variables": {
-      "AZURE_AI_MODEL_DEPLOYMENT_NAME": "gpt-5.4"
-    }
-  }
-}
+```yaml
+object: agent.version
+name: support-agent
+description: Hosted source-zip agent.
+definition:
+  kind: hosted
+  protocol_versions:
+    - protocol: responses
+      version: 2.0.0
+  cpu: "0.5"
+  memory: 1Gi
+  code_configuration:
+    runtime: dotnet_10
+    entry_point:
+      - dotnet
+      - Support.Agent.dll
+    dependency_resolution: bundled
+  environment_variables:
+    AZURE_AI_MODEL_DEPLOYMENT_NAME: gpt-5.4
 ```
 
 The reusable source-zip workflow builds the application and packages the publish output at the
@@ -94,27 +101,20 @@ archive root. If `FOUNDRY_PROJECT_ENDPOINT` is present in `environment_variables
 
 ### Hosted container-image agent
 
-```json
-{
-  "object": "agent.version",
-  "name": "image-agent",
-  "description": "Hosted container-image agent.",
-  "definition": {
-    "kind": "hosted",
-    "container_protocol_versions": [
-      {
-        "protocol": "responses",
-        "version": "2.0.0"
-      }
-    ],
-    "cpu": "1",
-    "memory": "2Gi",
-    "image": "",
-    "environment_variables": {
-      "AZURE_AI_MODEL_DEPLOYMENT_NAME": "model-gateway/gpt-5.4-mini"
-    }
-  }
-}
+```yaml
+object: agent.version
+name: image-agent
+description: Hosted container-image agent.
+definition:
+  kind: hosted
+  container_protocol_versions:
+    - protocol: responses
+      version: 2.0.0
+  cpu: "1"
+  memory: 2Gi
+  image: ""
+  environment_variables:
+    AZURE_AI_MODEL_DEPLOYMENT_NAME: model-gateway/gpt-5.4-mini
 ```
 
 Leave `definition.image` empty in the committed manifest. `scripts/deploy-image-agent.ps1`

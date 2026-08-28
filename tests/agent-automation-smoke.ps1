@@ -56,6 +56,21 @@ try {
     }
   }
 
+  function global:yq {
+    # The agent definition is authored in YAML and read with `yq -r '.name'` by publish-teams.ps1.
+    # Emulate that here so the smoke test does not depend on a yq binary being installed.
+    $global:LASTEXITCODE = 0
+    $manifestPath = @($args | Where-Object { $_ -like '*.yaml' -or $_ -like '*.yml' })[0]
+    if ($manifestPath -and (Test-Path -LiteralPath $manifestPath)) {
+      foreach ($line in (Get-Content -LiteralPath $manifestPath)) {
+        if ($line -match '^\s*name\s*:\s*(.+?)\s*$') {
+          return ($Matches[1].Trim('"', "'"))
+        }
+      }
+    }
+    return ''
+  }
+
   function global:curl {
     $global:CurlCalls.Add(($args -join ' '))
     $metadataArgument = @($args | Where-Object { $_ -like 'metadata=@*' })[0]
@@ -232,6 +247,8 @@ try {
   @{ name = 'fixture-agent'; definition = @{ kind = 'prompt' } } |
     ConvertTo-Json -Depth 10 |
     Set-Content -LiteralPath (Join-Path $teamsDirectory 'agent.json')
+  'name: fixture-agent' |
+    Set-Content -LiteralPath (Join-Path $teamsDirectory 'agent.yaml')
   @{ exposeToM365 = $false } |
     ConvertTo-Json |
     Set-Content -LiteralPath (Join-Path $teamsDirectory 'network.json')

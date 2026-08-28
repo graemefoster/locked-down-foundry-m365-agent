@@ -70,7 +70,7 @@ The caller selects one of three reusable workflows:
 - hosted container-image agent: `.github/workflows/_deploy-hosted-agent.yml`
 
 All three run on the private self-hosted runner and consume
-`agents/<name>/agent.json`.
+`agents/<name>/agent.yaml` (normalized to JSON with `yq` at deploy time).
 
 ### 3. Apply governance
 
@@ -107,7 +107,7 @@ resource deletion.
 
 The deployment configuration for an agent lives under `agents/<name>/`:
 
-- `agent.json` — required deployment definition
+- `agent.yaml` — required deployment definition (normalized to JSON via `yq` at deploy time)
 - `network.json` — optional exposure and token-limit policy
 - `teams.json` — optional Teams/Microsoft 365 metadata
 

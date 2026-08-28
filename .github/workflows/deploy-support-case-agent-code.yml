@@ -9,6 +9,6 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-code-agent.yml
     with:
-      agent-json: agents/support-case-agent/agent.json
+      agent-manifest: agents/support-case-agent/agent.yaml
       build-context: agents/support-case-agent/support-case-agent.Agent
       entry-dll: support-case-agent.Agent.dll

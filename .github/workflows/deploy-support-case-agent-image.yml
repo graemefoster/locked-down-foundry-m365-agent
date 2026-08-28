@@ -10,6 +10,6 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-hosted-agent.yml
     with:
-      agent-json: agents/support-case-agent/agent-image.json
+      agent-manifest: agents/support-case-agent/agent-image.yaml
       build-context: agents/support-case-agent/support-case-agent.Agent
       image-repository: agents/support-case-agent

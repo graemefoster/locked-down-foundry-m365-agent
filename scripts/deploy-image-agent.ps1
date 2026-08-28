@@ -143,19 +143,31 @@ if ([string]::IsNullOrWhiteSpace($agentVersion)) {
   throw "Could not resolve the version created for '$agentName'."
 }
 
-$publishBody = @{
-  agent_endpoint = @{
-    version_selector = @{
-      version_selection_rules = @(
-        @{
-          agent_version      = $agentVersion
-          traffic_percentage = 100
-          type               = 'FixedRatio'
-        }
-      )
-    }
+# Serve the new version AND assert the endpoint protocol/authorization configuration from the
+# manifest in a single agent_endpoint merge-patch. Declaring 'agent_endpoint' in agent.yaml (e.g.
+# the 'activity' protocol + BotServiceRbac for a Teams agent) means publishing no longer has to
+# patch the protocol on separately.
+$agentEndpoint = [ordered]@{
+  version_selector = @{
+    version_selection_rules = @(
+      @{
+        agent_version      = $agentVersion
+        traffic_percentage = 100
+        type               = 'FixedRatio'
+      }
+    )
   }
-} | ConvertTo-Json -Depth 10
+}
+if ($null -ne $agent.agent_endpoint) {
+  if ($null -ne $agent.agent_endpoint.protocol_configuration) {
+    $agentEndpoint.protocol_configuration = $agent.agent_endpoint.protocol_configuration
+  }
+  if ($null -ne $agent.agent_endpoint.authorization_schemes) {
+    $agentEndpoint.authorization_schemes = $agent.agent_endpoint.authorization_schemes
+  }
+}
+
+$publishBody = @{ agent_endpoint = $agentEndpoint } | ConvertTo-Json -Depth 10
 
 Invoke-RestMethod `
   -Method Patch `

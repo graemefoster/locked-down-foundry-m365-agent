@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       agent-directory:
-        description: Directory containing agent.json, network.json, and teams.json.
+        description: Directory containing agent.yaml, network.json, and teams.json.
         type: string
         required: true
 

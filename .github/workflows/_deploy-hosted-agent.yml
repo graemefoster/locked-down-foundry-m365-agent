@@ -3,8 +3,8 @@ name: Deploy container-image agent
 on:
   workflow_call:
     inputs:
-      agent-json:
-        description: Path to the image agent JSON file.
+      agent-manifest:
+        description: Path to the image agent YAML manifest (agents/<name>/agent.yaml).
         type: string
         required: true
       build-context:
@@ -31,6 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Normalize the manifest (yq)
+        shell: bash
+        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
+
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
@@ -39,7 +43,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/deploy-image-agent.ps1 `
-            -AgentJsonPath "${{ inputs.agent-json }}" `
+            -AgentJsonPath agent.json `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -AcrName "${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}" `
             -ImageRepository "${{ inputs.image-repository }}" `

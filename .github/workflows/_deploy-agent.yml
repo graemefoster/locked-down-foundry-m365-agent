@@ -3,8 +3,8 @@ name: Deploy prompt agent
 on:
   workflow_call:
     inputs:
-      agent-json:
-        description: Path to the prompt agent JSON file.
+      agent-manifest:
+        description: Path to the prompt agent YAML manifest (agents/<name>/agent.yaml).
         type: string
         required: true
 
@@ -18,6 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Normalize the manifest (yq)
+        shell: bash
+        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
+
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
@@ -26,6 +30,6 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/deploy-prompt-agent.ps1 `
-            -AgentJsonPath "${{ inputs.agent-json }}" `
+            -AgentJsonPath agent.json `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -McpServerUrl "${{ vars.MCP_SERVER_URL }}"

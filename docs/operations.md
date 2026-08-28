@@ -91,7 +91,8 @@ Repeat Teams publishing after changing `teams.json` or the Teams app version.
 ## Agent deployment modes
 
 All agent workflows run on `[self-hosted, vnet, foundry-private]`, authenticate with the VM
-managed identity, and use `agents/<name>/agent.json`.
+managed identity, and use `agents/<name>/agent.yaml` (normalized to JSON with `yq` at deploy
+time).
 
 ### Prompt
 
@@ -119,8 +120,8 @@ application, places publish output at the ZIP root, creates `agent.zip`, and run
 scripts/deploy-code-agent.ps1
 ```
 
-The script uploads the ZIP and `agent.json` metadata together, then publishes the created
-version.
+The script uploads the ZIP and the normalized `agent.json` metadata together, then publishes the
+created version.
 
 Example callers:
 
@@ -186,13 +187,14 @@ The caller invokes `.github/workflows/publish-teams.yml`, which:
 2. restores the VM managed-identity Azure session;
 3. runs `scripts/publish-teams.ps1`.
 
-The script requires `agent.json`, `network.json`, and `teams.json` in the selected agent
+The script requires `agent.yaml`, `network.json`, and `teams.json` in the selected agent
 directory. It exits without publishing unless `network.json` sets `exposeToM365` to `true`.
-It creates or updates the Azure Bot Service registration, enables the activity protocol, and
-publishes the Microsoft 365 app.
+It creates or updates the Azure Bot Service registration and publishes the Microsoft 365 app.
+The activity protocol and its authorization schemes are declared in the agent's `agent.yaml`
+(`agent_endpoint`) and applied by the deploy step, so publishing no longer patches them.
 
-The delegated token is used only for the Microsoft 365 publish API. Foundry reads, protocol
-updates, and Azure Bot Service deployment use the VM managed identity.
+The delegated token is used only for the Microsoft 365 publish API. Foundry reads and Azure Bot
+Service deployment use the VM managed identity.
 
 After publishing, re-run the governance workflow so the Teams APIM audience list contains the
 live bot application ID.
@@ -200,7 +202,7 @@ live bot application ID.
 ## Evaluation
 
 `.github/workflows/nightly-eval-agent.yml` runs on the private runner and reads the agent name
-from `agents/teams-agent/agent.json`. By default it evaluates the latest version.
+from `agents/teams-agent/agent.yaml`. By default it evaluates the latest version.
 
 Manual inputs can select explicit `name:version` values and a baseline. Version-over-version
 comparison invokes Foundry cluster analysis, which is not supported in a Private BYO-network

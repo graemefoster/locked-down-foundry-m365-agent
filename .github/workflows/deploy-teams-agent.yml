@@ -9,4 +9,4 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-agent.yml
     with:
-      agent-json: agents/teams-agent/agent.json
+      agent-manifest: agents/teams-agent/agent.yaml

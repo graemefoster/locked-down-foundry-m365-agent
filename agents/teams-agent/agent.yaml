@@ -1,0 +1,34 @@
+object: agent.version
+name: teams-agent
+description: The agent published to Microsoft Teams / M365, served through the model gateway.
+definition:
+  kind: prompt
+  # Gateway model reference: '<apim-connection-name>/<exposed-model-name>'. The connection name
+  # ('model-gateway') is fixed by the template (modelGatewayConnectionName).
+  model: model-gateway/gpt-5.4-mini
+  instructions: You are a helpful AI assistant available in Microsoft Teams, served through the enterprise model gateway. Answer questions clearly and concisely.
+  tools:
+    - type: mcp
+      server_label: testweathermcpserver
+      # server_url is INJECTED at deploy time by the reusable deploy workflow (from the
+      # MCP_SERVER_URL repo variable), so this manifest stays environment-agnostic. The Foundry
+      # MCP tool schema requires exactly one of server_url/connector_id/tunnel_id, so it cannot be
+      # committed here; project_connection_id supplies auth via the 'testweathermcpserver' connection.
+      project_connection_id: testweathermcpserver
+      # Auto-approve MCP tool calls. MCP tools default to require_approval "always", which pauses
+      # the run on an mcp_approval_request. The nightly eval samples the agent non-interactively
+      # (nothing answers the approval), so those turns end as a dangling tool-call with no final
+      # text -> agents-category evaluators fail. "never" lets the tool execute so the model
+      # produces a final answer to evaluate.
+      require_approval: "never"
+# Endpoint-level protocol + authorization configuration. This is applied by the deploy script's
+# serve step (the single agent_endpoint merge-patch), so Teams publishing no longer has to patch
+# the activity protocol on. 'activity' exposes the agent to Microsoft 365 / Teams; BotServiceRbac
+# is the Bot Service authorization scheme required by the Activity protocol, alongside Entra.
+agent_endpoint:
+  protocol_configuration:
+    responses: {}
+    activity: {}
+  authorization_schemes:
+    - type: Entra
+    - type: BotServiceRbac
