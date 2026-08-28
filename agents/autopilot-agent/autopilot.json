@@ -1,7 +1,7 @@
 {
   "displayName": "Autopilot Agent",
   "publishScope": "Tenant",
-  "appVersion": "1.0.1",
+  "appVersion": "1.0.2",
   "canRespondWithoutMention": true,
   "shortDescription": "Foundry Autopilot agent deployed through GitHub Actions.",
   "fullDescription": "A Microsoft Foundry Autopilot agent that responds to Microsoft 365 messages.",

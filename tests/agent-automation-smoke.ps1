@@ -374,8 +374,8 @@ try {
     $autopilotCall[0].Body -notmatch 'botServiceArmId'
   ) 'Autopilot publishing included a Bot Service ARM ID.'
   Assert-True (
-    $autopilotCall[0].Body -match '"optionalPermissionScopes"'
-  ) 'Autopilot publishing omitted optional permission scopes.'
+    $autopilotCall[0].Body -notmatch '"optionalPermissionScopes"'
+  ) 'Autopilot publishing included legacy optional permission scopes.'
   Assert-True (
     $autopilotCall[0].Body -match '"useAgenticUserTemplate": true'
   ) 'Autopilot publishing did not enable the agentic-user template.'
