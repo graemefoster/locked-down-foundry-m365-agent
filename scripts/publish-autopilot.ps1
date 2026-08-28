@@ -69,9 +69,6 @@ $publishBody = [ordered]@{
     CommunicationProtocol    = 'activityProtocol'
   }
 }
-if ($null -ne $autopilot.optionalPermissionScopes) {
-  $publishBody.optionalPermissionScopes = @($autopilot.optionalPermissionScopes)
-}
 
 $publishUrl = "$FoundryProjectEndpoint/agents/$agentName/microsoft365/publish?api-version=2025-11-15-preview"
 $publishJson = $publishBody | ConvertTo-Json -Depth 10
