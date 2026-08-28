@@ -23,8 +23,12 @@ deployment.
 `azd` is the only supported deployment path:
 
 ```bash
+azd env set AZURE_LOCATION eastus
 azd up
 ```
+
+Set `AZURE_LOCATION` explicitly before the first deployment. The committed default is `eastus`,
+but an explicit environment value prevents an unintended region if defaults change later.
 
 `azd up` performs three categories of work:
 

@@ -48,6 +48,7 @@ boundaries, routing, and security invariants.
 Install and authenticate the Azure CLI, Azure Developer CLI, GitHub CLI, and PowerShell, then:
 
 ```bash
+azd env set AZURE_LOCATION eastus
 azd up
 ```
 
