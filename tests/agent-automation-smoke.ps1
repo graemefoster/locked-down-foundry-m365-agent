@@ -341,12 +341,22 @@ try {
   & "$repositoryRoot/scripts/publish-autopilot.ps1" `
     -AgentDirectory $autopilotDirectory `
     -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project' `
-    -PublishAccessToken 'fixture-user-token'
+    -PublishAccessToken 'fixture-publish-token'
 
   $autopilotCall = @($global:RestCalls | Where-Object {
       $_.Method -eq 'Post' -and $_.Uri -match '/microsoft365/publish\?'
     })
+  $autopilotRead = @($global:RestCalls | Where-Object {
+      $_.Method -eq 'Get' -and $_.Uri -match '/agents/fixture-agent\?'
+    })
+  Assert-True ($autopilotRead.Count -eq 1) 'Autopilot publishing did not read the live agent.'
+  Assert-True (
+    $autopilotRead[0].Headers.Authorization -eq 'Bearer fixture-token'
+  ) 'Autopilot agent lookup did not use the managed-identity token.'
   Assert-True ($autopilotCall.Count -eq 1) 'Autopilot publishing did not issue exactly one request.'
+  Assert-True (
+    $autopilotCall[0].Headers.Authorization -eq 'Bearer fixture-publish-token'
+  ) 'Autopilot publishing did not use the delegated user token.'
   Assert-True (
     $autopilotCall[0].Body -match '"publishAsAutopilot": true'
   ) 'Autopilot publishing did not set publishAsAutopilot.'
