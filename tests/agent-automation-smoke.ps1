@@ -32,6 +32,16 @@ try {
   $global:McpPolicyScenario = 'empty'
   $global:EasyAuthBody = ''
 
+  $autopilotToolingManifestPath = Join-Path $repositoryRoot 'agents/autopilot-agent/simple-autopilot-agent/ToolingManifest.json'
+  $autopilotToolingManifest = Get-Content -LiteralPath $autopilotToolingManifestPath -Raw | ConvertFrom-Json
+  $autopilotConfig = Get-Content -LiteralPath (Join-Path $repositoryRoot 'agents/autopilot-agent/autopilot.json') -Raw | ConvertFrom-Json
+  $manifestScopes = @($autopilotToolingManifest.mcpServers.scope | Sort-Object -Unique)
+  $publishedScopes = @($autopilotConfig.optionalPermissionScopes.scopes | Sort-Object -Unique)
+  Assert-True (
+    $manifestScopes.Count -gt 0 -and
+    ($manifestScopes -join ',') -eq ($publishedScopes -join ',')
+  ) 'Autopilot ToolingManifest scopes do not match the published permission scopes.'
+
   function global:az {
     $command = $args -join ' '
     $global:AzCalls.Add($command)

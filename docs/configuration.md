@@ -99,6 +99,10 @@ The reusable source-zip workflow builds the application and packages the publish
 archive root. If `FOUNDRY_PROJECT_ENDPOINT` is present in `environment_variables`,
 `scripts/deploy-code-agent.ps1` replaces it with `AZURE_AI_PROJECT_ENDPOINT` at deployment time.
 
+Autopilot source packages must include `ToolingManifest.json` at the build-context root. Its MCP
+scopes must match `agents/autopilot-agent/autopilot.json` so Microsoft 365 publishing can generate
+the blueprint manifest elements.
+
 ### Hosted container-image agent
 
 ```yaml

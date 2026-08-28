@@ -14,6 +14,7 @@
 !agents/**/network.json
 !agents/**/teams.json
 !agents/**/autopilot.json
+!agents/**/ToolingManifest.json
 # ...and the MCP gateway config + per-agent rate-limit config (source of truth compiled into APIM).
 !mcp/*.json
 # ...and the App Service source that azd deploys as CODE (these are real app config/manifests,
