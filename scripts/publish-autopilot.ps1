@@ -29,10 +29,19 @@ $appVersion = if ($autopilot.appVersion) { $autopilot.appVersion } else { '1.0.0
 
 $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
 $agentUrl = "$FoundryProjectEndpoint/agents/$agentName`?api-version=2025-11-15-preview"
+$managedIdentityToken = az account get-access-token `
+  --resource https://ai.azure.com `
+  --query accessToken `
+  --output tsv
+
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($managedIdentityToken)) {
+  throw "Could not acquire the VM managed-identity token."
+}
+
 $liveAgent = Invoke-RestMethod `
   -Method Get `
   -Uri $agentUrl `
-  -Headers @{ Authorization = "******" }
+  -Headers @{ Authorization = ('Bearer ' + $managedIdentityToken) }
 
 $blueprintClientId = $liveAgent.versions.latest.blueprint.client_id
 if ([string]::IsNullOrWhiteSpace($blueprintClientId)) {
