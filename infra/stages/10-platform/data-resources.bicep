@@ -58,7 +58,8 @@ module aiDependencies './resources/standard-dependent-resources.bicep' = if (dep
 module appService './gateway/app-service.bicep' = {
   name: 'appServiceDeployment'
   params: {
-    location: location
+    // TEMPORARY: East US App Service allocations are unavailable for this subscription.
+    location: 'australiaeast'
     logAnalyticsId: logAnalyticsId
     aspName: appServicePlanName
     appInsightsName: appInsightsName

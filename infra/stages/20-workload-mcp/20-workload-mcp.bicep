@@ -13,7 +13,6 @@ APIM MCP servers array + the app-registration audience that main.bicep wires int
 Foundry project MCP connections and the APIM MCP compliance policy.
 */
 
-param location string
 param uniqueSuffix string
 param appServicePlanName string
 param appInsightsName string
@@ -27,7 +26,8 @@ param apimName string
 module mcpWebApp 'mcp-web-app.bicep' = {
   name: 'stage20-mcp-web-app-${uniqueSuffix}'
   params: {
-    location: location
+    // TEMPORARY: East US App Service allocations are unavailable for this subscription.
+    location: 'australiaeast'
     appInsightsName: appInsightsName
     appServiceDelegationSubnetId: appServiceDelegatedSubnetId
     aspName: appServicePlanName

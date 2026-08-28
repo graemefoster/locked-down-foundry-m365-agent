@@ -422,7 +422,6 @@ module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
 module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
   name: 'stage20-workload-mcp-${uniqueSuffix}'
   params: {
-    location: location
     uniqueSuffix: uniqueSuffix
     appServicePlanName: appServicePlanName
     appInsightsName: appInsightsName
