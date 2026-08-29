@@ -27,6 +27,30 @@ $autopilot = Get-Content -LiteralPath $autopilotPath -Raw | ConvertFrom-Json
 $displayName = if ($autopilot.displayName) { $autopilot.displayName } else { $agentName }
 $appVersion = if ($autopilot.appVersion) { $autopilot.appVersion } else { '1.0.0' }
 
+$apiVersion = '2025-11-15-preview'
+$FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
+
+# An autopilot hires an agent user account per instance, and that account is bound to the
+# agent's identity blueprint. Resolve the blueprint client id from the deployed agent's
+# instance identity so the manifest never has to hardcode it (override via autopilot.json
+# 'agentIdentityBlueprintId' only if you must pin a specific value).
+$blueprintClientId = if ($autopilot.agentIdentityBlueprintId) {
+  $autopilot.agentIdentityBlueprintId
+}
+else {
+  $agentUrl = "$FoundryProjectEndpoint/agents/$agentName?api-version=$apiVersion"
+  Write-Host "Resolving agent identity blueprint id from $agentUrl"
+  $agentDetail = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers @{
+    Authorization = "Bearer $PublishAccessToken"
+    Accept        = 'application/json'
+  }
+  $agentDetail.instance_identity.client_id
+}
+if ([string]::IsNullOrWhiteSpace($blueprintClientId)) {
+  throw "Could not resolve the agent identity blueprint client id for '$agentName'. Deploy the agent before publishing it as an autopilot."
+}
+Write-Host "Using agent identity blueprint id '$blueprintClientId'."
+
 $publishBody = [ordered]@{
   agentDisplayName         = $displayName
   publishAsAutopilot       = $true
@@ -39,13 +63,20 @@ $publishBody = [ordered]@{
   developerWebsiteUrl      = $autopilot.developerWebsiteUrl
   privacyUrl               = $autopilot.privacyUrl
   termsOfUseUrl            = $autopilot.termsOfUseUrl
+  useAgenticUserTemplate   = $true
+  agenticUserTemplate      = [ordered]@{
+    Id                       = 'digitalWorkerTemplate'
+    File                     = 'agenticUserTemplateManifest.json'
+    SchemaVersion            = '0.1.0-preview'
+    AgentIdentityBlueprintId = $blueprintClientId
+    CommunicationProtocol    = 'activityProtocol'
+  }
 }
 if ($null -ne $autopilot.optionalPermissionScopes) {
   $publishBody.optionalPermissionScopes = @($autopilot.optionalPermissionScopes)
 }
 
-$FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
-$publishUrl = "$FoundryProjectEndpoint/agents/$agentName/microsoft365/publish?api-version=2025-11-15-preview"
+$publishUrl = "$FoundryProjectEndpoint/agents/$agentName/microsoft365/publish?api-version=$apiVersion"
 $publishJson = $publishBody | ConvertTo-Json -Depth 10
 $published = $false
 

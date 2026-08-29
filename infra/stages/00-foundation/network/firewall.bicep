@@ -292,11 +292,20 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
               'agent365.svc.cloud.microsoft'
             ]
           }
-        ]
-      }
-    ]
-  }
-}
+          {
+            ruleType: 'ApplicationRule'
+            description: 'Agent subnet: allow the hosted agent to post activities back to Teams/Bot Framework channel connector (serviceUrl host) over HTTPS (SNI-pinned). Exact FQDN only, no wildcard.'
+            name: 'AllowAgentTeamsReply'
+            sourceAddresses: [
+              agentSubnetCidr
+            ]
+            protocols: [
+              { port: 443, protocolType: 'Https' }
+            ]
+            targetFqdns: [
+              'smba.trafficmanager.net'
+            ]
+          }
 
 output publicIpV4 string = firewallPip.properties.ipAddress
 output firewallPrivateIp string = firewall.properties.ipConfigurations[0].properties.privateIPAddress
