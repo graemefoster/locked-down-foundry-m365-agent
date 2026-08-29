@@ -5,7 +5,7 @@ definition:
   kind: prompt
   # Gateway model reference: '<apim-connection-name>/<exposed-model-name>'. The connection name
   # ('model-gateway') is fixed by the template (modelGatewayConnectionName).
-  model: model-gateway/gpt-5.4-mini
+  model: model-gateway/gpt-5-mini
   instructions: You are a helpful AI assistant available in Microsoft Teams, served through the enterprise model gateway. Answer questions clearly and concisely.
   tools:
     - type: mcp

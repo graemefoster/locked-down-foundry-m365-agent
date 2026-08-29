@@ -17,5 +17,5 @@ definition:
       - support-case-agent.Agent.dll
     dependency_resolution: bundled
   environment_variables:
-    AZURE_AI_MODEL_DEPLOYMENT_NAME: gpt-5.4
+    AZURE_AI_MODEL_DEPLOYMENT_NAME: gpt-5-mini
     OTEL_ENABLE_SENSITIVE_DATA: "true"

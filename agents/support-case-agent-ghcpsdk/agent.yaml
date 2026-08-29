@@ -15,6 +15,6 @@ definition:
       - support-case-agent-ghcpsdk.Agent.dll
     dependency_resolution: bundled
   environment_variables:
-    MODEL_DEPLOYMENT_NAME: gpt-5.4
+    MODEL_DEPLOYMENT_NAME: gpt-5-mini
     # FOUNDRY_PROJECT_ENDPOINT is INJECTED at deploy time by deploy-code-agent.ps1.
     FOUNDRY_PROJECT_ENDPOINT: ""

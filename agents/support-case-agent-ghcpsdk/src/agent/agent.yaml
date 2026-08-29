@@ -13,7 +13,7 @@ protocols:
     version: 1.0.0
 environment_variables:
   - name: MODEL_DEPLOYMENT_NAME
-    value: gpt-5.4
+    value: gpt-5-mini
 resources:
   cpu: "1"
   memory: 2Gi

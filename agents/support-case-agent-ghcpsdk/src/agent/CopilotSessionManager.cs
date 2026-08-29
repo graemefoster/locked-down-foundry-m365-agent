@@ -328,8 +328,8 @@ public sealed class CopilotSessionManager(
             return _options.ModelDeploymentName;
         }
 
-        logger.LogDebug("No configured model deployment found. Falling back to default model deployment gpt-5.4.");
-        return "gpt-5.4";
+        logger.LogDebug("No configured model deployment found. Falling back to default model deployment gpt-5-mini.");
+        return "gpt-5-mini";
     }
 
     private string GetWorkingDirectory()
