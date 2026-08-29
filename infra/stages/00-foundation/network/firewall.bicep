@@ -306,6 +306,25 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
               'smba.trafficmanager.net'
             ]
           }
+          {
+            ruleType: 'ApplicationRule'
+            description: 'Agent subnet: allow the Application Insights / OpenTelemetry SDK to fetch live-metrics and dynamic settings over HTTPS (SNI-pinned). Not covered by the AzureMonitor service tag. Exact FQDN only, no wildcard.'
+            name: 'AllowAgentMonitorSdkSettings'
+            sourceAddresses: [
+              agentSubnetCidr
+            ]
+            protocols: [
+              { port: 443, protocolType: 'Https' }
+            ]
+            targetFqdns: [
+              'settings.sdk.monitor.azure.com'
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
 
 output publicIpV4 string = firewallPip.properties.ipAddress
 output firewallPrivateIp string = firewall.properties.ipConfigurations[0].properties.privateIPAddress
