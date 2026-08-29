@@ -38,7 +38,7 @@ $blueprintClientId = if ($autopilot.agentIdentityBlueprintId) {
   $autopilot.agentIdentityBlueprintId
 }
 else {
-  $agentUrl = "$FoundryProjectEndpoint/agents/$agentName?api-version=$apiVersion"
+  $agentUrl = "$FoundryProjectEndpoint/agents/${agentName}?api-version=$apiVersion"
   Write-Host "Resolving agent identity blueprint id from $agentUrl"
   $agentDetail = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers @{
     Authorization = "Bearer $PublishAccessToken"
@@ -76,7 +76,7 @@ if ($null -ne $autopilot.optionalPermissionScopes) {
   $publishBody.optionalPermissionScopes = @($autopilot.optionalPermissionScopes)
 }
 
-$publishUrl = "$FoundryProjectEndpoint/agents/$agentName/microsoft365/publish?api-version=$apiVersion"
+$publishUrl = "$FoundryProjectEndpoint/agents/${agentName}/microsoft365/publish?api-version=$apiVersion"
 $publishJson = $publishBody | ConvertTo-Json -Depth 10
 $published = $false
 
