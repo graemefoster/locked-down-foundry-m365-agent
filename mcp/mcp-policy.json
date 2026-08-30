@@ -6,7 +6,7 @@
       "name": "mcp",
       "agents": [
         {
-          "name": "teams-agent",
+          "name": "grf-2026-teams-agent",
           "requestsPerMinute": 50000
         }
       ]
