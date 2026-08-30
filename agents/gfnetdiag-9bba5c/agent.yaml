@@ -1,0 +1,28 @@
+object: agent.version
+name: gfnetdiag-9bba5c
+description: GFNETDIAG-9BBA5C locked-down Foundry M365 502 diagnostic autopilot.
+metadata:
+  enableVnextExperience: "true"
+digital_worker_type: m365
+definition:
+  kind: hosted
+  protocol_versions:
+    - protocol: activity
+      version: 2.0.0
+  cpu: "0.5"
+  memory: 1Gi
+  code_configuration:
+    runtime: python_3_13
+    entry_point:
+      - python
+      - main.py
+    dependency_resolution: remote_build
+  environment_variables:
+    AZURE_AI_MODEL_DEPLOYMENT_NAME: gpt-5-mini
+    OTEL_ENABLE_SENSITIVE_DATA: "true"
+agent_endpoint:
+  protocol_configuration:
+    activity:
+      enable_m365_public_endpoint: true
+  authorization_schemes:
+    - type: BotServiceRbac
