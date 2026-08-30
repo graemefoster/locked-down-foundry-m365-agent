@@ -36,6 +36,11 @@ on:
         type: string
         required: false
         default: ''
+      use-delegated-login:
+        description: Sign in with a delegated user (device-code) token instead of the VM managed identity. Required for m365 digital-worker agents so the created agent's identity blueprint is sponsored by the user (matches publish).
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -126,8 +131,19 @@ jobs:
         run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
 
       - name: Sign in with the VM managed identity
+        if: inputs.use-delegated-login == false
         shell: pwsh
         run: az login --identity --output none
+
+      - name: Sign in with a delegated user token
+        if: inputs.use-delegated-login == true
+        shell: pwsh
+        run: |
+          az login `
+            --use-device-code `
+            --tenant "${{ vars.TEAMS_TENANT_ID }}" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "Delegated user sign-in failed." }
 
       - name: Deploy and publish the source-zip agent
         shell: pwsh

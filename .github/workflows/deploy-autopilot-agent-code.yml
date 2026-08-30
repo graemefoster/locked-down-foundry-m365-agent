@@ -13,3 +13,4 @@ jobs:
       build-context: agents/grf-2026-autopilot-agent/simple-autopilot-agent
       build-method: python
       entry-file: main.py
+      use-delegated-login: true
