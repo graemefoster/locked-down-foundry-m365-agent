@@ -75,6 +75,7 @@ $metadata = [ordered]@{
   definition = $agent.definition
 }
 if ($null -ne $agent.description) { $metadata.description = $agent.description }
+if ($null -ne $agent.publisherName) { $metadata.publisherName = $agent.publisherName }
 if ($null -ne $agent.metadata) { $metadata.metadata = $agent.metadata }
 if ($null -ne $agent.agent_endpoint) { $metadata.agent_endpoint = $agent.agent_endpoint }
 if ($null -ne $agent.digital_worker_type) { $metadata.digital_worker_type = $agent.digital_worker_type }

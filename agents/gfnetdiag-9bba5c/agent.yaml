@@ -1,6 +1,7 @@
 object: agent.version
 name: gfnetdiag-9bba5c
 description: GFNETDIAG-9BBA5C locked-down Foundry M365 502 diagnostic autopilot.
+publisherName: Graeme Foster
 metadata:
   enableVnextExperience: "true"
 digital_worker_type: m365

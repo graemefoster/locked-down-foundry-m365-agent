@@ -1,6 +1,7 @@
 object: agent.version
 name: graemes-private-autopilot-agent
 description: Autopilot agent that responds to Teams messages, and can call work-iq.
+publisherName: Graeme Foster
 metadata:
   enableVnextExperience: "true"
 digital_worker_type: m365
