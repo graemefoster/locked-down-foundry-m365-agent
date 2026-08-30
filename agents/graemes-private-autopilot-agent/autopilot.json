@@ -1,0 +1,25 @@
+{
+  "displayName": "Graeme's Private Autopilot Agent",
+  "publishScope": "Tenant",
+  "appVersion": "1.0.3",
+  "canRespondWithoutMention": true,
+  "shortDescription": "Foundry Autopilot agent deployed through GitHub Actions.",
+  "fullDescription": "A Microsoft Foundry Autopilot agent that responds to Microsoft 365 messages.",
+  "developerName": "Azure Developer",
+  "developerWebsiteUrl": "https://azure.microsoft.com",
+  "privacyUrl": "https://privacy.microsoft.com",
+  "termsOfUseUrl": "https://www.microsoft.com/legal/terms-of-use",
+  "optionalPermissionScopes": [
+    {
+      "resourceAppId": "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
+      "scopes": [
+        "McpServers.Word.All",
+        "McpServers.Mail.All",
+        "McpServers.OneDriveSharepoint.All",
+        "McpServers.Teams.All",
+        "McpServers.Excel.All",
+        "McpServers.Calendar.All"
+      ]
+    }
+  ]
+}
