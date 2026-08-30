@@ -14,6 +14,10 @@
   One API serves every published agent — no per-agent re-provision.
 
   Auth posture:
+    * NOTE (DIAGNOSTIC / bring-up): validate-jwt and the single-tenant serviceurl
+      assertion are currently COMMENTED OUT in the policy below to remove APIM edge
+      auth as a failure point while proving the private inbound path. Re-enable both
+      before locking down. See the inline comment in `policyTemplate`.
     * validate-jwt (defense-in-depth) — the Bot Channel Adapter presents a signed
       Bot Framework JWT. We validate it at the APIM edge using the Bot Framework
       OpenID metadata, pinning issuer 'https://api.botframework.com' and (when
@@ -81,6 +85,14 @@ var serviceUrlAssertBlock = empty(expectedTenantId)
 var policyTemplate = '''<policies>
   <inbound>
     <base />
+    <!-- DIAGNOSTIC (bring-up) — TEMPORARILY DISABLED. The Bot Framework validate-jwt edge
+         check and the single-tenant serviceurl assertion below are commented out to remove
+         APIM edge auth as a failure point while we prove the private inbound path
+         (Bot Service -> YARP -> APIM -> Foundry PE). RE-ENABLE both blocks (uncomment) before
+         returning to the locked-down posture. While disabled, deploy-agent-network.yml's
+         "apply Teams audiences" step is inert (there is no validate-jwt audience set to rebuild).
+         We deliberately do NOT dump the bot token here; request/response diagnostics stay in
+         the deploy/publish scripts.
     <validate-jwt header-name="Authorization" failed-validation-httpcode="401" failed-validation-error-message="Unauthorized: Bot Framework token failed validation." output-token-variable-name="jwt">
       <openid-config url="https://login.botframework.com/v1/.well-known/openidconfiguration" />
       @@AUDIENCES@@
@@ -89,6 +101,7 @@ var policyTemplate = '''<policies>
       </issuers>
     </validate-jwt>
     @@SERVICEURLASSERT@@
+    -->
     <set-backend-service backend-id="@@BACKENDID@@" />
     <rewrite-uri template="@@REWRITE@@" copy-unmatched-params="false" />
   </inbound>
