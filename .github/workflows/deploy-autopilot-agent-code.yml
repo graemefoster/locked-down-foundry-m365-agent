@@ -9,7 +9,7 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-code-agent.yml
     with:
-      agent-manifest: agents/autopilot-agent/agent.yaml
-      build-context: agents/autopilot-agent/simple-autopilot-agent
+      agent-manifest: agents/grf-2026-autopilot-agent/agent.yaml
+      build-context: agents/grf-2026-autopilot-agent/simple-autopilot-agent
       build-method: python
       entry-file: main.py

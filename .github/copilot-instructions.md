@@ -67,7 +67,7 @@ Reusable workflows are separated by operation:
 3. apply the MCP policy;
 4. apply Teams audiences.
 
-The nightly evaluation workflow reads `agents/teams-agent/agent.yaml`.
+The nightly evaluation workflow reads `agents/grf-2026-teams-agent/agent.yaml`.
 
 ## Variables and routes
 

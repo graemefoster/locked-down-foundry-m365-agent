@@ -423,6 +423,8 @@ module stage15 'stages/15-foundry-project/15-foundry-project.bicep' = {
     appInsightsName: appInsightsName
     keyVaultName: stage10.outputs.keyVaultName
     logAnalyticsId: stage00.outputs.logAnalyticsId
+    deployerPrincipalId: deployerPrincipalId
+    deployerPrincipalType: deployerPrincipalType
   }
 }
 

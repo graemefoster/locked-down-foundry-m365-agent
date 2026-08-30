@@ -52,6 +52,12 @@ param keyVaultName string
 // From stage 00.
 param logAnalyticsId string
 
+@description('Object ID of the deploying/publishing user (azd AZURE_PRINCIPAL_ID). Passed to the Foundry User grant so the delegated M365 publish token can perform agents/write.')
+param deployerPrincipalId string = ''
+
+@description('Principal type of deployerPrincipalId.')
+param deployerPrincipalType string = 'User'
+
 // Existing data-plane resources (declared for the dependsOn ordering preserved from stage 10).
 // Only referenced by STANDARD-tier modules; fall back to a placeholder name in BASIC so the
 // declarations stay valid when the trio names are empty.
@@ -152,6 +158,8 @@ module foundryProjectRoleAssignment './rbac/foundry-project-role-assignment.bice
     accountName: accountName
     projectName: aiProject.outputs.projectName
     projectPrincipalId: aiProject.outputs.projectPrincipalId
+    deployerPrincipalId: deployerPrincipalId
+    deployerPrincipalType: deployerPrincipalType
   }
 }
 

@@ -202,7 +202,7 @@ live bot application ID.
 ## Evaluation
 
 `.github/workflows/nightly-eval-agent.yml` runs on the private runner and reads the agent name
-from `agents/teams-agent/agent.yaml`. By default it evaluates the latest version.
+from `agents/grf-2026-teams-agent/agent.yaml`. By default it evaluates the latest version.
 
 Manual inputs can select explicit `name:version` values and a baseline. Version-over-version
 comparison invokes Foundry cluster analysis, which is not supported in a Private BYO-network

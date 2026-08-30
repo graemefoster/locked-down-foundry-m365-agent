@@ -9,4 +9,4 @@ jobs:
   publish:
     uses: ./.github/workflows/publish-teams.yml
     with:
-      agent-directory: agents/teams-agent
+      agent-directory: agents/grf-2026-teams-agent

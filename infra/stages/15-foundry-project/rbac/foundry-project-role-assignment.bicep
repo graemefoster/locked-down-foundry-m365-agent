@@ -12,6 +12,12 @@ param projectName string
 @description('Principal ID of the Foundry project managed identity')
 param projectPrincipalId string
 
+@description('Object ID of the deploying/publishing user (azd AZURE_PRINCIPAL_ID). Granted Foundry User so the delegated M365 publish token can perform agents/write. Empty skips the grant.')
+param deployerPrincipalId string = ''
+
+@description('Principal type of deployerPrincipalId. Delegated M365 publishing uses a human user token, so this is User by default.')
+param deployerPrincipalType string = 'User'
+
 resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' existing = {
   name: accountName
   scope: resourceGroup()
@@ -47,6 +53,31 @@ resource foundryUserRoleAssignmentOnAccount 'Microsoft.Authorization/roleAssignm
     principalId: projectPrincipalId
     roleDefinitionId: foundryUserRole.id
     principalType: 'ServicePrincipal'
+  }
+}
+
+// The deploying user is also the M365 publishing user. Microsoft 365 / Teams publishing is the
+// one delegated-user token path in this repo, and publish-*.ps1 performs agents/write. Grant the
+// deployer Foundry User at both project and account scope (mirroring the project MI grants) so the
+// delegated publish token is authorized. Conditional so CI/service-principal deploys that leave
+// deployerPrincipalId empty are unaffected.
+resource deployerFoundryUserOnProject 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  scope: project
+  name: guid(deployerPrincipalId, foundryUserRole.id, project.id)
+  properties: {
+    principalId: deployerPrincipalId
+    roleDefinitionId: foundryUserRole.id
+    principalType: deployerPrincipalType
+  }
+}
+
+resource deployerFoundryUserOnAccount 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployerPrincipalId)) {
+  scope: account
+  name: guid(deployerPrincipalId, foundryUserRole.id, account.id)
+  properties: {
+    principalId: deployerPrincipalId
+    roleDefinitionId: foundryUserRole.id
+    principalType: deployerPrincipalType
   }
 }
 

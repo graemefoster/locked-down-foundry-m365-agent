@@ -9,4 +9,4 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-agent.yml
     with:
-      agent-manifest: agents/teams-agent/agent.yaml
+      agent-manifest: agents/grf-2026-teams-agent/agent.yaml

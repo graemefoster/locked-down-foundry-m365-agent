@@ -16,7 +16,7 @@ on:
       dataPath:
         description: Path to the evaluation data.
         required: false
-        default: agents/teams-agent/eval-data.json
+        default: agents/grf-2026-teams-agent/eval-data.json
 
 permissions:
   contents: read
@@ -53,9 +53,9 @@ jobs:
           }
 
           if ([string]::IsNullOrWhiteSpace($agentIds)) {
-            $agentName = (& yq -r '.name' agents/teams-agent/agent.yaml)
+            $agentName = (& yq -r '.name' agents/grf-2026-teams-agent/agent.yaml)
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($agentName)) {
-              throw "Could not read the agent name from agents/teams-agent/agent.yaml."
+              throw "Could not read the agent name from agents/grf-2026-teams-agent/agent.yaml."
             }
             $token = az account get-access-token `
               --resource https://ai.azure.com `

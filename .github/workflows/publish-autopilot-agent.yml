@@ -36,6 +36,6 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/publish-autopilot.ps1 `
-            -AgentDirectory agents/autopilot-agent `
+            -AgentDirectory agents/grf-2026-autopilot-agent `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -PublishAccessToken $env:PUBLISH_USER_TOKEN
