@@ -144,12 +144,16 @@ resource diagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' 
           service tags on 443/TCP. No FQDNs, no wildcards, no port 80.
     * Application rules:
         - Unrestricted-App-Out: non-agent sources keep general web egress.
-        - App-AgentAllow: the agent subnet is allowed ONLY the exact Agent 365
-          telemetry FQDN (agent365.svc.cloud.microsoft) over HTTPS, filtered by
-          TLS SNI. Foundry forbids TLS *inspection*, but SNI-based FQDN filtering
-          needs no decryption, so this is compliant. This is the real boundary
-          for A365 egress — the agent NSG can only scope to the broad
-          AzureFrontDoor.Frontend service tag, so the firewall pins the hostname.
+        - App-AgentAllow: the agent subnet is allowed ONLY an explicit set of
+          exact FQDNs over HTTPS, filtered by TLS SNI: Agent 365 telemetry
+          (agent365.svc.cloud.microsoft), the Teams/Bot Framework reply host
+          (smba.trafficmanager.net), the App Insights SDK settings endpoint
+          (settings.sdk.monitor.azure.com), and Microsoft Container Registry
+          (mcr.microsoft.com, *.data.mcr.microsoft.com) for hosted-agent image
+          pulls. Foundry forbids TLS *inspection*, but SNI-based FQDN filtering
+          needs no decryption, so this is compliant. These are the real boundary
+          for agent L7 egress — the agent NSG can only scope to broad service
+          tags (e.g. AzureFrontDoor.Frontend), so the firewall pins the hostnames.
           All other agent L7/FQDN egress falls through to the implicit deny.
 
   Service tags used for the agent are the documented Foundry/ACA requirements:
@@ -318,6 +322,21 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
             ]
             targetFqdns: [
               'settings.sdk.monitor.azure.com'
+            ]
+          }
+          {
+            ruleType: 'ApplicationRule'
+            description: 'Agent subnet: allow the hosted Container Apps agent runtime to pull base/runtime image layers from Microsoft Container Registry over HTTPS (SNI-pinned). MCR is fronted by a CDN whose IPs are not covered by the MicrosoftContainerRegistry service tag, so the network rule misses it and it must be pinned by FQDN here.'
+            name: 'AllowAgentMcr'
+            sourceAddresses: [
+              agentSubnetCidr
+            ]
+            protocols: [
+              { port: 443, protocolType: 'Https' }
+            ]
+            targetFqdns: [
+              'mcr.microsoft.com'
+              '*.data.mcr.microsoft.com'
             ]
           }
         ]
