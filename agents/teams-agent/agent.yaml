@@ -1,6 +1,6 @@
 object: agent.version
-name: teams-agent
-description: The agent published to Microsoft Teams / M365, served through the model gateway.
+name: grf-2026-teams-agent
+description: GRF 2026 demo agent published to Microsoft Teams / M365 from a locked-down virtual network, served through the enterprise model gateway.
 definition:
   kind: prompt
   # Gateway model reference: '<apim-connection-name>/<exposed-model-name>'. The connection name

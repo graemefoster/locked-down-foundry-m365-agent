@@ -1,6 +1,6 @@
 object: agent.version
-name: autopilot-agent
-description: Autopilot agent that responds to Teams messages, and can call work-iq.
+name: grf-2026-autopilot-agent
+description: GRF 2026 Autopilot digital-worker agent that responds to Microsoft Teams messages and can call Work-IQ, served through the locked-down model gateway.
 metadata:
   enableVnextExperience: "true"
 digital_worker_type: m365

@@ -1,9 +1,9 @@
 {
-  "displayName": "Teams Agent",
+  "displayName": "GRF 2026 Teams Agent",
   "publishScope": "Shared",
   "appVersion": "1.0.0",
-  "shortDescription": "Foundry M365 agent",
-  "fullDescription": "A Foundry agent published to Microsoft 365 from a locked-down virtual network.",
+  "shortDescription": "GRF 2026 locked-down Foundry agent in Microsoft Teams.",
+  "fullDescription": "GRF 2026 demonstration agent: a Microsoft Foundry agent published to Microsoft 365 from a fully network-locked-down virtual network, served through the enterprise model gateway.",
   "developerName": "Azure Developer",
   "developerWebsiteUrl": "https://azure.microsoft.com",
   "privacyUrl": "https://privacy.microsoft.com",

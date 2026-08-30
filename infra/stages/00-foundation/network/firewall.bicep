@@ -312,7 +312,7 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
           }
           {
             ruleType: 'ApplicationRule'
-            description: 'Agent subnet: allow the Application Insights / OpenTelemetry SDK to fetch live-metrics and dynamic settings over HTTPS (SNI-pinned). Not covered by the AzureMonitor service tag. Exact FQDN only, no wildcard.'
+            description: 'Agent subnet: allow the Application Insights / OpenTelemetry SDK to fetch live-metrics, live-diagnostics and dynamic settings over HTTPS (SNI-pinned). Not covered by the AzureMonitor service tag. Exact FQDNs only, no wildcard.'
             name: 'AllowAgentMonitorSdkSettings'
             sourceAddresses: [
               agentSubnetCidr
@@ -322,6 +322,7 @@ resource policyRuleCollectionGroup 'Microsoft.Network/firewallPolicies/ruleColle
             ]
             targetFqdns: [
               'settings.sdk.monitor.azure.com'
+              'australiaeast.livediagnostics.monitor.azure.com'
             ]
           }
           {
