@@ -32,7 +32,7 @@ $FoundryProjectEndpoint = $FoundryProjectEndpoint.TrimEnd('/')
 
 # An autopilot hires an agent user account per instance, and that account is bound to the
 # agent's identity blueprint. Resolve the blueprint client id from the deployed agent's
-# instance identity so the manifest never has to hardcode it (override via autopilot.json
+# blueprint (NOT its per-instance identity) so the manifest never has to hardcode it (override via autopilot.json
 # 'agentIdentityBlueprintId' only if you must pin a specific value).
 $blueprintClientId = if ($autopilot.agentIdentityBlueprintId) {
   $autopilot.agentIdentityBlueprintId
@@ -44,7 +44,7 @@ else {
     Authorization = "Bearer $PublishAccessToken"
     Accept        = 'application/json'
   }
-  $agentDetail.instance_identity.client_id
+  $agentDetail.blueprint.client_id
 }
 if ([string]::IsNullOrWhiteSpace($blueprintClientId)) {
   throw "Could not resolve the agent identity blueprint client id for '$agentName'. Deploy the agent before publishing it as an autopilot."
