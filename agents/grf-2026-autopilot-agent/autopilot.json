@@ -1,7 +1,7 @@
 {
   "displayName": "GRF 2026 Autopilot Agent",
   "publishScope": "Tenant",
-  "appVersion": "1.0.3",
+  "appVersion": "1.0.4",
   "canRespondWithoutMention": true,
   "shortDescription": "GRF 2026 Foundry Autopilot digital worker for Microsoft 365.",
   "fullDescription": "GRF 2026 Microsoft Foundry Autopilot agent that responds to Microsoft 365 messages and can call Work-IQ, deployed through GitHub Actions into a locked-down virtual network.",
