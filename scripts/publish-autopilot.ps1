@@ -79,6 +79,7 @@ if ($null -ne $autopilot.optionalPermissionScopes) {
 $publishUrl = "$FoundryProjectEndpoint/agents/${agentName}/microsoft365/publish?api-version=$apiVersion"
 $publishJson = $publishBody | ConvertTo-Json -Depth 10
 $published = $false
+$wasNoOp = $false
 
 Write-Host "Publishing Autopilot '$agentName' to Microsoft 365."
 
@@ -110,7 +111,9 @@ for ($attempt = 1; $attempt -le 5 -and -not $published; $attempt++) {
     $detail = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { '' }
 
     if ($detail -match 'version already exists') {
-      Write-Host "Microsoft 365 Autopilot version '$appVersion' is already published."
+      $wasNoOp = $true
+      Write-Host "::warning::Autopilot '$agentName' version '$appVersion' is ALREADY published to Microsoft 365 - this publish was a NO-OP. Nothing changed. Bump 'appVersion' in $AgentDirectory/autopilot.json to publish your changes."
+      Write-Warning "Autopilot '$agentName' version '$appVersion' is ALREADY published - NO-OP, nothing changed. Bump 'appVersion' in autopilot.json to republish."
       $published = $true
     }
     elseif ($statusCode -in 502, 503, 504 -and $attempt -lt 5) {
@@ -124,4 +127,9 @@ for ($attempt = 1; $attempt -le 5 -and -not $published; $attempt++) {
   }
 }
 
-Write-Host "Autopilot publishing finished for '$agentName'."
+if ($wasNoOp) {
+  Write-Host "Autopilot publishing finished for '$agentName' - NO-OP (version '$appVersion' already published; nothing was changed)."
+}
+else {
+  Write-Host "Autopilot publishing finished for '$agentName' - published version '$appVersion'."
+}
