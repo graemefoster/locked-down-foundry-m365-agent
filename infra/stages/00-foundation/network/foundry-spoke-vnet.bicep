@@ -324,6 +324,20 @@ resource bastionNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
         }
       }
       {
+        name: 'Allow-All-Outbound'
+        properties: {
+          priority: 3900
+          access: 'Allow'
+          direction: 'Outbound'
+          protocol: '*'
+          sourceAddressPrefix: agentSubnet
+          sourcePortRange: '*'
+          destinationAddressPrefix: '*'
+          destinationPortRange: '*'
+          description: 'Temporary diagnostic override: allow all outbound traffic from the delegated Foundry agent subnet.'
+        }
+      }
+      {
         name: 'Deny-All-Outbound'
         properties: {
           priority: 4000
