@@ -45,23 +45,52 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($tenantId)) {
 
 $headers = @{ Authorization = "Bearer $token" }
 $botAppIds = @()
+$notDeployedAgents = @()
+$identitylessAgents = @()
 
 foreach ($agentName in $teamsAgents) {
-  $agent = Invoke-RestMethod `
-    -Method Get `
-    -Uri "$FoundryProjectEndpoint/agents/$agentName`?api-version=$ApiVersion" `
-    -Headers $headers
+  try {
+    $agent = Invoke-RestMethod `
+      -Method Get `
+      -Uri "$FoundryProjectEndpoint/agents/$agentName`?api-version=$ApiVersion" `
+      -Headers $headers
+  }
+  catch {
+    $statusCode = if ($null -ne $_.Exception.Response) {
+      [int]$_.Exception.Response.StatusCode
+    }
+    else {
+      $null
+    }
+
+    if ($statusCode -eq 404) {
+      $notDeployedAgents += $agentName
+      Write-Warning "Agent '$agentName' is not deployed and is excluded from the Teams audience."
+      continue
+    }
+
+    throw
+  }
 
   if ($agent.instance_identity.principal_id) {
     $botAppIds += $agent.instance_identity.principal_id
   }
   else {
-    Write-Host "Agent '$agentName' has no principal_id and is excluded from the Teams audience."
+    $identitylessAgents += $agentName
+    Write-Warning "Agent '$agentName' is deployed but has no principal_id and is excluded from the Teams audience."
   }
 }
 
-if ($teamsAgents.Count -gt 0 -and $botAppIds.Count -eq 0) {
-  throw "Teams exposure is enabled, but no live bot App IDs were resolved."
+if ($notDeployedAgents.Count -gt 0) {
+  Write-Warning "Not deployed: $($notDeployedAgents -join ', ')"
+}
+if ($identitylessAgents.Count -gt 0) {
+  Write-Warning "Deployed without a Teams-ready identity: $($identitylessAgents -join ', ')"
+}
+
+if ($botAppIds.Count -eq 0) {
+  Write-Warning "No live bot App IDs were resolved; leaving the existing Teams audience policy unchanged."
+  return
 }
 
 $audiencePath = Join-Path ([System.IO.Path]::GetTempPath()) "teams-audiences-$([guid]::NewGuid().ToString('N')).json"

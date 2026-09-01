@@ -168,7 +168,9 @@ The steps intentionally do not use a common helper module or composite action.
 - YARP routes are regenerated and stale agent routes are removed.
 - MCP agent names are resolved to live Foundry identity client IDs before the APIM policy and
   MCP App Service Easy Auth allowlist are applied.
-- Teams audiences are resolved from agents enabled for Microsoft 365.
+- Teams audiences are resolved from agents enabled for Microsoft 365. Undeployed agents and
+  deployed agents without an instance identity are reported and skipped. If none of the
+  configured agents have live identities, the existing Teams audience policy is left unchanged.
 
 An omitted agent or principal remains denied. APIM writes remain serialized to prevent
 management-plane update conflicts.
