@@ -1,0 +1,25 @@
+{
+  "displayName": "GFDIAG6-b91c7e Netdiag Autopilot (Graeme)",
+  "publishScope": "Tenant",
+  "appVersion": "1.0.0",
+  "canRespondWithoutMention": true,
+  "shortDescription": "GFDIAG6-b91c7e locked-down autopilot identity/creation diagnostic - do not use.",
+  "fullDescription": "GFDIAG6-b91c7e - interactive-deploy autopilot deployed by Graeme Foster to verify the delegated user-token creation/identity flow on the locked-down Foundry. Safe to ignore.",
+  "developerName": "Azure Developer",
+  "developerWebsiteUrl": "https://azure.microsoft.com",
+  "privacyUrl": "https://privacy.microsoft.com",
+  "termsOfUseUrl": "https://www.microsoft.com/legal/terms-of-use",
+  "optionalPermissionScopes": [
+    {
+      "resourceAppId": "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
+      "scopes": [
+        "McpServers.Word.All",
+        "McpServers.Mail.All",
+        "McpServers.OneDriveSharepoint.All",
+        "McpServers.Teams.All",
+        "McpServers.Excel.All",
+        "McpServers.Calendar.All"
+      ]
+    }
+  ]
+}
