@@ -172,10 +172,6 @@ These properties are intentional and should not be weakened:
 - Agent 365 telemetry resolves through Azure Front Door. The agent subnet therefore permits the
   required Front Door service tag, while Azure Firewall narrows the effective destination to
   the configured Agent 365 telemetry hostname.
-- The Foundry agent subnet uses a dedicated route table. Its default route traverses Azure
-  Firewall, while explicitly configured `/32` Foundry platform destinations use direct Internet
-  routes to avoid firewall SNAT. The VM and deployment-script subnets retain the shared
-  firewall-only route table.
 - Firewall diagnostics and APIM telemetry are the primary runtime evidence for denied or failed
   paths. VNet flow logs depend on the flow-log storage account remaining writable by the Azure
   service.

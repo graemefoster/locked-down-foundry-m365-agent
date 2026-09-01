@@ -19,25 +19,6 @@ param firewallPrivateIp string
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
 
-@description('Destination CIDRs that bypass Azure Firewall SNAT from the Foundry agent subnet. Keep this list restricted to observed Foundry platform endpoints.')
-param agentDirectInternetPrefixes array = [
-  '20.49.114.40/32'
-  '20.189.172.73/32'
-  '20.189.172.76/32'
-  '52.240.245.67/32'
-  '52.240.245.68/32'
-]
-
-var agentDirectInternetRoutes = [
-  for prefix in agentDirectInternetPrefixes: {
-    name: 'DirectInternet-${replace(replace(prefix, '.', '-'), '/', '-')}'
-    properties: {
-      nextHopType: 'Internet'
-      addressPrefix: prefix
-    }
-  }
-]
-
 @description('''
 CIDRs permitted to make inbound calls to the agent ingress (the /invoke path):
 typically the App Service / YARP spoke and the private-endpoint subnet. Used to
@@ -122,23 +103,6 @@ resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
         }
       }
     ]
-  }
-}
-
-resource agentRouteTable 'Microsoft.Network/routeTables@2022-11-01' = {
-  name: '${vnetName}-agent-rt'
-  location: location
-  properties: {
-    routes: concat([
-      {
-        name: 'InternetViaFirewall'
-        properties: {
-          nextHopType: 'VirtualAppliance'
-          addressPrefix: '0.0.0.0/0'
-          nextHopIpAddress: firewallPrivateIp
-        }
-      }
-    ], agentDirectInternetRoutes)
   }
 }
 
@@ -721,7 +685,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
               }
             }
           ]
-          routeTable: { id: agentRouteTable.id }
+          routeTable: { id: routeTable.id }
           networkSecurityGroup: {
             id: agentNsg.id
           }
@@ -789,7 +753,6 @@ output vmSubnetName string = 'VirtualMachines'
 output agentSubnetName string = agentSubnetName
 output peSubnetName string = peSubnetName
 output routeTableName string = routeTable.name
-output agentRouteTableName string = agentRouteTable.name
 output deploymentScriptsSubnetId string = '${virtualNetwork.id}/subnets/DeploymentScripts'
 // Azure Bastion requires this subnet name exactly.
 output bastionSubnetId string = '${virtualNetwork.id}/subnets/AzureBastionSubnet'
