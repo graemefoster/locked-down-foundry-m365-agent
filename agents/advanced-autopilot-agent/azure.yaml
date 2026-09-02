@@ -13,11 +13,12 @@ services:
     endpoint: https://aiservicesfrce.services.ai.azure.com/api/projects/project-frce
   advanced-autopilot-agent:
     host: azure.ai.agent
-    project: ./hello_world_a365_agent
-    language: docker
-    docker:
-      path: Dockerfile
-      remoteBuild: false
+    project: .
+    language: python
+    codeConfiguration:
+      runtime: python_3_13
+      entryPoint: main.py
+      dependencyResolution: remote_build
     uses:
       - ai-project
     kind: hosted
@@ -37,6 +38,17 @@ services:
     env:
       ModelDeployment: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
       FOUNDRY_PROJECT_ENDPOINT: ${AZURE_AI_PROJECT_ENDPOINT}
+      MCP_PLATFORM_ENDPOINT: https://agent365.svc.cloud.microsoft
+      CONNECTIONS__SERVICE_CONNECTION__SETTINGS__AUTHTYPE: IdentityProxyManager
+      CONNECTIONS__SERVICE_CONNECTION__SETTINGS__SCOPES__0: 5a807f24-c9de-44ee-a3a7-329e88a00ffc/.default
+      CONNECTIONSMAP__0__SERVICEURL: "*"
+      CONNECTIONSMAP__0__CONNECTION: SERVICE_CONNECTION
+      AGENTAPPLICATION__STARTTYPINGTIMER: "false"
+      AGENTAPPLICATION__REMOVERECIPIENTMENTION: "false"
+      AGENTAPPLICATION__NORMALIZEMENTIONS: "false"
+      AGENTAPPLICATION__USERAUTHORIZATION__AUTOSIGNIN: "false"
+      AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__AGENTIC__TYPE: AgenticUserAuthorization
+      AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__AGENTIC__SETTINGS__SCOPES: 5a807f24-c9de-44ee-a3a7-329e88a00ffc/.default
     container:
       resources:
         cpu: '2'

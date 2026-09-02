@@ -49,7 +49,6 @@ jobs:
           AZURE_AI_PROJECT_ID: ${{ vars.AZURE_AI_PROJECT_ID }}
           AZURE_AI_PROJECT_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
           AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
-          AZURE_CONTAINER_REGISTRY_ENDPOINT: ${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}.azurecr.io
         run: |
           azd env new github-actions --no-prompt
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
@@ -58,7 +57,6 @@ jobs:
           azd env set AZURE_AI_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
           azd env set FOUNDRY_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
           azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$AZURE_AI_MODEL_DEPLOYMENT_NAME"
-          azd env set AZURE_CONTAINER_REGISTRY_ENDPOINT "$AZURE_CONTAINER_REGISTRY_ENDPOINT"
           azd provision --no-prompt
           azd deploy advanced-autopilot-agent --no-prompt
 
