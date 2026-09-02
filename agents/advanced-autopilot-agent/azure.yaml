@@ -5,6 +5,8 @@ requiredVersions:
   extensions:
     azure.ai.agents: '>=1.0.0-beta.13'
 name: advanced-autopilot-agent
+infra:
+  provider: microsoft.foundry
 services:
   ai-project:
     host: azure.ai.project

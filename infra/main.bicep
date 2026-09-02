@@ -521,6 +521,7 @@ output GITHUB_ACTIONS_RUNNER_VM_NAME string = stage40.outputs.vmName
 
 @description('Foundry project endpoint the seeded agents are created against.')
 output AZURE_AI_PROJECT_ENDPOINT string = stage15.outputs.projectEndpoint
+output AZURE_AI_PROJECT_ID string = stage15.outputs.projectId
 
 @description('Foundry (Cognitive Services) account name. Used by the predown hook to delete capability hosts before teardown.')
 output AZURE_AI_ACCOUNT_NAME string = stage13.outputs.aiAccountName
