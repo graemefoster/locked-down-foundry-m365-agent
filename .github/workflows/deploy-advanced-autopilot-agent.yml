@@ -70,6 +70,30 @@ jobs:
           azd provision --no-prompt
           azd deploy advanced-autopilot-agent --no-prompt
 
+      - name: Enable the scoped Microsoft 365 endpoint
+        shell: pwsh
+        run: |
+          $projectEndpoint = "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}".TrimEnd('/')
+          $agentUrl = "${projectEndpoint}/agents/advanced-autopilot-agent?api-version=2025-11-15-preview"
+          $body = @{
+            agent_endpoint = @{
+              protocol_configuration = @{
+                activity = @{
+                  enable_m365_public_endpoint = $true
+                }
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+
+          Invoke-RestMethod `
+            -Method Patch `
+            -Uri $agentUrl `
+            -Headers @{
+              Authorization  = "Bearer $env:PUBLISH_USER_TOKEN"
+              'Content-Type' = 'application/merge-patch+json'
+            } `
+            -Body $body | Out-Null
+
       - name: Grant the agent access to Foundry
         shell: pwsh
         run: |
