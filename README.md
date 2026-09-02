@@ -65,8 +65,6 @@ gh workflow run deploy-grf-2026-teams-agent.yml
 gh workflow run deploy-grf-2026-autopilot-agent.yml
 gh workflow run deploy-support-case-agent.yml
 gh workflow run deploy-support-case-agent-ghcpsdk.yml
-gh workflow run deploy-gfdiag10-fef839.yml
-gh workflow run deploy-gfdiag11.yml
 ```
 
 All workflows run on the private self-hosted runner and consume

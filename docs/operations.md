@@ -87,8 +87,6 @@ shared governance, and publishes it when Microsoft 365 metadata is present.
 | `grf-2026-autopilot-agent` | `deploy-grf-2026-autopilot-agent.yml` | Python source-zip deploy, governance, Autopilot publish |
 | `support-case-agent` | `deploy-support-case-agent.yml` | .NET source-zip deploy and governance |
 | `support-case-agent-ghcpsdk` | `deploy-support-case-agent-ghcpsdk.yml` | .NET source-zip deploy and governance |
-| `gfdiag10-fef839` | `deploy-gfdiag10-fef839.yml` | Python source-zip deploy, governance, Autopilot publish |
-| `gfdiag11` | `deploy-gfdiag11.yml` | Python source-zip deploy, governance, Autopilot publish |
 
 The workflows share a non-cancelling concurrency group, so only one agent lifecycle updates APIM,
 YARP, Easy Auth, or Teams audiences at a time. Re-run any agent lifecycle after changing
