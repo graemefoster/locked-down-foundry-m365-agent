@@ -39,7 +39,7 @@ services:
       useCase: digital_worker
       publish:
         publishScope: tenant
-        appVersion: 1.0.0
+        appVersion: 1.0.1
         agentDisplayName: advanced-autopilot-agent
         canRespondWithoutMention: true
         shortDescription: Advanced Autopilot digital worker adapted from the Foundry Autopilot sample.
