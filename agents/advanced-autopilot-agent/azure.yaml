@@ -35,6 +35,24 @@ services:
         - activity
       authorizationSchemes:
         - type: BotServiceRbac
+    activity:
+      useCase: digital_worker
+      publish:
+        publishScope: tenant
+        appVersion: 1.0.0
+        agentDisplayName: advanced-autopilot-agent
+        canRespondWithoutMention: true
+        shortDescription: Advanced Autopilot digital worker adapted from the Foundry Autopilot sample.
+        fullDescription: Advanced Autopilot digital worker using the Foundry Responses API and Microsoft 365 MCP tools.
+        developerName: Azure Developer
+        developerWebsiteUrl: https://azure.microsoft.com
+        privacyUrl: https://privacy.microsoft.com
+        termsOfUseUrl: https://www.microsoft.com/legal/terms-of-use
+        agenticUserTemplate:
+          id: digitalWorkerTemplate
+          file: agenticUserTemplateManifest.json
+          schemaVersion: 0.1.0-preview
+          communicationProtocol: activityProtocol
     env:
       ModelDeployment: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
       FOUNDRY_PROJECT_ENDPOINT: ${AZURE_AI_PROJECT_ENDPOINT}
