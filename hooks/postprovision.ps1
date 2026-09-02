@@ -66,6 +66,7 @@ if (-not $repoSlug) {
 # Repo variable name -> source env var (Bicep output). Same name unless noted.
 $repoVariableMap = [ordered]@{
   AZURE_SUBSCRIPTION_ID            = 'AZURE_SUBSCRIPTION_ID'
+  AZURE_LOCATION                   = 'AZURE_LOCATION'
   AZURE_RESOURCE_GROUP           = 'AZURE_RESOURCE_GROUP'
   AZURE_AI_ACCOUNT_NAME          = 'AZURE_AI_ACCOUNT_NAME'
   AZURE_AI_PROJECT_ENDPOINT      = 'AZURE_AI_PROJECT_ENDPOINT'

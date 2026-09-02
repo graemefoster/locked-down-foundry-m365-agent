@@ -514,6 +514,7 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
 
 @description('Resource group the deployment targets.')
 output AZURE_RESOURCE_GROUP string = resourceGroup().name
+output AZURE_LOCATION string = location
 
 @description('Name of the private Linux VM that hosts the in-VNet self-hosted GitHub Actions runner (also the predown hook\'s runner-deregistration target).')
 output GITHUB_ACTIONS_RUNNER_VM_NAME string = stage40.outputs.vmName

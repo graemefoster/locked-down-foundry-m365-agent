@@ -45,6 +45,7 @@ jobs:
         working-directory: agents/advanced-autopilot-agent
         env:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
           AZURE_AI_PROJECT_ID: ${{ vars.AZURE_AI_PROJECT_ID }}
           AZURE_AI_PROJECT_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT }}
           AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME }}
@@ -52,6 +53,7 @@ jobs:
         run: |
           azd env new github-actions --no-prompt
           azd env set AZURE_SUBSCRIPTION_ID "$AZURE_SUBSCRIPTION_ID"
+          azd env set AZURE_LOCATION "$AZURE_LOCATION"
           azd env set AZURE_AI_PROJECT_ID "$AZURE_AI_PROJECT_ID"
           azd env set AZURE_AI_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
           azd env set FOUNDRY_PROJECT_ENDPOINT "$AZURE_AI_PROJECT_ENDPOINT"
