@@ -14,8 +14,9 @@ Python port of the C# ``Program.cs`` + ``A365AgentApplication``. Wires up:
   C# ``builder.AddAgent<A365AgentApplication>``), with all four agentic
   notification handlers (Email, Word, Excel, PowerPoint) routed through the
   agent's ``handle_agent_notification_activity``.
-* The HTTP server endpoints ``/api/messages``, ``/``, ``/liveness``, and
-  ``/readiness`` to match the original C# minimal-API routes.
+* The HTTP server endpoints ``/activity/messages``, ``/api/messages``, ``/``,
+  ``/liveness``, and ``/readiness``. Foundry Activity protocol v2 forwards to
+  ``/activity/messages``; ``/api/messages`` remains available for v1 clients.
 """
 
 from __future__ import annotations
@@ -532,12 +533,12 @@ class GenericAgentHost:
             parent_context = propagate.extract(req.headers)
 
             with tracer.start_as_current_span(
-                "POST /api/messages",
+                f"POST {req.path}",
                 context=parent_context,
                 kind=SpanKind.SERVER,
                 attributes={
                     "http.request.method": req.method,
-                    "http.route": "/api/messages",
+                    "http.route": req.path,
                     "url.scheme": req.scheme,
                     "server.address": req.host,
                 },
@@ -549,7 +550,8 @@ class GenericAgentHost:
                     except UnicodeDecodeError:
                         body_repr = repr(body_bytes)
                     logger.info(
-                        "📥 /api/messages request | method=%s | content-type=%s | size=%d bytes | body=%s",
+                        "📥 %s request | method=%s | content-type=%s | size=%d bytes | body=%s",
+                        req.path,
                         req.method,
                         req.headers.get("Content-Type", ""),
                         len(body_bytes),
@@ -613,6 +615,8 @@ class GenericAgentHost:
         middlewares.append(anonymous_claims)
         app = Application(middlewares=middlewares)
 
+        app.router.add_post("/activity/messages", entry_point)
+        app.router.add_get("/activity/messages", lambda _: Response(status=200))
         app.router.add_post("/api/messages", entry_point)
         app.router.add_get("/api/messages", lambda _: Response(status=200))
         app.router.add_get("/", root)
@@ -641,7 +645,7 @@ class GenericAgentHost:
         print("=" * 80)
         print(f"🔒 Auth: {'Enabled' if auth_configuration else 'Anonymous'}")
         print(f"🚀 Server: {host_addr}:{port}")
-        print(f"📚 Endpoint: http://{host_addr}:{port}/api/messages")
+        print(f"📚 Endpoint: http://{host_addr}:{port}/activity/messages")
         print(f"❤️  Health: http://{host_addr}:{port}/api/health\n")
 
         try:
