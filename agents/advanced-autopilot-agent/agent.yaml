@@ -1,0 +1,25 @@
+object: agent.version
+name: advanced-autopilot-agent
+description: Advanced Autopilot Agent — hosted container-image M365 digital worker adapted from the Foundry autopilot Python sample, calling the Foundry Responses API with the Word/Mail/OneDrive-SharePoint/Teams/Excel/Calendar (and optional Azure DevOps) MCP tool bundle.
+digital_worker_type: m365
+definition:
+  kind: hosted
+  container_protocol_versions:
+    - protocol: activity
+      version: 2.0.0
+  cpu: "2"
+  memory: 4Gi
+  image: ""
+  environment_variables:
+    ModelDeployment: gpt-5-mini
+    FOUNDRY_PROJECT_ENDPOINT: ""
+    # Azure DevOps organization name (e.g. "contoso"). Leave blank to keep the
+    # optional azure-devops MCP server disabled; agent.py skips it gracefully
+    # when this is unset.
+    AZURE_DEVOPS_ORGANIZATION: ""
+agent_endpoint:
+  protocol_configuration:
+    activity:
+      enable_m365_public_endpoint: true
+  authorization_schemes:
+    - type: BotServiceRbac

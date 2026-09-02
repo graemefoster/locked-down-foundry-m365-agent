@@ -24,7 +24,6 @@ $agentName = $agent.name
 if ([string]::IsNullOrWhiteSpace($agentName)) {
   throw "Agent JSON has no 'name': $AgentJsonPath"
 }
-
 Write-Host "Building the image for '$agentName'."
 
 $loginServer = az acr show --name $AcrName --query loginServer --output tsv

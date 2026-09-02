@@ -14,6 +14,9 @@
 !agents/**/network.json
 !agents/**/teams.json
 !agents/**/autopilot.json
+# ...and the MCP tool-server bundle consumed directly by hosted agent application
+# source (loaded at runtime by agent.py, not a compiled ARM artifact).
+!agents/**/ToolingManifest.json
 # ...and the MCP gateway config + per-agent rate-limit config (source of truth compiled into APIM).
 !mcp/*.json
 # ...and the App Service source that azd deploys as CODE (these are real app config/manifests,

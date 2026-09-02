@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Azure/azure-dev/main/schemas/v1.0/azure.yaml.json
+
+requiredVersions:
+  azd: '>=1.32.0'
+  extensions:
+    azure.ai.agents: '>=1.0.0-beta.13'
+name: support-case-agent
+services:
+  ai-project:
+    host: azure.ai.project
+    endpoint: ${AZURE_AI_PROJECT_ENDPOINT}
+  support-case-agent:
+    host: azure.ai.agent
+    project: ./support-case-agent.Agent
+    language: csharp
+    codeConfiguration:
+      runtime: dotnet_10
+      entryPoint: support-case-agent.Agent.dll
+      dependencyResolution: bundled
+    uses:
+      - ai-project
+    kind: hosted
+    name: support-case-agent
+    description: Hosted support-case agent.
+    protocols:
+      - protocol: responses
+        version: 2.0.0
+    env:
+      AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
+      OTEL_ENABLE_SENSITIVE_DATA: "true"
+    container:
+      resources:
+        cpu: '0.5'
+        memory: 1Gi
