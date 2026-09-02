@@ -37,8 +37,17 @@ jobs:
             throw "Could not acquire the delegated user token."
           }
 
+          $managementToken = azd auth token `
+            --tenant-id "${{ vars.TEAMS_TENANT_ID }}" `
+            --scope https://management.azure.com/.default
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($managementToken)) {
+            throw "Could not acquire the delegated Azure management token."
+          }
+
           Write-Host "::add-mask::$token"
+          Write-Host "::add-mask::$managementToken"
           "PUBLISH_USER_TOKEN=$token" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MANAGEMENT_USER_TOKEN=$managementToken" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Deploy the agent with azd
         shell: bash
@@ -60,6 +69,56 @@ jobs:
           azd env set AZURE_AI_MODEL_DEPLOYMENT_NAME "$AZURE_AI_MODEL_DEPLOYMENT_NAME"
           azd provision --no-prompt
           azd deploy advanced-autopilot-agent --no-prompt
+
+      - name: Grant the agent access to Foundry
+        shell: pwsh
+        run: |
+          $projectEndpoint = "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}".TrimEnd('/')
+          $agentUrl = "${projectEndpoint}/agents/advanced-autopilot-agent?api-version=2025-11-15-preview"
+          $agent = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers @{
+            Authorization = "Bearer $env:PUBLISH_USER_TOKEN"
+            Accept        = 'application/json'
+          }
+
+          $principalId = $agent.instance_identity.principal_id
+          if ([string]::IsNullOrWhiteSpace($principalId)) {
+            throw "The deployed agent has no instance_identity.principal_id."
+          }
+
+          $accountScope = "${{ vars.AZURE_AI_PROJECT_ID }}" -replace '/projects/[^/]+$', ''
+          $roleDefinitionId = "${accountScope}/providers/Microsoft.Authorization/roleDefinitions/a97b65f3-24c7-4388-baec-2e87135dc908"
+          $headers = @{
+            Authorization = "Bearer $env:MANAGEMENT_USER_TOKEN"
+            Accept        = 'application/json'
+          }
+          $listUrl = "https://management.azure.com${accountScope}/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&%24filter=atScope()"
+          $assignments = Invoke-RestMethod -Method Get -Uri $listUrl -Headers $headers
+          $existing = @($assignments.value | Where-Object {
+            $_.properties.principalId -eq $principalId -and
+            $_.properties.roleDefinitionId -eq $roleDefinitionId
+          })
+
+          if ($existing.Count -eq 0) {
+            $assignmentId = [guid]::NewGuid().ToString()
+            $assignmentUrl = "https://management.azure.com${accountScope}/providers/Microsoft.Authorization/roleAssignments/${assignmentId}?api-version=2022-04-01"
+            $body = @{
+              properties = @{
+                principalId      = $principalId
+                principalType    = 'ServicePrincipal'
+                roleDefinitionId = $roleDefinitionId
+              }
+            } | ConvertTo-Json -Depth 4
+
+            Invoke-RestMethod `
+              -Method Put `
+              -Uri $assignmentUrl `
+              -Headers ($headers + @{ 'Content-Type' = 'application/json' }) `
+              -Body $body | Out-Null
+            Write-Host "Granted Cognitive Services User to agent identity '$principalId'."
+          }
+          else {
+            Write-Host "Agent identity '$principalId' already has Cognitive Services User."
+          }
 
       - name: Sign in with the VM managed identity
         shell: pwsh
