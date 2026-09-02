@@ -166,6 +166,11 @@ It creates or updates the Azure Bot Service registration and publishes the Micro
 The activity protocol and its authorization schemes are declared in the agent's `agent.yaml`
 (`agent_endpoint`) and applied by the deploy step, so publishing no longer patches them.
 
+The bot's messaging endpoint is the public YARP route (`/teams/<agentName>`), not the Foundry
+activity URL, so Foundry stays fully private. For the two publishing models (the front-door path
+this repository uses and the `enable_m365_public_endpoint` alternative), see
+[docs/publish-m365-vnet.md](publish-m365-vnet.md).
+
 The Autopilot lifecycle workflows acquire one delegated token, deploy while the delegated user is
 active, switch Azure CLI to the VM managed identity for governance, then pass the saved delegated
 token to `scripts/publish-autopilot.ps1`.

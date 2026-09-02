@@ -44,20 +44,14 @@ param firewallPolicyName string
 @description('Deployment region, used to build the region-specific APIM live-diagnostics telemetry FQDN.')
 param location string = resourceGroup().location
 
-@description('Agent subnet CIDR. Allowed to reach the APIM inbound private endpoint on 443.')
-param agentSubnetCidr string
+@description('Complete VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
-@description('CIDR of the gateway spoke pe-subnet (APIM inbound PE). The agent subnet is allowed to reach this on 443.')
-param modelGatewayPeSubnetCidr string
-
-@description('CIDR of the gateway spoke apim-subnet (APIM v2 outbound VNet integration). Allowed platform egress on 443, and source of the Teams forward to the Foundry PE.')
-param modelGatewayApimSubnetCidr string
-
-@description('CIDR of the primary Foundry spoke pe-subnet (Foundry account PE). The APIM outbound subnet is allowed to reach this on 443 for the Teams inbound path.')
-param foundryPeSubnetCidr string
-
-@description('CIDR of the App Service spoke pe-subnet (MCP web app PE). The APIM outbound subnet is allowed to reach this on 443 for the MCP server gateway path.')
-param appServicePeSubnetCidr string
+var agentSubnetCidr = addressPlan.foundry.agentSubnetCidr
+var modelGatewayPeSubnetCidr = addressPlan.modelGateway.peSubnetCidr
+var modelGatewayApimSubnetCidr = addressPlan.modelGateway.apimSubnetCidr
+var foundryPeSubnetCidr = addressPlan.foundry.peSubnetCidr
+var appServicePeSubnetCidr = addressPlan.appService.peSubnetCidr
 
 // Service tags APIM v2 may reach for platform dependencies / MI token acquisition
 // when its outbound-integration subnet force-tunnels 0.0.0.0/0 through the firewall.

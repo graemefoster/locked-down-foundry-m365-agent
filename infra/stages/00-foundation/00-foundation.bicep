@@ -21,14 +21,8 @@ param appServicePlanName string
 param firewallPolicyName string
 param storageSkuName string
 
-// Deterministic addressing scheme (computed once in main, threaded here + to stage 30).
-param agentSubnetCidr string
-param appServiceDelegatedSubnetCidr string
-param appServicePeSubnetCidr string
-param modelGatewayPeSubnetCidr string
-param modelGatewayApimSubnetCidr string
-param modelGatewaySpokeAddressPrefix string
-param firewallUnrestrictedSourceCidrs array
+// Complete deterministic addressing scheme computed by the resource-free address-plan module.
+param addressPlan object
 
 module observability 'observability.bicep' = {
   name: 'stage00-observability-${uniqueSuffix}'
@@ -50,13 +44,7 @@ module networking 'networking.bicep' = {
     appServicePlanName: appServicePlanName
     firewallPolicyName: firewallPolicyName
     storageSkuName: storageSkuName
-    agentSubnetCidr: agentSubnetCidr
-    appServiceDelegatedSubnetCidr: appServiceDelegatedSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
-    modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
-    firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
+    addressPlan: addressPlan
     logAnalyticsId: observability.outputs.logAnalyticsId
     logAnalyticsCustomerId: observability.outputs.logAnalyticsCustomerId
   }

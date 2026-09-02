@@ -15,14 +15,8 @@ param appServicePlanName string
 param firewallPolicyName string
 param storageSkuName string
 
-// Deterministic addressing scheme (from main).
-param agentSubnetCidr string
-param appServiceDelegatedSubnetCidr string
-param appServicePeSubnetCidr string
-param modelGatewayPeSubnetCidr string
-param modelGatewayApimSubnetCidr string
-param modelGatewaySpokeAddressPrefix string
-param firewallUnrestrictedSourceCidrs array
+// Complete deterministic addressing scheme (from the root address-plan module).
+param addressPlan object
 
 // From the observability slice.
 param logAnalyticsId string
@@ -34,6 +28,7 @@ module hubNetwork './network/network-agent-vnet.bicep' = {
   params: {
     location: location
     vnetName: vnetName
+    addressPlan: addressPlan.hub
   }
 }
 
@@ -50,9 +45,7 @@ module firewall './network/firewall.bicep' = {
     location: location
     logAnalyticsId: logAnalyticsId
     yarpProxyFqdn: 'yarp-${appServicePlanName}.azurewebsites.net'
-    agentSubnetCidr: agentSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
-    unrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
+    addressPlan: addressPlan
   }
 }
 
@@ -65,16 +58,17 @@ module foundrySpokeVnet './network/foundry-spoke-vnet.bicep' = {
   params: {
     location: location
     vnetName: '${vnetName}-foundry-spoke'
+    addressPlan: addressPlan.foundry
     agentSubnetName: agentSubnetName
     peSubnetName: peSubnetName
     firewallPrivateIp: firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
     agentInboundAllowedCidrs: [
-      appServiceDelegatedSubnetCidr
+      addressPlan.appService.delegatedSubnetCidr
     ]
-    modelGatewayPeCidr: modelGatewayPeSubnetCidr
-    appServicePeCidr: appServicePeSubnetCidr
-    apimSubnetCidr: modelGatewayApimSubnetCidr
+    modelGatewayPeCidr: addressPlan.modelGateway.peSubnetCidr
+    appServicePeCidr: addressPlan.appService.peSubnetCidr
+    apimSubnetCidr: addressPlan.modelGateway.apimSubnetCidr
   }
 }
 
@@ -85,6 +79,7 @@ module appServiceSpokeVnet './network/appservice-spoke-vnet.bicep' = {
     // TEMPORARY: East US App Service allocations are unavailable for this subscription.
     location: 'australiaeast'
     vnetName: '${vnetName}-appservice-spoke'
+    addressPlan: addressPlan.appService
     firewallPrivateIp: firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
   }
@@ -197,7 +192,7 @@ module modelGatewaySpokeVnet './network/model-gateway-spoke-vnet.bicep' = {
   params: {
     location: location
     vnetName: '${vnetName}-model-gateway-spoke'
-    vnetAddressPrefix: modelGatewaySpokeAddressPrefix
+    addressPlan: addressPlan.modelGateway
     firewallPrivateIp: firewallPrivateIp
     dnsServerIp: hubNetwork.outputs.dnsResolverInboundIp
   }

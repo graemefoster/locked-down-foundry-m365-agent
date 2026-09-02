@@ -28,8 +28,8 @@ param location string
 @description('The name of the model-gateway spoke virtual network')
 param vnetName string = 'model-gateway-spoke-vnet'
 
-@description('Address space for the model-gateway spoke VNet')
-param vnetAddressPrefix string = '10.3.0.0/16'
+@description('Model-gateway VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
 @description('The name of the APIM VNet-integration subnet')
 param apimSubnetName string = 'apim-subnet'
@@ -42,9 +42,6 @@ param firewallPrivateIp string
 
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
-
-var apimSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
-var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 
 // NSG for the APIM v2 outbound VNet-integration subnet. APIM v2 requires
 // outbound access to Azure Storage and Azure Key Vault (platform dependencies).
@@ -112,7 +109,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        vnetAddressPrefix
+        addressPlan.vnetAddressPrefix
       ]
     }
     dhcpOptions: {
@@ -124,7 +121,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       {
         name: apimSubnetName
         properties: {
-          addressPrefix: apimSubnet
+          addressPrefix: addressPlan.apimSubnetCidr
           delegations: [
             {
               name: 'apim-vnet-integration'
@@ -142,7 +139,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       {
         name: peSubnetName
         properties: {
-          addressPrefix: peSubnet
+          addressPrefix: addressPlan.peSubnetCidr
           // Enabled so the UDR below is honored for private-endpoint traffic —
           // required to keep agent<->APIM routing symmetric through the firewall.
           privateEndpointNetworkPolicies: 'Enabled'
@@ -156,8 +153,8 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
 output virtualNetworkName string = virtualNetwork.name
 output virtualNetworkId string = virtualNetwork.id
 output apimSubnetId string = '${virtualNetwork.id}/subnets/${apimSubnetName}'
-output apimSubnetCidr string = apimSubnet
+output apimSubnetCidr string = addressPlan.apimSubnetCidr
 output peSubnetId string = '${virtualNetwork.id}/subnets/${peSubnetName}'
 output peSubnetName string = peSubnetName
-output peSubnetCidr string = peSubnet
+output peSubnetCidr string = addressPlan.peSubnetCidr
 output routeTableName string = routeTable.name

@@ -35,6 +35,7 @@ Foundry Spoke: AI Services, Storage, CosmosDB, AI Search, VM/Bastion
 
   //hosted agents:
   'northcentralus'
+  'centralus'
 ])
 param location string = any(resourceGroup().location)
 
@@ -137,6 +138,18 @@ param displayName string = 'network secured agent project'
 @description('Virtual Network base name')
 param vnetName string = 'agent-vnet'
 
+@description('Hub VNet address space.')
+param hubVnetAddressPrefix string = '10.0.0.0/22'
+
+@description('Foundry spoke VNet address space.')
+param foundrySpokeAddressPrefix string = '10.0.16.0/22'
+
+@description('App Service spoke VNet address space.')
+param appServiceSpokeAddressPrefix string = '10.1.0.0/16'
+
+@description('Model-gateway spoke VNet address space.')
+param modelGatewaySpokeAddressPrefix string = '10.3.0.0/16'
+
 @description('The name of Agents Subnet to create for agents')
 param agentSubnetName string = 'agent-subnet'
 
@@ -220,37 +233,19 @@ var acrName = toLower('${uniqueSuffix}acr')
 // rules) as params, so neither stage recomputes — and there is no spoke<->firewall cycle.
 var firewallPolicyName = '${uniqueSuffix}fwallpol'
 
-// CIDRs allowed to call the agent ingress (/invoke path). The YARP proxy is an
-// App Service VNet-integrated into the App Service spoke's delegated subnet, so
-// its outbound calls to the agent originate from that /24. Kept tight — only the
-// delegated subnet, not the whole App Service spoke VNet. Derived from the
-// App Service spoke default address space (10.1.0.0/16, subnet 0).
-var appServiceSpokeAddressPrefix = '10.1.0.0/16'
-var appServiceDelegatedSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24, 0)
-// App Service spoke PE subnet — hosts the MCP web app inbound private endpoint. The agent
-// subnet is allowed to reach it (NSG + firewall) and its return path is force-tunnelled back
-// through the firewall (appservice-spoke-vnet.bicep pe-subnet UDR).
-var appServicePeSubnetCidr = cidrSubnet(appServiceSpokeAddressPrefix, 24, 1)
+// Resource-free address plan: one source of truth for every VNet, subnet, NSG, route, and
+// firewall rule. Calculating the CIDRs before the network resources avoids a circular
+// dependency between the spoke UDRs and the firewall private IP.
+module networkAddressPlan 'stages/00-foundation/network/address-plan.bicep' = {
+  name: 'network-address-plan-${uniqueSuffix}'
+  params: {
+    hubVnetAddressPrefix: hubVnetAddressPrefix
+    foundrySpokeAddressPrefix: foundrySpokeAddressPrefix
+    appServiceSpokeAddressPrefix: appServiceSpokeAddressPrefix
+    modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
+  }
+}
 
-// Foundry spoke address space (module default). Agent subnet is locked down at the
-// firewall; the dev VM subnet stays unrestricted alongside the App Service spoke.
-var foundrySpokeAddressPrefix = '10.2.0.0/16'
-var agentSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 0)
-var foundryPeSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 1)
-var vmSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 2)
-var deploymentScriptsSubnetCidr = cidrSubnet(foundrySpokeAddressPrefix, 24, 3)
-var firewallUnrestrictedSourceCidrs = [
-  vmSubnetCidr
-  appServiceSpokeAddressPrefix
-  deploymentScriptsSubnetCidr
-]
-
-// Model-gateway spoke (always deployed). CIDRs are deterministic so they can be passed to
-// the firewall without depending on the spoke VNet module (avoids a dependency cycle:
-// the spoke VNet needs the firewall private IP, the firewall needs these CIDRs).
-var modelGatewaySpokeAddressPrefix = '10.3.0.0/16'
-var modelGatewayApimSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 0)
-var modelGatewayPeSubnetCidr = cidrSubnet(modelGatewaySpokeAddressPrefix, 24, 1)
 var providerAccountName = toLower('gwprovider${uniqueSuffix}')
 var apimName = 'apim-${uniqueSuffix}-modelgw'
 // APIM Standard v2 gateway URL is deterministic from the name. Derived (not read from the
@@ -276,13 +271,7 @@ module stage00 'stages/00-foundation/00-foundation.bicep' = {
     appServicePlanName: appServicePlanName
     firewallPolicyName: firewallPolicyName
     storageSkuName: storageSkuName
-    agentSubnetCidr: agentSubnetCidr
-    appServiceDelegatedSubnetCidr: appServiceDelegatedSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
-    modelGatewaySpokeAddressPrefix: modelGatewaySpokeAddressPrefix
-    firewallUnrestrictedSourceCidrs: firewallUnrestrictedSourceCidrs
+    addressPlan: networkAddressPlan.outputs.addressPlan
   }
 }
 
@@ -475,11 +464,7 @@ module stage30 'stages/30-governance/30-governance.bicep' = {
     modelGatewayConnectionName: modelGatewayConnectionName
     gatewayModelName: gatewayModelName
     firewallPolicyName: firewallPolicyName
-    agentSubnetCidr: agentSubnetCidr
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
-    foundryPeSubnetCidr: foundryPeSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
+    addressPlan: networkAddressPlan.outputs.addressPlan
     teamsBotAppIds: teamsBotAppIds
     enableRaiGuardrailPolicy: enableRaiGuardrailPolicy
     enableNonCompliantModelDemo: enableNonCompliantModelDemo

@@ -4,17 +4,14 @@ param location string
 @description('The name of the App Service spoke virtual network')
 param vnetName string = 'appservice-spoke-vnet'
 
-@description('Address space for the App Service Spoke VNet')
-param vnetAddressPrefix string = '10.1.0.0/16'
+@description('App Service VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
 @description('Next hop IP address for the Azure Firewall (UDR next hop for spoke egress).')
 param firewallPrivateIp string
 
 @description('Custom DNS server IP (DNS Resolver inbound endpoint)')
 param dnsServerIp string
-
-var appServiceDelegatedSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
-var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
 
 resource routeTable 'Microsoft.Network/routeTables@2022-11-01' = {
   name: '${vnetName}-rt'
@@ -39,7 +36,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        vnetAddressPrefix
+        addressPlan.vnetAddressPrefix
       ]
     }
     dhcpOptions: {
@@ -51,7 +48,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       {
         name: 'AppServiceDelegated'
         properties: {
-          addressPrefix: appServiceDelegatedSubnet
+          addressPrefix: addressPlan.delegatedSubnetCidr
           delegations: [
             {
               name: 'AppServiceDelegation'
@@ -66,7 +63,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
       {
         name: 'pe-subnet'
         properties: {
-          addressPrefix: peSubnet
+          addressPrefix: addressPlan.peSubnetCidr
         }
       }
     ]

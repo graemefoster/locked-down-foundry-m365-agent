@@ -8,23 +8,16 @@ param firewallManagementSubnetId string
 param logAnalyticsId string
 param yarpProxyFqdn string
 
-@description('Agent subnet CIDR. Egress from this subnet is locked down to an explicit service-tag allow-list on 443.')
-param agentSubnetCidr string
+@description('Complete VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
-@description('''
-CIDR of the App Service spoke private-endpoint subnet (MCP web app inbound PE). The agent
-subnet force-tunnels its 0.0.0.0/0 egress through this firewall, so an explicit network rule
-is required for the agent to reach the MCP tool PE. Return routing is symmetric via a UDR on
-the App Service pe-subnet (see appservice-spoke-vnet.bicep).
-''')
-param appServicePeSubnetCidr string
-
-@description('''
-Source CIDRs that remain UNRESTRICTED at the firewall (dev VM subnet + App Service
-spoke). Per the design, only the agent subnet is locked down; the dev VM and the
-App Service spoke keep general outbound so day-to-day work is unaffected.
-''')
-param unrestrictedSourceCidrs array
+var agentSubnetCidr = addressPlan.foundry.agentSubnetCidr
+var appServicePeSubnetCidr = addressPlan.appService.peSubnetCidr
+var unrestrictedSourceCidrs = [
+  addressPlan.foundry.vmSubnetCidr
+  addressPlan.appService.vnetAddressPrefix
+  addressPlan.foundry.deploymentScriptsSubnetCidr
+]
 
 // The optional model-gateway rule collection group lives in its own module
 // (model-gateway/model-gateway-firewall-rules.bicep) so main.bicep can sequence

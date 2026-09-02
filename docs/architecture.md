@@ -42,6 +42,12 @@ The network is divided into a hub and workload spokes:
 There is no direct spoke-to-spoke trust path. User-defined routes keep the firewall as the
 network choke point.
 
+All address spaces are configured in `infra/main.bicep` and expanded by the resource-free
+`infra/stages/00-foundation/network/address-plan.bicep` module. Its single `addressPlan` output
+contains every hub and spoke VNet/subnet CIDR. VNet definitions, NSGs, route tables, firewall
+rules, and cross-spoke governance consume that same object; network modules do not independently
+calculate or default CIDRs.
+
 ## Platform components
 
 - **Primary Foundry account and project** host the deployed agents.
@@ -113,6 +119,10 @@ network.
 The Azure Bot Service resource is registration and channel configuration; it is not a data-path
 hop. APIM validates the Bot Framework token, configured bot audience, issuer, and deployment
 tenant before forwarding the original request to Foundry.
+
+This front-door path keeps Foundry fully private. For how it compares to the
+`enable_m365_public_endpoint` scoped-exception model, see
+[publish-m365-vnet.md](publish-m365-vnet.md).
 
 ### Foundry agent API
 

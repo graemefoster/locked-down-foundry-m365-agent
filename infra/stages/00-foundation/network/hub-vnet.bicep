@@ -4,12 +4,8 @@ param location string
 @description('The name of the hub virtual network')
 param vnetName string = 'hub-vnet'
 
-@description('Address space for the Hub VNet')
-param vnetAddressPrefix string = '10.0.0.0/16'
-
-var firewallSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
-var firewallMgmtSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
-var dnsResolverInboundSubnet = cidrSubnet(vnetAddressPrefix, 28, 32) // 10.0.2.0/28
+@description('Hub VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
 resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   name: vnetName
@@ -17,26 +13,26 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        vnetAddressPrefix
+        addressPlan.vnetAddressPrefix
       ]
     }
     subnets: [
       {
         name: 'AzureFirewallSubnet'
         properties: {
-          addressPrefix: firewallSubnet
+          addressPrefix: addressPlan.firewallSubnetCidr
         }
       }
       {
         name: 'AzureFirewallManagementSubnet'
         properties: {
-          addressPrefix: firewallMgmtSubnet
+          addressPrefix: addressPlan.firewallManagementSubnetCidr
         }
       }
       {
         name: 'DnsResolverInbound'
         properties: {
-          addressPrefix: dnsResolverInboundSubnet
+          addressPrefix: addressPlan.dnsResolverInboundSubnetCidr
           delegations: [
             {
               name: 'Microsoft.Network.dnsResolvers'
@@ -59,4 +55,4 @@ output firewallManagementSubnetId string = filter(
   subnet => subnet.name == 'AzureFirewallManagementSubnet'
 )[0].id
 output dnsResolverInboundSubnetId string = '${virtualNetwork.id}/subnets/DnsResolverInbound'
-output dnsResolverInboundStaticIp string = cidrHost(dnsResolverInboundSubnet, 4)
+output dnsResolverInboundStaticIp string = cidrHost(addressPlan.dnsResolverInboundSubnetCidr, 4)

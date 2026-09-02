@@ -98,4 +98,5 @@ See [docs/configuration.md](docs/configuration.md) for examples and validation r
 - [Architecture](docs/architecture.md)
 - [Operations](docs/operations.md)
 - [Configuration](docs/configuration.md)
+- [Publish to Microsoft 365 and Teams](docs/publish-m365-vnet.md)
 - [Troubleshooting](docs/troubleshooting.md)

@@ -11,8 +11,8 @@ param location string
 @description('Base name prefix for the virtual networks')
 param vnetName string
 
-// Hub address space
-var hubAddressPrefix = '10.0.0.0/16'
+@description('Hub VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
 // Deploy Hub VNet (firewall + DNS resolver subnets)
 module hubVnet 'hub-vnet.bicep' = {
@@ -20,7 +20,7 @@ module hubVnet 'hub-vnet.bicep' = {
   params: {
     location: location
     vnetName: '${vnetName}-hub'
-    vnetAddressPrefix: hubAddressPrefix
+    addressPlan: addressPlan
   }
 }
 

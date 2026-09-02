@@ -4,8 +4,8 @@ param location string
 @description('The name of the Foundry spoke virtual network')
 param vnetName string = 'foundry-spoke-vnet'
 
-@description('Address space for the Foundry Spoke VNet')
-param vnetAddressPrefix string = '10.2.0.0/16'
+@description('Foundry VNet and subnet CIDRs from the shared address plan.')
+param addressPlan object
 
 @description('The name of the Agents Subnet')
 param agentSubnetName string = 'agent-subnet'
@@ -53,15 +53,15 @@ where APIM (in the gateway spoke) forwards to the primary Foundry account privat
 ''')
 param apimSubnetCidr string = ''
 
-var agentSubnet = cidrSubnet(vnetAddressPrefix, 24, 0)
-var peSubnet = cidrSubnet(vnetAddressPrefix, 24, 1)
-var vmSubnet = cidrSubnet(vnetAddressPrefix, 24, 2)
-var deploymentScriptsSubnet = cidrSubnet(vnetAddressPrefix, 24, 3)
+var agentSubnet = addressPlan.agentSubnetCidr
+var peSubnet = addressPlan.peSubnetCidr
+var vmSubnet = addressPlan.vmSubnetCidr
+var deploymentScriptsSubnet = addressPlan.deploymentScriptsSubnetCidr
 // vmSubnet accepts RDP/SSH only from this dedicated AzureBastionSubnet CIDR.
 // The AzureBastionSubnet's OWN NSG, however, must use the required Bastion
 // service-tag rules (VirtualNetwork / Internet:80 / AzureCloud); scoping those
 // to subnet CIDRs fails Azure Bastion's NetworkSecurityGroupNotCompliant check.
-var bastionSubnet = cidrSubnet(vnetAddressPrefix, 24, 4)
+var bastionSubnet = addressPlan.bastionSubnetCidr
 
 // Azure DNS "wire server" virtual IP. ACA requires DNS to this IP and it must
 // never be denied. See https://learn.microsoft.com/azure/container-apps/firewall-integration
@@ -678,7 +678,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2024-05-01' = {
   properties: {
     addressSpace: {
       addressPrefixes: [
-        vnetAddressPrefix
+        addressPlan.vnetAddressPrefix
       ]
     }
     dhcpOptions: {

@@ -46,13 +46,9 @@ param gatewayCallerAppId string
 param modelGatewayConnectionName string
 param gatewayModelName string
 
-// ---- firewall (cross-spoke) rule CIDRs ----
+// ---- complete shared address plan ----
 param firewallPolicyName string
-param agentSubnetCidr string
-param modelGatewayPeSubnetCidr string
-param modelGatewayApimSubnetCidr string
-param foundryPeSubnetCidr string
-param appServicePeSubnetCidr string
+param addressPlan object
 
 // ---- Teams / M365 publish ----
 @description('Bot Microsoft App IDs allowed as APIM validate-jwt audiences on the Teams API. Empty = validate the Bot Framework issuer only.')
@@ -229,11 +225,7 @@ module gatewayFirewallRules './model-gateway/gateway-firewall-rules.bicep' = {
   params: {
     firewallPolicyName: firewallPolicyName
     location: location
-    agentSubnetCidr: agentSubnetCidr
-    modelGatewayPeSubnetCidr: modelGatewayPeSubnetCidr
-    modelGatewayApimSubnetCidr: modelGatewayApimSubnetCidr
-    foundryPeSubnetCidr: foundryPeSubnetCidr
-    appServicePeSubnetCidr: appServicePeSubnetCidr
+    addressPlan: addressPlan
   }
 }
 
