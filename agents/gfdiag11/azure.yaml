@@ -10,7 +10,7 @@ infra:
 services:
   ai-project:
     host: azure.ai.project
-    endpoint: ${AZURE_AI_PROJECT_ENDPOINT}
+    endpoint: https://aiservicesfrce.services.ai.azure.com/api/projects/project-frce
   gfdiag11:
     host: azure.ai.agent
     project: ../grf-2026-autopilot-agent/simple-autopilot-agent

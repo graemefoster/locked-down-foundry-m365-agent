@@ -10,7 +10,7 @@ infra:
 services:
   ai-project:
     host: azure.ai.project
-    endpoint: ${AZURE_AI_PROJECT_ENDPOINT}
+    endpoint: https://aiservicesfrce.services.ai.azure.com/api/projects/project-frce
   advanced-autopilot-agent:
     host: azure.ai.agent
     project: ./hello_world_a365_agent
