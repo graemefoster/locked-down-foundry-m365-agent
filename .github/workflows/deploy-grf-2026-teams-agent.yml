@@ -1,0 +1,26 @@
+name: Deploy grf-2026-teams-agent
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/_deploy-agent.yml
+    with:
+      agent-manifest: agents/grf-2026-teams-agent/agent.yaml
+
+  governance:
+    needs: deploy
+    uses: ./.github/workflows/deploy-agent-network.yml
+
+  publish:
+    needs: governance
+    uses: ./.github/workflows/publish-teams.yml
+    with:
+      agent-directory: agents/grf-2026-teams-agent

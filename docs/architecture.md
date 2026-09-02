@@ -181,8 +181,9 @@ These properties are intentional and should not be weakened:
 | Concern | Supported owner |
 |---|---|
 | Azure resources and MCP/YARP application code | `azd up`, `azd provision`, and `azd deploy` |
-| Prompt agents | `_deploy-agent.yml` and `scripts/deploy-prompt-agent.ps1` |
-| Source-zip agents | `_deploy-code-agent.yml` and `scripts/deploy-code-agent.ps1` |
-| Container-image agents | `_deploy-hosted-agent.yml` and `scripts/deploy-image-agent.ps1` |
-| Teams publishing | `publish-teams.yml` and `scripts/publish-teams.ps1` |
-| Runtime governance | `deploy-agent-network.yml` and its four explicit `apply-*.ps1` steps |
+| Agent lifecycle | One dispatchable `deploy-<agent>.yml` workflow per agent |
+| Prompt deployment | `_deploy-agent.yml` and `scripts/deploy-prompt-agent.ps1` |
+| Source-zip deployment | `_deploy-code-agent.yml` and `scripts/deploy-code-agent.ps1` |
+| Teams publishing | Internal `publish-teams.yml` and `scripts/publish-teams.ps1` |
+| Autopilot publishing | Per-agent lifecycle workflow and `scripts/publish-autopilot.ps1` |
+| Runtime governance | Internal `deploy-agent-network.yml` or the same four explicit `apply-*.ps1` steps in a hosted M365 lifecycle |

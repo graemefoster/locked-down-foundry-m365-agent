@@ -1,7 +1,7 @@
 name: Apply agent network governance
 
 on:
-  workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read

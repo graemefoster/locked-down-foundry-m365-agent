@@ -1,0 +1,114 @@
+name: Deploy grf-2026-autopilot-agent
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-lifecycle
+  cancel-in-progress: false
+
+jobs:
+  deploy-govern-publish:
+    if: github.repository == 'graemefoster/locked-down-foundry-m365-agent'
+    runs-on: [self-hosted, vnet, foundry-private]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Create the Python source zip
+        shell: pwsh
+        run: |
+          $context = "agents/grf-2026-autopilot-agent/simple-autopilot-agent"
+          if (-not (Test-Path -LiteralPath (Join-Path $context "main.py"))) {
+            throw "Python source does not contain 'main.py'."
+          }
+          git archive --format=zip --output=agent.zip "HEAD:$context"
+          if ($LASTEXITCODE -ne 0) { throw "Could not create the Python source zip." }
+
+      - name: Normalize the manifest
+        shell: bash
+        run: yq -o=json '.' "agents/grf-2026-autopilot-agent/agent.yaml" > agent.json
+
+      - name: Sign in and acquire the delegated user token
+        shell: pwsh
+        run: |
+          az login `
+            --use-device-code `
+            --tenant "${{ vars.TEAMS_TENANT_ID }}" `
+            --output none
+          if ($LASTEXITCODE -ne 0) { throw "Interactive az login failed." }
+
+          $who = az ad signed-in-user show --query userPrincipalName --output tsv
+          Write-Host "Deploying and publishing as user: $who"
+
+          $token = az account get-access-token `
+            --resource https://ai.azure.com `
+            --query accessToken `
+            --output tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+            throw "Could not acquire the delegated user token."
+          }
+
+          Write-Host "::add-mask::$token"
+          "PUBLISH_USER_TOKEN=$token" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Deploy the source-zip agent
+        shell: pwsh
+        run: |
+          ./scripts/deploy-code-agent.ps1 `
+            -AgentJsonPath agent.json `
+            -ZipPath agent.zip `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}"
+
+      - name: Sign in with the VM managed identity
+        shell: pwsh
+        run: az login --identity --output none
+
+      - name: Apply Foundry token limits
+        shell: pwsh
+        run: |
+          ./scripts/apply-token-limits.ps1 `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.FOUNDRY_AGENTS_APIM_NAME }}" `
+            -ApiName "${{ vars.FOUNDRY_AGENTS_API_NAME }}" `
+            -FoundryAccountName "${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}" `
+            -CallerAudience "${{ vars.FOUNDRY_AGENTS_AUDIENCE }}"
+
+      - name: Apply YARP routes
+        shell: pwsh
+        run: |
+          ./scripts/apply-yarp-routes.ps1 `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -YarpWebAppName "${{ vars.TEAMS_YARP_WEBAPP_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}" `
+            -TeamsApiName "${{ vars.TEAMS_APIM_API_NAME }}"
+
+      - name: Apply the MCP allowlist
+        shell: pwsh
+        run: |
+          ./scripts/apply-mcp-policy.ps1 `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.MCP_COMPLIANCE_APIM_NAME }}" `
+            -McpWebAppName "${{ vars.MCP_WEBAPP_NAME }}" `
+            -McpAudience "${{ vars.MCP_COMPLIANCE_AUDIENCE }}"
+
+      - name: Apply Teams bot audiences
+        shell: pwsh
+        run: |
+          ./scripts/apply-teams-audiences.ps1 `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
+            -ApimName "${{ vars.TEAMS_APIM_NAME }}" `
+            -FoundryAccountName "${{ vars.FOUNDRY_AGENTS_ACCOUNT_NAME }}" `
+            -FoundryApiPath "${{ vars.FOUNDRY_AGENTS_API_PATH }}"
+
+      - name: Publish the Autopilot
+        shell: pwsh
+        run: |
+          ./scripts/publish-autopilot.ps1 `
+            -AgentDirectory agents/grf-2026-autopilot-agent `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -PublishAccessToken $env:PUBLISH_USER_TOKEN

@@ -78,25 +78,30 @@ azd hooks run postprovision
 
 ## Workflow order
 
-The supported order is:
+Run the lifecycle workflow for the required agent. Each workflow deploys its agent, reconciles
+shared governance, and publishes it when Microsoft 365 metadata is present.
 
-1. deploy each required agent;
-2. apply agent network governance;
-3. publish selected agents to Teams;
-4. run or schedule evaluation.
+| Agent | Workflow | Result |
+|---|---|---|
+| `grf-2026-teams-agent` | `deploy-grf-2026-teams-agent.yml` | Prompt deploy, governance, Teams publish |
+| `grf-2026-autopilot-agent` | `deploy-grf-2026-autopilot-agent.yml` | Python source-zip deploy, governance, Autopilot publish |
+| `support-case-agent` | `deploy-support-case-agent.yml` | .NET source-zip deploy and governance |
+| `support-case-agent-ghcpsdk` | `deploy-support-case-agent-ghcpsdk.yml` | .NET source-zip deploy and governance |
+| `gfdiag10-fef839` | `deploy-gfdiag10-fef839.yml` | Python source-zip deploy, governance, Autopilot publish |
 
-Repeat governance after changing any `network.json`, `mcp.json`, or `mcp-policy.json`.
-Repeat Teams publishing after changing `teams.json` or the Teams app version.
+The workflows share a non-cancelling concurrency group, so only one agent lifecycle updates APIM,
+YARP, Easy Auth, or Teams audiences at a time. Re-run any agent lifecycle after changing
+`network.json`, `mcp.json`, or `mcp-policy.json`; governance always reconciles the complete
+repository state.
 
 ## Agent deployment modes
 
-All agent workflows run on `[self-hosted, vnet, foundry-private]`, authenticate with the VM
-managed identity, and use `agents/<name>/agent.yaml` (normalized to JSON with `yq` at deploy
-time).
+All agent workflows run on `[self-hosted, vnet, foundry-private]` and use
+`agents/<name>/agent.yaml`, normalized to JSON with `yq` at deployment time.
 
 ### Prompt
 
-The caller invokes `.github/workflows/_deploy-agent.yml`, which runs:
+`deploy-grf-2026-teams-agent.yml` invokes `.github/workflows/_deploy-agent.yml`, which runs:
 
 ```text
 scripts/deploy-prompt-agent.ps1
@@ -105,16 +110,11 @@ scripts/deploy-prompt-agent.ps1
 The script creates or versions the prompt agent, injects `MCP_SERVER_URL` into any MCP tool, and
 publishes the resulting version at 100 percent traffic.
 
-Example caller:
-
-```bash
-gh workflow run deploy-teams-agent.yml
-```
-
 ### Hosted source zip
 
-The caller invokes `.github/workflows/_deploy-code-agent.yml`. The reusable workflow builds the
-application, places publish output at the ZIP root, creates `agent.zip`, and runs:
+The support-agent workflows invoke `.github/workflows/_deploy-code-agent.yml`. The reusable
+workflow builds the application, places publish output at the ZIP root, creates `agent.zip`, and
+runs:
 
 ```text
 scripts/deploy-code-agent.ps1
@@ -123,39 +123,12 @@ scripts/deploy-code-agent.ps1
 The script uploads the ZIP and the normalized `agent.json` metadata together, then publishes the
 created version.
 
-Example callers:
+The hosted M365 workflows package their Python source directly so deployment and publication can
+share one delegated user token.
 
-```bash
-gh workflow run deploy-support-case-agent-code.yml
-gh workflow run deploy-support-case-agent-ghcpsdk-code.yml
-```
+## Governance
 
-### Hosted container image
-
-The caller invokes `.github/workflows/_deploy-hosted-agent.yml`, which runs:
-
-```text
-scripts/deploy-image-agent.ps1
-```
-
-The script builds and pushes an OCI image to ACR, writes the resulting image reference into the
-in-memory agent definition, creates a version, and publishes it.
-
-Example caller:
-
-```bash
-gh workflow run deploy-support-case-agent-image.yml
-```
-
-## Apply governance
-
-Run:
-
-```bash
-gh workflow run deploy-agent-network.yml
-```
-
-The workflow has four explicit, serialized PowerShell steps:
+Every agent lifecycle applies these four explicit, serialized PowerShell operations:
 
 1. `scripts/apply-token-limits.ps1`
 2. `scripts/apply-yarp-routes.ps1`
@@ -172,18 +145,16 @@ The steps intentionally do not use a common helper module or composite action.
   deployed agents without an instance identity are reported and skipped. If none of the
   configured agents have live identities, the existing Teams audience policy is left unchanged.
 
-An omitted agent or principal remains denied. APIM writes remain serialized to prevent
-management-plane update conflicts.
+`deploy-agent-network.yml` provides the same sequence as internal `workflow_call` automation for
+the prompt and support-agent workflows. The hosted M365 workflows retain the four explicit steps
+inside their single job so deployment and publication require only one delegated sign-in.
 
-## Publish to Teams
+An omitted agent or principal remains denied. Undeployed or identityless agents are reported and
+skipped. If no live Teams identities resolve, the existing audience policy remains unchanged.
 
-Teams publishing is separate from agent deployment and governance:
+## Microsoft 365 publishing
 
-```bash
-gh workflow run publish-teams-teams-agent.yml
-```
-
-The caller invokes `.github/workflows/publish-teams.yml`, which:
+The Teams-agent lifecycle invokes `.github/workflows/publish-teams.yml`, which:
 
 1. obtains a delegated user token through device-code authentication;
 2. restores the VM managed-identity Azure session;
@@ -195,11 +166,12 @@ It creates or updates the Azure Bot Service registration and publishes the Micro
 The activity protocol and its authorization schemes are declared in the agent's `agent.yaml`
 (`agent_endpoint`) and applied by the deploy step, so publishing no longer patches them.
 
-The delegated token is used only for the Microsoft 365 publish API. Foundry reads and Azure Bot
-Service deployment use the VM managed identity.
+The Autopilot lifecycle workflows acquire one delegated token, deploy while the delegated user is
+active, switch Azure CLI to the VM managed identity for governance, then pass the saved delegated
+token to `scripts/publish-autopilot.ps1`.
 
-After publishing, re-run the governance workflow so the Teams APIM audience list contains the
-live bot application ID.
+The delegated token is used only where user authorization is required. Shared governance and
+Azure resource operations use the VM managed identity.
 
 ## Evaluation
 

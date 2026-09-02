@@ -55,46 +55,25 @@ azd up
 `azd up` provisions the single environment, deploys the MCP and YARP applications, and runs the
 post-provision variable sync. It does **not** deploy Foundry agents.
 
-### 2. Deploy an agent
+### 2. Run an agent lifecycle
 
-Run the caller workflow for the required agent. For example:
-
-```bash
-gh workflow run deploy-teams-agent.yml
-```
-
-The caller selects one of three reusable workflows:
-
-- prompt agent: `.github/workflows/_deploy-agent.yml`
-- hosted source-zip agent: `.github/workflows/_deploy-code-agent.yml`
-- hosted container-image agent: `.github/workflows/_deploy-hosted-agent.yml`
-
-All three run on the private self-hosted runner and consume
-`agents/<name>/agent.yaml` (normalized to JSON with `yq` at deploy time).
-
-### 3. Apply governance
-
-After deploying or changing agents, run:
+Each agent has one dispatchable workflow that deploys the agent, reconciles the shared governance
+configuration, and publishes it when `teams.json` or `autopilot.json` is present:
 
 ```bash
-gh workflow run deploy-agent-network.yml
+gh workflow run deploy-grf-2026-teams-agent.yml
+gh workflow run deploy-grf-2026-autopilot-agent.yml
+gh workflow run deploy-support-case-agent.yml
+gh workflow run deploy-support-case-agent-ghcpsdk.yml
+gh workflow run deploy-gfdiag10-fef839.yml
 ```
 
-The workflow applies, in order, Foundry token limits, YARP routes, the MCP allowlist, and Teams
-audiences. APIM writes are intentionally serialized.
+All workflows run on the private self-hosted runner and consume
+`agents/<name>/agent.yaml` (normalized to JSON with `yq` at deploy time). Governance applies token
+limits, YARP routes, the MCP allowlist, and Teams audiences in order. Workflows that publish to
+Microsoft 365 prompt for delegated device-code authentication.
 
-### 4. Publish to Teams, if configured
-
-For an agent with `network.json` and `teams.json`, run its Teams caller workflow. The sample is:
-
-```bash
-gh workflow run publish-teams-teams-agent.yml
-```
-
-This workflow requires an interactive delegated user sign-in for the Microsoft 365 publish
-operation.
-
-### 5. Tear down
+### 3. Tear down
 
 ```bash
 azd down

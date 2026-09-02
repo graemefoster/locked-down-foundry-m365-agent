@@ -238,7 +238,8 @@ Rules:
 - An unresolved or identity-less agent is omitted and remains denied.
 - An agent not listed for a server receives `403`; permission on one server does not grant
   access to another.
-- Apply changes through `deploy-agent-network.yml`, not a direct APIM deployment.
+- Apply changes by rerunning any per-agent lifecycle workflow, not through a direct APIM
+  deployment. Each lifecycle reconciles the complete governance configuration.
 
 ## Workflow variables
 

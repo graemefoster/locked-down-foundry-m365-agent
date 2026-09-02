@@ -142,20 +142,19 @@ Publishing requires all of the following:
 - `agent.yaml`;
 - `network.json` with `exposeToM365: true`;
 - `teams.json`;
-- a successful governance run;
-- a successful Teams publish run.
+- a successful run of the affected agent's lifecycle workflow.
 
 The generated public route is `/teams/<agentName>`. A missing route returns `404` at YARP.
-An outdated audience list fails at APIM. Reapply governance after agent identity or exposure
-changes.
+An outdated audience list fails at APIM. Rerun the affected agent's lifecycle workflow after
+agent identity or exposure changes.
 
 ## Foundry API route or token-limit denial
 
 The generated route is `/agents/<agentName>/{**remainder}` and exists only when
 `exposeFoundryApi` is true. Callers absent from `network.json` are denied by design.
 
-Re-run `deploy-agent-network.yml` after changing exposure or principals. It regenerates routes,
-removes stale routes, and reapplies the token policy.
+Rerun any per-agent lifecycle workflow after changing exposure or principals. The governance
+stage regenerates routes, removes stale routes, and reapplies the token policy.
 
 ## MCP `403`, `429`, or missing URL
 
@@ -165,8 +164,7 @@ removes stale routes, and reapplies the token policy.
 - Agent run reports no MCP URL: `MCP_SERVER_URL` was not synced or the prompt agent was deployed
   outside the supported workflow.
 
-Run `azd hooks run postprovision`, redeploy the agent, then rerun
-`deploy-agent-network.yml`.
+Run `azd hooks run postprovision`, then rerun the affected agent's lifecycle workflow.
 
 ## Private evaluation limitation
 

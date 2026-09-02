@@ -60,7 +60,9 @@ Reusable workflows are separated by operation:
 - `_deploy-hosted-agent.yml` — hosted container image
 - `publish-teams.yml` — Teams/Microsoft 365 publishing
 
-`deploy-agent-network.yml` must retain four explicit, serialized script steps in this order:
+Each agent has one dispatchable `deploy-<agent>.yml` lifecycle workflow. Standalone governance
+and publish workflows are not operator entry points. `deploy-agent-network.yml` is internal
+`workflow_call` automation and must retain four explicit, serialized script steps in this order:
 
 1. apply token limits;
 2. apply YARP routes;

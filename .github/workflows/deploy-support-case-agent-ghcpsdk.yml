@@ -5,6 +5,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: agent-lifecycle
+  cancel-in-progress: false
+
 jobs:
   deploy:
     uses: ./.github/workflows/_deploy-code-agent.yml
@@ -12,3 +16,7 @@ jobs:
       agent-manifest: agents/support-case-agent-ghcpsdk/agent.yaml
       build-context: agents/support-case-agent-ghcpsdk/src/agent
       entry-dll: support-case-agent-ghcpsdk.Agent.dll
+
+  governance:
+    needs: deploy
+    uses: ./.github/workflows/deploy-agent-network.yml
