@@ -61,6 +61,56 @@ jobs:
             -ZipPath agent.zip `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}"
 
+      - name: Grant the agent access to Foundry
+        shell: pwsh
+        run: |
+          $projectEndpoint = "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}".TrimEnd('/')
+          $agentUrl = "${projectEndpoint}/agents/grf-2026-autopilot-agent?api-version=2025-11-15-preview"
+          $token = az account get-access-token `
+            --resource https://ai.azure.com `
+            --query accessToken `
+            --output tsv
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
+            throw "Could not acquire a Foundry token."
+          }
+
+          $agent = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers @{
+            Authorization = "******"
+            Accept        = 'application/json'
+          }
+
+          $principalId = $agent.instance_identity.principal_id
+          if ([string]::IsNullOrWhiteSpace($principalId)) {
+            throw "The deployed agent has no instance_identity.principal_id."
+          }
+
+          $accountScope = "${{ vars.AZURE_AI_PROJECT_ID }}" -replace '/projects/[^/]+$', ''
+          $roleDefinitionId = "${accountScope}/providers/Microsoft.Authorization/roleDefinitions/a97b65f3-24c7-4388-baec-2e87135dc908"
+          $existing = az role assignment list `
+            --assignee-object-id $principalId `
+            --scope $accountScope `
+            --query "[?roleDefinitionId=='$roleDefinitionId'].id" `
+            --output tsv
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not inspect role assignments for agent identity '$principalId'."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($existing)) {
+            az role assignment create `
+              --assignee-object-id $principalId `
+              --assignee-principal-type ServicePrincipal `
+              --role $roleDefinitionId `
+              --scope $accountScope `
+              --output none
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not grant Cognitive Services User to agent identity '$principalId'."
+            }
+            Write-Host "Granted Cognitive Services User to agent identity '$principalId'."
+          }
+          else {
+            Write-Host "Agent identity '$principalId' already has Cognitive Services User."
+          }
+
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none

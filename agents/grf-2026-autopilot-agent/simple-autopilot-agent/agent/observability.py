@@ -18,6 +18,9 @@ from opentelemetry.sdk.resources import Resource
 def configure_observability() -> None:
     """Enable Azure Monitor and Agent 365 telemetry before app imports."""
     logging.getLogger("agent").setLevel(logging.INFO)
+    enable_a365_exporter = (
+        os.environ.get("ENABLE_A365_OBSERVABILITY_EXPORTER", "").lower() == "true"
+    )
 
     attributes = {
         "service.name": os.environ.get(
@@ -36,7 +39,7 @@ def configure_observability() -> None:
             os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")
         ),
         enable_a365=True,
-        a365_enable_observability_exporter=True,
+        a365_enable_observability_exporter=enable_a365_exporter,
         instrumentation_options={
             "openai_agents": {"enabled": False},
         },

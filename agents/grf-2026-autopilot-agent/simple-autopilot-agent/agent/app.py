@@ -12,7 +12,7 @@ import os
 
 from aiohttp.web import Application, Request, Response, run_app
 from azure.ai.projects.aio import AIProjectClient
-from azure.identity.aio import DefaultAzureCredential
+from azure.identity.aio import ManagedIdentityCredential
 from microsoft_agents.authentication.msal import MsalConnectionManager
 from microsoft_agents.hosting.aiohttp import (
     CloudAdapter,
@@ -42,7 +42,10 @@ from .traceback_suppression import install_traceback_suppression
 logger = logging.getLogger(__name__)
 
 
-def build_agent(connection_manager: MsalConnectionManager) -> AgentApplication[TurnState]:
+def build_agent(
+    connection_manager: MsalConnectionManager,
+    project: AIProjectClient,
+) -> AgentApplication[TurnState]:
     """Create the agent application and register its surface-specific routes."""
     adapter = CloudAdapter(connection_manager=connection_manager)
     configure_hosting_observability(adapter.middleware_set)
@@ -58,10 +61,6 @@ def build_agent(connection_manager: MsalConnectionManager) -> AgentApplication[T
             surface,
             context.activity.text,
             extra={"surface": surface},
-        )
-        project = AIProjectClient(
-            endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
-            credential=DefaultAzureCredential(),
         )
         if context.activity.text:
             response = await project.get_openai_client().responses.create(
@@ -122,7 +121,18 @@ def build_app() -> Application:
         connections_configurations={"SERVICE_CONNECTION": connection},
         connections_map=[{"SERVICEURL": "*", "CONNECTION": "SERVICE_CONNECTION"}],
     )
-    agent = build_agent(connection_manager)
+    instance_client_id = os.environ.get("FOUNDRY_AGENT_DEFAULT_INSTANCE_CLIENT_ID")
+    if not instance_client_id:
+        raise RuntimeError(
+            "FOUNDRY_AGENT_DEFAULT_INSTANCE_CLIENT_ID is required in the hosted runtime."
+        )
+
+    credential = ManagedIdentityCredential(client_id=instance_client_id)
+    project = AIProjectClient(
+        endpoint=os.environ["FOUNDRY_PROJECT_ENDPOINT"],
+        credential=credential,
+    )
+    agent = build_agent(connection_manager, project)
     install_traceback_suppression(agent.adapter)
 
     async def messages(request: Request) -> Response:
@@ -134,6 +144,12 @@ def build_app() -> Application:
     app = Application()
     app.router.add_post("/activity/messages", messages)
     app.router.add_get("/readiness", health)
+
+    async def close_clients(_app: Application) -> None:
+        await project.close()
+        await credential.close()
+
+    app.on_cleanup.append(close_clients)
     return app
 
 
