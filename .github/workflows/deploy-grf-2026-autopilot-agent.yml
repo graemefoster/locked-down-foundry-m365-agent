@@ -66,12 +66,9 @@ jobs:
         run: |
           $projectEndpoint = "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}".TrimEnd('/')
           $agentUrl = "${projectEndpoint}/agents/grf-2026-autopilot-agent?api-version=2025-11-15-preview"
-          $token = az account get-access-token `
-            --resource https://ai.azure.com `
-            --query accessToken `
-            --output tsv
-          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-            throw "Could not acquire a Foundry token."
+          $token = $env:PUBLISH_USER_TOKEN
+          if ([string]::IsNullOrWhiteSpace($token)) {
+            throw "The delegated Foundry token is unavailable."
           }
 
           $agent = Invoke-RestMethod -Method Get -Uri $agentUrl -Headers @{
