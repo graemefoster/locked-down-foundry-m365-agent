@@ -12,6 +12,7 @@ from microsoft.opentelemetry.a365.hosting import (
     BaggageMiddleware,
     OutputLoggingMiddleware,
 )
+from opentelemetry.instrumentation.aiohttp_client import AioHttpClientInstrumentor
 from opentelemetry.sdk.resources import Resource
 
 
@@ -44,6 +45,7 @@ def configure_observability() -> None:
             "openai_agents": {"enabled": False},
         },
     )
+    AioHttpClientInstrumentor().instrument()
 
 
 class _MiddlewareCompatibilityAdapter:
