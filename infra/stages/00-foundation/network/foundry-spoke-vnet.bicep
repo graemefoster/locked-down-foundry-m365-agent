@@ -595,7 +595,7 @@ resource agentNsg 'Microsoft.Network/networkSecurityGroups@2022-05-01' = {
             '52.122.0.0/15'
           ]
           destinationPortRange: '443'
-          description: 'Agent replies to the Teams/Bot Framework connector. AzureBotService does not contain these Teams ranges; the firewall pins the flow to smba.trafficmanager.net.'
+          description: 'Allow agent replies to Teams connector ranges; the firewall restricts egress to smba.trafficmanager.net.'
         }
       }
       {

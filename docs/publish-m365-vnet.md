@@ -9,12 +9,12 @@ Microsoft 365 does not support private connectivity to agent endpoints: the Acti
 route that Copilot and Teams call must be reachable over the public internet. There are two ways to
 satisfy that requirement without ever enabling public network access on the Foundry account:
 
-- **Approach A — scoped public Activity Protocol exception.** Foundry itself opens a
-  service-managed, source-IP-filtered public path to *only* the Activity Protocol route, using the
-  `enable_m365_public_endpoint` flag. This is the Learn article's default.
-- **Approach B — bring your own front door.** Foundry exposes no public path at all. You stand up
-  a public reverse proxy (for example Application Gateway in front of API Management) and point the
-  agent's Activity Protocol endpoint at your proxy.
+- **Approach A — scoped public Activity Protocol exception.** Foundry opens a service-managed,
+  source-IP-filtered public path to *only* the Activity Protocol route, using the
+  `enable_m365_public_endpoint` flag. This is the Learn article's default and the simplest option.
+- **Approach B — bring your own front door.** If you would rather route public traffic through
+  your own firewall or reverse proxy (for example Application Gateway in front of API Management),
+  you can leave the flag off and point the agent's Activity Protocol endpoint at your proxy instead.
 
 Foundry account networking is not changed by either approach. Do not enable public network access
 on the Foundry account.
@@ -78,14 +78,16 @@ does not replace token validation, tenant checks, or RBAC.
 > Keep every protocol (for example `responses`) and scheme (for example `Entra`) you still need, or
 > the endpoint loses them.
 
-### Why some teams choose Approach B instead
+This is the recommended starting point: Foundry manages the source-IP-filtered exception for you,
+and there is no extra infrastructure to run.
 
-`enable_m365_public_endpoint: true` is a Foundry-managed exception: it opens a public path on the
-Foundry account itself, filtered to Microsoft source ranges. Some security teams do not want *any*
-Foundry-hosted public exception on a resource they have deliberately set to
-`publicNetworkAccess=Disabled` — they prefer all public ingress to terminate on infrastructure they
-own, inspect, and control (WAF, logging, custom policy). Approach B keeps the flag `false` and
-satisfies Microsoft 365's public-reachability requirement with a customer-owned front door.
+### If you prefer to use your own firewall
+
+Some organizations like to route all public ingress through their own firewall or reverse proxy so
+it lands on infrastructure they run and inspect. If that is your preference, Approach B lets you
+leave `enable_m365_public_endpoint` off and terminate the public traffic on a front door you own
+instead. It is a deployment choice, not a security requirement — both approaches keep the Foundry
+account private and enforce authentication on every request.
 
 ## Approach B — bring your own front door
 
@@ -137,9 +139,9 @@ Because your front door reaches that route over a private connection, Foundry do
 `enable_m365_public_endpoint`. The `activity` protocol and an authorization scheme must still be
 present so the endpoint accepts activity messages.
 
-Trade-off: Approach B keeps Foundry entirely private but adds one public hop that you own and must
-secure (WAF, source-range restriction, token validation, deny-by-default policy), whereas
-Approach A lets Foundry manage the source-IP-filtered exception for you.
+Trade-off: Approach A is simpler because Foundry manages the source-IP-filtered exception for you.
+Approach B gives you a front door you own and operate (WAF, source-range restriction, token
+validation, policy), at the cost of running that extra hop. Both keep the Foundry account private.
 
 ### Switching the agent's endpoint to your front door
 

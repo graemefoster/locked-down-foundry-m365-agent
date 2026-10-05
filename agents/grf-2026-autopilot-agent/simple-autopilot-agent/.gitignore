@@ -1,4 +1,3 @@
-.azure/
 .venv/
 .vscode/
 __pycache__/
