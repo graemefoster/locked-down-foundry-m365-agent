@@ -383,6 +383,7 @@ module stage13 'stages/13-foundry/13-foundry.bicep' = {
     keyVaultUri: stage10.outputs.keyVaultUri
     keyName: stage10.outputs.keyName
     keyUriWithVersion: stage10.outputs.keyUriWithVersion
+    aiSearchPrincipalId: stage10.outputs.aiSearchPrincipalId
   }
 }
 

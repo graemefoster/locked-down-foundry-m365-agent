@@ -9,6 +9,7 @@ gets its own stage carrying EVERYTHING that stands the account up and protects i
   network/ai-account-private-endpoint.bicep    → the account private endpoint + DNS
   rbac/keyvault-account-role-assignment.bicep  → account SMI → Key Vault Crypto User (CMK)
   rbac/app-insights-account-role-assignment.bicep → account SMI → Log Analytics Reader
+  rbac/ai-search-openai-user-role-assignment.bicep → Search SMI → OpenAI User (embeddings)
   encryption/ai-account-encryption.bicep       → re-PUT the account with CMK encryption
 
 Runs AFTER stage 10 (needs Key Vault + the DNS zones + the data substrate). The
@@ -43,6 +44,7 @@ param keyVaultName string
 param keyVaultUri string
 param keyName string
 param keyUriWithVersion string
+param aiSearchPrincipalId string
 
 // Foundry account egress posture — shared by BOTH the identity (create) and encryption
 // (CMK re-PUT) declarations of the account. A CognitiveServices account update is a full PUT,
@@ -79,6 +81,14 @@ module appInsightsAccountRoleAssignment './rbac/app-insights-account-role-assign
   params: {
     appInsightsName: appInsightsName
     accountPrincipalId: aiAccount.outputs.accountPrincipalId
+  }
+}
+
+module aiSearchOpenAiUserRoleAssignment './rbac/ai-search-openai-user-role-assignment.bicep' = if (!empty(aiSearchPrincipalId)) {
+  name: 'search-openai-user-${uniqueSuffix}-deployment'
+  params: {
+    accountName: aiAccount.outputs.accountName
+    aiSearchPrincipalId: aiSearchPrincipalId
   }
 }
 

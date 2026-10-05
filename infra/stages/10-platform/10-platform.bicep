@@ -192,6 +192,7 @@ output azureStorageResourceGroupName string = dataResources.outputs.azureStorage
 output aiSearchName string = dataResources.outputs.aiSearchName
 output aiSearchServiceResourceGroupName string = dataResources.outputs.aiSearchServiceResourceGroupName
 output aiSearchServiceSubscriptionId string = dataResources.outputs.aiSearchServiceSubscriptionId
+output aiSearchPrincipalId string = dataResources.outputs.aiSearchPrincipalId
 output cosmosDBName string = dataResources.outputs.cosmosDBName
 output cosmosDBSubscriptionId string = dataResources.outputs.cosmosDBSubscriptionId
 output cosmosDBResourceGroupName string = dataResources.outputs.cosmosDBResourceGroupName

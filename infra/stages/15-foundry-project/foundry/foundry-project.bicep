@@ -103,16 +103,19 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2025-04-01-previ
 
   //throws an error if they already exist and are used by a capability host
   @onlyIfNotExists()
-  resource project_connection_azureai_search 'connections@2025-04-01-preview' = if (deployStandardAgent) {
+  resource project_connection_azureai_search 'connections@2025-10-01-preview' = if (deployStandardAgent) {
     name: aiSearchName
     properties: {
       category: 'CognitiveSearch'
       target: 'https://${aiSearchName}.search.windows.net'
-      authType: 'AAD'
+      authType: 'ProjectManagedIdentity'
+      credentials: {}
       metadata: {
         ApiType: 'Azure'
         ResourceId: searchService.id
         location: searchService.location
+        displayName: aiSearchName
+        type: 'azure_ai_search'
       }
     }
   }

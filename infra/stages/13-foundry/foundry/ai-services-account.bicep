@@ -68,8 +68,8 @@ resource account 'Microsoft.CognitiveServices/accounts@2025-04-01-preview' = {
           }
         ]
       : null)
-    // Set disable local auth to true or false. Agent service does not support API key based authentication
-    disableLocalAuth: false
+    // Entra-only authentication; agents do not support API-key authentication.
+    disableLocalAuth: true
     restrictOutboundNetworkAccess: restrictOutboundNetworkAccess //to further restrict tool calls to specific endpoints, set to true then populate allowedFqdnList
     allowedFqdnList: allowedFqdnList
   }

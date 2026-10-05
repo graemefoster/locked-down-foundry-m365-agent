@@ -54,7 +54,7 @@ resource accountUpdate 'Microsoft.CognitiveServices/accounts@2025-04-01-preview'
     allowProjectManagement: true
     customSubDomainName: accountName
     publicNetworkAccess: publicNetworkAccess
-    disableLocalAuth: false
+    disableLocalAuth: true
     restrictOutboundNetworkAccess: restrictOutboundNetworkAccess
     // allowedFqdnList only applies when restrictOutboundNetworkAccess is true. Egress is left
     // unrestricted (network isolation is still enforced via publicNetworkAccess: Disabled +

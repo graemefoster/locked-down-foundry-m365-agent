@@ -81,6 +81,11 @@ gateway, runner, and ingress design.
 Secrets are not embedded in agent configuration. The runner bootstrap reads its registration
 credential from Key Vault, and deployment workflows use managed identity.
 
+The primary Foundry account disables API-key authentication in both its creation and CMK-update
+declarations. Search receives Cognitive Services OpenAI User on that account for embeddings.
+New project-to-Search connections use `ProjectManagedIdentity`; existing connections are preserved
+by `@onlyIfNotExists()` because they may already be bound to a capability host.
+
 The installed runner's project-scoped RBAC administrator assignment is conditioned to allow only
 Foundry User grants to service principals and to deny role-assignment deletion. Deployment grants
 runtime access using the agent's principal object ID without Microsoft Graph lookup.
