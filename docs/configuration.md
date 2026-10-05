@@ -116,6 +116,12 @@ The reusable source-zip workflow builds the application and packages the publish
 archive root. If `FOUNDRY_PROJECT_ENDPOINT` is present in `environment_variables`,
 `scripts/deploy-code-agent.ps1` replaces it with `AZURE_AI_PROJECT_ENDPOINT` at deployment time.
 
+The Advanced Autopilot agent accepts Teams image attachments and inline HTML images alongside
+message text. It downloads supported attachments through the authenticated Teams connector and
+sends at most four images, each no larger than 20 MiB, to the model. PNG, JPEG, GIF, and WebP are
+recognized by their file signatures; unsupported or failed downloads are logged and omitted.
+The Teams connector honors standard proxy environment variables.
+
 ### Hosted container-image agent
 
 ```yaml

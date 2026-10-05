@@ -32,6 +32,7 @@ from azure.identity.aio import (
 from openai import APIStatusError, AsyncOpenAI
 
 from microsoft_agents.hosting.core import Authorization, TurnContext
+from microsoft_agents.hosting.core.connector import ConnectorClientBase
 
 from .request_correlation import set_current_span_response
 
@@ -42,6 +43,15 @@ except Exception:  # pragma: no cover - optional dependency
 
 from .agent_interface import AgentInterface
 from .email_channel_compat import is_email_notification
+from .message_content import (
+    ImageReference,
+    ParsedMessage,
+    build_multimodal_input,
+    detect_image_content_type,
+    merge_image_references,
+    parse_attachment_location,
+    parse_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +63,8 @@ logger = logging.getLogger(__name__)
 # Audience used to acquire the agentic-user token that the MCP servers accept.
 # Matches the C# ResponsesApiAgentLogicServiceFactory.
 MCP_SCOPE = "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default"
+MAX_INPUT_IMAGES = 4
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 class FoundryDigitalWorkerAgent(AgentInterface):
@@ -211,6 +223,25 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         auth_handler_name: Optional[str],
         context: TurnContext,
     ) -> str:
+        self._log_message_sender(context)
+
+        try:
+            response_input = await self._prepare_response_input(message, context)
+            response = await self._invoke_responses_api(
+                response_input=response_input,
+                conversation_id=self._get_conversation_id(context),
+                instructions=self._personalize_prompt(context),
+                auth=auth,
+                auth_handler_name=auth_handler_name,
+                context=context,
+            )
+            return response or "Done."
+        except Exception as ex:
+            logger.exception("Error processing message")
+            return f"Sorry, I encountered an error: {ex}"
+
+    @staticmethod
+    def _log_message_sender(context: TurnContext) -> None:
         from_prop = context.activity.from_property
         logger.info(
             "Turn received from user — DisplayName: '%s', UserId: '%s', AadObjectId: '%s'",
@@ -218,12 +249,76 @@ class FoundryDigitalWorkerAgent(AgentInterface):
             getattr(from_prop, "id", None) or "(unknown)",
             getattr(from_prop, "aad_object_id", None) or "(none)",
         )
-        display_name = getattr(from_prop, "name", None) or "there"
-        personalized_prompt = self.AGENT_PROMPT.replace("{user_name}", display_name)
 
-        # Reshape the incoming text for email and Teams channels so the model has
-        # enough context to compose a reply via the SendEmail / Teams MCP tools.
-        # Mirrors ResponsesApiAgentLogicService.NewActivityReceived.
+    def _personalize_prompt(self, context: TurnContext) -> str:
+        from_prop = context.activity.from_property
+        display_name = getattr(from_prop, "name", None) or "there"
+        return self.AGENT_PROMPT.replace("{user_name}", display_name)
+
+    @staticmethod
+    def _get_conversation_id(context: TurnContext) -> str:
+        conversation = getattr(context.activity, "conversation", None)
+        return getattr(conversation, "id", "") or "default"
+
+    async def _prepare_response_input(
+        self,
+        message: str,
+        context: TurnContext,
+    ) -> str | list[dict[str, Any]]:
+        parsed = self._collect_message_content(message, context)
+        message_text = self._add_channel_context(parsed.text, context)
+        image_data_urls = await self._download_message_images(
+            parsed.images,
+            context,
+        )
+        return build_multimodal_input(message_text, image_data_urls)
+
+    def _collect_message_content(
+        self,
+        message: str,
+        context: TurnContext,
+    ) -> ParsedMessage:
+        parsed_message = parse_message(message)
+        html_attachment_images: list[ImageReference] = []
+        html_attachment_text = ""
+
+        for html in self._get_html_attachment_content(context):
+            parsed_attachment = parse_message(html)
+            html_attachment_images.extend(parsed_attachment.images)
+            if not html_attachment_text:
+                html_attachment_text = parsed_attachment.text
+
+        text = parsed_message.text or html_attachment_text
+        images = merge_image_references(
+            self._get_attachment_images(context),
+            parsed_message.images,
+            html_attachment_images,
+        )
+        return ParsedMessage(text=text, images=images)
+
+    @staticmethod
+    def _get_html_attachment_content(context: TurnContext) -> list[str]:
+        attachments = getattr(context.activity, "attachments", None) or []
+        content: list[str] = []
+        for attachment in attachments:
+            content_type = str(
+                FoundryDigitalWorkerAgent._get_first_value(
+                    attachment,
+                    "content_type",
+                    "contentType",
+                )
+            )
+            value = FoundryDigitalWorkerAgent._get_first_value(
+                attachment,
+                "content",
+            )
+            if content_type.lower() == "text/html" and isinstance(value, str):
+                content.append(value)
+        return content
+
+    @staticmethod
+    def _add_channel_context(message: str, context: TurnContext) -> str:
+        from_prop = context.activity.from_property
         channel_id = getattr(context.activity, "channel_id", "") or ""
         if channel_id in ("email", "agents:email"):
             sender_id = getattr(from_prop, "id", "") if from_prop else ""
@@ -244,23 +339,124 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 f"Respond to this chat message with chat id {conv_id} "
                 f"From: {sender_name} ({sender_id})\nMessage: {message}"
             )
+        return message
 
-        conversation = getattr(context.activity, "conversation", None)
-        conversation_id = getattr(conversation, "id", "") or "default"
+    async def _download_message_images(
+        self,
+        references: list[ImageReference],
+        context: TurnContext,
+    ) -> list[str]:
+        if not references:
+            return []
 
-        try:
-            response = await self._invoke_responses_api(
-                input_text=message,
-                conversation_id=conversation_id,
-                instructions=personalized_prompt,
-                auth=auth,
-                auth_handler_name=auth_handler_name,
-                context=context,
+        connector = context.turn_state.get("ConnectorClient")
+        if not isinstance(connector, ConnectorClientBase):
+            logger.warning(
+                "Found %d image(s), but the authenticated connector client is unavailable",
+                len(references),
             )
-            return response or "Done."
-        except Exception as ex:
-            logger.exception("Error processing message")
-            return f"Sorry, I encountered an error: {ex}"
+            return []
+
+        images: list[str] = []
+        for reference in references[:MAX_INPUT_IMAGES]:
+            image = await self._download_image(reference, connector)
+            if image:
+                images.append(image)
+        return images
+
+    @staticmethod
+    def _get_attachment_images(context: TurnContext) -> list[ImageReference]:
+        attachments = getattr(context.activity, "attachments", None) or []
+        images: list[ImageReference] = []
+        for attachment in attachments:
+            content_type = str(
+                FoundryDigitalWorkerAgent._get_first_value(
+                    attachment,
+                    "content_type",
+                    "contentType",
+                )
+            )
+            content_url = str(
+                FoundryDigitalWorkerAgent._get_first_value(
+                    attachment,
+                    "content_url",
+                    "contentUrl",
+                )
+            )
+            if content_url and content_type.lower().startswith("image/"):
+                images.append(
+                    ImageReference(
+                        url=content_url,
+                        content_type=content_type.lower(),
+                        alt_text=str(
+                            FoundryDigitalWorkerAgent._get_first_value(
+                                attachment,
+                                "name",
+                            )
+                        ),
+                    )
+                )
+        return images
+
+    async def _download_image(
+        self,
+        image: ImageReference,
+        connector: ConnectorClientBase,
+    ) -> Optional[str]:
+        service_url = str(getattr(connector, "base_uri", "") or "")
+        location = parse_attachment_location(
+            image.url,
+            trusted_service_url=service_url,
+        )
+        if location is None:
+            logger.warning("Ignoring unsupported image URL host or path: %s", image.url)
+            return None
+
+        attachment_id, view_id = location
+        try:
+            stream = await connector.attachments.get_attachment(
+                attachment_id,
+                view_id,
+            )
+            image_bytes = stream.getvalue()
+        except Exception:
+            logger.exception("Failed to download Teams image %s", attachment_id)
+            return None
+
+        if not image_bytes:
+            logger.warning("Teams image %s was empty", attachment_id)
+            return None
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            logger.warning(
+                "Ignoring Teams image %s because it exceeds %d bytes",
+                attachment_id,
+                MAX_IMAGE_BYTES,
+            )
+            return None
+
+        content_type = detect_image_content_type(image_bytes)
+        if not content_type:
+            logger.warning(
+                "Ignoring Teams attachment %s with unknown image type",
+                attachment_id,
+            )
+            return None
+        if image.content_type and image.content_type != content_type:
+            logger.warning(
+                "Teams image %s declared %s but contained %s",
+                attachment_id,
+                image.content_type,
+                content_type,
+            )
+
+        logger.info(
+            "Downloaded Teams image %s (%s, %d bytes)",
+            attachment_id,
+            content_type,
+            len(image_bytes),
+        )
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return f"data:{content_type};base64,{encoded}"
 
     # ------------------------------------------------------------------
     # Notification handling
@@ -301,7 +497,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                     f"From: {from_email}\nEmail details:\n{email_details}"
                 )
                 return await self._invoke_responses_api(
-                    input_text=msg,
+                    response_input=msg,
                     conversation_id=conversation_id,
                     instructions=self.AGENT_PROMPT,
                     auth=auth,
@@ -322,7 +518,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 or f"Notification received: {notification_type}"
             )
             return await self._invoke_responses_api(
-                input_text=notification_message,
+                response_input=notification_message,
                 conversation_id=conversation_id,
                 instructions=self.AGENT_PROMPT,
                 auth=auth,
@@ -416,7 +612,7 @@ Comment text: {comment_snippet}
 """.strip()
 
         response = await self._invoke_responses_api(
-            input_text=prompt,
+            response_input=prompt,
             conversation_id=conversation_id,
             instructions=self.AGENT_PROMPT,
             auth=auth,
@@ -566,7 +762,7 @@ Comment text: {comment_snippet}
     async def _invoke_responses_api(
         self,
         *,
-        input_text: str,
+        response_input: str | list[dict[str, Any]],
         conversation_id: str,
         instructions: str,
         auth: Authorization,
@@ -594,7 +790,7 @@ Comment text: {comment_snippet}
         request_args: dict[str, Any] = {
             "model": self._deployment,
             "instructions": instructions,
-            "input": input_text,
+            "input": response_input,
             "tools": mcp_tools,
         }
         if previous_response_id is not None:

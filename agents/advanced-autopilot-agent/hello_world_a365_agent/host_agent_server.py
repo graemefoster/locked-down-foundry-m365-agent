@@ -62,6 +62,7 @@ from .email_channel_compat import (
     is_email_notification,
     is_wpx_comment_activity,
 )
+from .environment_aware_connector import EnvironmentAwareConnectorFactory
 from .request_correlation import (
     AgentRequestCorrelationMiddleware,
     CorrelatingCloudAdapter,
@@ -267,8 +268,12 @@ class GenericAgentHost:
 
         self.storage = MemoryStorage()
         self.connection_manager = MsalConnectionManager(**agents_sdk_config)
+        connector_factory = EnvironmentAwareConnectorFactory(
+            self.connection_manager
+        )
         self.adapter = CorrelatingCloudAdapter(
-            connection_manager=self.connection_manager
+            connection_manager=self.connection_manager,
+            channel_service_client_factory=connector_factory,
         )
         self.adapter.use(AgentRequestCorrelationMiddleware())
         self.authorization = Authorization(
@@ -386,7 +391,7 @@ class GenericAgentHost:
                 # then the final LLM response. Mirrors the C# StreamingResponse
                 # flow (QueueInformativeUpdateAsync + QueueTextChunk).
                 if not is_wpx_comment_activity(context.activity):
-                    await context.send_activity("Working on your request...")
+                    await context.send_activity("Working on your request. I got you covered friend...")
                 await context.send_activity(Activity(type="typing"))
 
                 async def _typing_loop() -> None:
