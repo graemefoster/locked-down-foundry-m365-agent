@@ -90,7 +90,33 @@ The deployment configuration for an agent lives under `agents/<name>/`:
 - `teams.json` — optional Teams/Microsoft 365 metadata
 
 Source-project `agent.yaml` files inside application source trees are not deployment manifests.
+Do not add per-agent `azure.yaml` files; agent deployment uses the Foundry REST scripts.
 See [docs/configuration.md](docs/configuration.md) for examples and validation rules.
+
+To deploy an agent directly from Bash on a signed-in workstation or runner, install `pwsh`, `yq`
+v4, and Azure CLI first. Image agents also require a running Docker engine:
+
+```bash
+brew install yq azure-cli
+brew install --cask powershell
+
+./scripts/deploy-agent.sh \
+  -AgentDirectory agents/support-case-agent \
+  -FoundryProjectEndpoint "$AZURE_AI_PROJECT_ENDPOINT"
+```
+
+The wrapper detects prompt, .NET source, Python source, and container-image manifests. Pass
+`-SourceDirectory` when automatic source discovery would be ambiguous.
+
+Publish an already-deployed agent using its `autopilot.json` or `teams.json` metadata:
+
+```bash
+az login --use-device-code --tenant "$TEAMS_TENANT_ID"
+
+./scripts/publish-agent.sh \
+  -AgentDirectory agents/advanced-autopilot-agent \
+  -FoundryProjectEndpoint "$AZURE_AI_PROJECT_ENDPOINT"
+```
 
 ## Documentation
 

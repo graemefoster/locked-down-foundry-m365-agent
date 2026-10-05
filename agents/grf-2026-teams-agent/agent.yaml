@@ -10,10 +10,10 @@ definition:
   tools:
     - type: mcp
       server_label: testweathermcpserver
-      # server_url is INJECTED at deploy time by the reusable deploy workflow (from the
-      # MCP_SERVER_URL repo variable), so this manifest stays environment-agnostic. The Foundry
-      # MCP tool schema requires exactly one of server_url/connector_id/tunnel_id, so it cannot be
-      # committed here; project_connection_id supplies auth via the 'testweathermcpserver' connection.
+      # server_url is injected at deploy time from MCP_GATEWAY_URL and the matching entry in
+      # mcp/mcp.json, so this manifest stays environment-agnostic. The Foundry MCP tool schema
+      # requires exactly one of server_url/connector_id/tunnel_id, so it cannot be committed here;
+      # project_connection_id supplies auth via the 'testweathermcpserver' connection.
       project_connection_id: testweathermcpserver
       # Auto-approve MCP tool calls. MCP tools default to require_approval "always", which pauses
       # the run on an mcp_approval_request. The nightly eval samples the agent non-interactively

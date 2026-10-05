@@ -141,13 +141,13 @@ if ([string]::IsNullOrWhiteSpace($agentVersion)) {
 if ($GrantAgentProjectAccess) {
   $createdVersion = if ($response.version) { $response } else { $response.versions.latest }
   $provisioningStatus = [string]$createdVersion.status
-  $instanceClientId = [string]$createdVersion.instance_identity.client_id
+  $instancePrincipalId = [string]$createdVersion.instance_identity.principal_id
   $versionUrl = "$FoundryProjectEndpoint/agents/$agentName/versions/$agentVersion`?api-version=$ApiVersion"
   $maxRetries = 30
   $delaySeconds = 10
 
   for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-    if ($provisioningStatus -eq 'active' -and -not [string]::IsNullOrWhiteSpace($instanceClientId)) {
+    if ($provisioningStatus -eq 'active' -and -not [string]::IsNullOrWhiteSpace($instancePrincipalId)) {
       break
     }
     if ($provisioningStatus -eq 'failed') {
@@ -162,8 +162,8 @@ if ($GrantAgentProjectAccess) {
       -Uri $versionUrl `
       -Headers $headers
     $provisioningStatus = [string]$version.status
-    if ($version.instance_identity.client_id) {
-      $instanceClientId = [string]$version.instance_identity.client_id
+    if ($version.instance_identity.principal_id) {
+      $instancePrincipalId = [string]$version.instance_identity.principal_id
     }
     Write-Host "Agent '$agentName' version $agentVersion provisioning status: $provisioningStatus"
   }
@@ -171,15 +171,16 @@ if ($GrantAgentProjectAccess) {
   if ($provisioningStatus -ne 'active') {
     throw "Agent '$agentName' version $agentVersion provisioning status is '$provisioningStatus', expected 'active'."
   }
-  if ([string]::IsNullOrWhiteSpace($instanceClientId)) {
-    throw "Agent '$agentName' version $agentVersion has no instance_identity.client_id."
+  if ([string]::IsNullOrWhiteSpace($instancePrincipalId)) {
+    throw "Agent '$agentName' version $agentVersion has no instance_identity.principal_id."
   }
 
-  Write-Host "Granting Foundry User to agent instance '$instanceClientId' on '$FoundryProjectId'."
+  Write-Host "Granting Foundry User to agent instance '$instancePrincipalId' on '$FoundryProjectId'."
   # Inspect the CLI exit code ourselves so an existing assignment is not a terminating error.
   $PSNativeCommandUseErrorActionPreference = $false
   $roleAssignmentOutput = az role assignment create `
-    --assignee $instanceClientId `
+    --assignee-object-id $instancePrincipalId `
+    --assignee-principal-type ServicePrincipal `
     --role 'Foundry User' `
     --scope $FoundryProjectId `
     --output none 2>&1 | Out-String

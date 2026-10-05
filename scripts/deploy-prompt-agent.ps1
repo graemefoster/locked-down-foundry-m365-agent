@@ -1,7 +1,8 @@
 param(
   [Parameter(Mandatory = $true)] [string]$AgentJsonPath,
   [Parameter(Mandatory = $true)] [string]$FoundryProjectEndpoint,
-  [Parameter(Mandatory = $false)] [string]$McpServerUrl = '',
+  [Parameter(Mandatory = $false)] [string]$McpGatewayUrl = '',
+  [Parameter(Mandatory = $false)] [string]$McpConfigPath = 'mcp/mcp.json',
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
 
@@ -24,11 +25,56 @@ if ($null -eq $agent.definition) {
 
 $mcpTools = @($agent.definition.tools | Where-Object { $_.type -eq 'mcp' })
 if ($mcpTools.Count -gt 0) {
-  if ([string]::IsNullOrWhiteSpace($McpServerUrl)) {
-    throw "Agent '$agentName' uses MCP, but no MCP server URL was supplied."
+  if ([string]::IsNullOrWhiteSpace($McpGatewayUrl)) {
+    throw "Agent '$agentName' uses MCP, but no MCP gateway URL was supplied."
   }
+  if (-not (Test-Path -LiteralPath $McpConfigPath)) {
+    throw "MCP server configuration not found: $McpConfigPath"
+  }
+
+  $mcpConfig = Get-Content -LiteralPath $McpConfigPath -Raw | ConvertFrom-Json
+  $configuredServers = @($mcpConfig.servers)
+  if ($configuredServers.Count -eq 0) {
+    throw "MCP server configuration '$McpConfigPath' contains no servers."
+  }
+
+  $gatewayBaseUrl = $McpGatewayUrl.TrimEnd('/')
+  $legacyServerMatch = @($configuredServers | Where-Object {
+    $gatewayBaseUrl.EndsWith("/$([string]$_.name)", [System.StringComparison]::OrdinalIgnoreCase)
+  })
+  if ($legacyServerMatch.Count -eq 1) {
+    $gatewayBaseUrl = $gatewayBaseUrl.Substring(
+      0,
+      $gatewayBaseUrl.Length - ([string]$legacyServerMatch[0].name).Length - 1
+    ).TrimEnd('/')
+  }
+
   foreach ($tool in $mcpTools) {
-    $tool | Add-Member -NotePropertyName server_url -NotePropertyValue $McpServerUrl -Force
+    $serverLabel = [string]$tool.server_label
+    $connectionId = [string]$tool.project_connection_id
+    $matches = @($configuredServers | Where-Object {
+      $configuredConnection = if ([string]::IsNullOrWhiteSpace([string]$_.connectionName)) {
+        [string]$_.name
+      }
+      else {
+        [string]$_.connectionName
+      }
+
+      (-not [string]::IsNullOrWhiteSpace($connectionId) -and $configuredConnection -eq $connectionId) -or
+      (-not [string]::IsNullOrWhiteSpace($serverLabel) -and [string]$_.name -eq $serverLabel)
+    })
+
+    if ($matches.Count -eq 0) {
+      throw "MCP tool '$serverLabel' does not match a server name or connectionName in '$McpConfigPath'."
+    }
+    if ($matches.Count -gt 1) {
+      throw "MCP tool '$serverLabel' matches multiple servers in '$McpConfigPath'. Align server_label and project_connection_id."
+    }
+
+    $serverName = [string]$matches[0].name
+    $serverUrl = "$gatewayBaseUrl/$serverName/"
+    $tool | Add-Member -NotePropertyName server_url -NotePropertyValue $serverUrl -Force
+    Write-Host "Mapped MCP tool '$serverLabel' to '$serverUrl'."
   }
 }
 

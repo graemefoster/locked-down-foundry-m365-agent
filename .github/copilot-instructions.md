@@ -35,12 +35,16 @@ role only.
 
 The deployment manifest is `agents/<name>/agent.yaml`. An `agent.yaml` that lives inside an
 application source project is source metadata for that application, not a deployment manifest. Do
-not add environment-suffixed agent manifests or repository variables.
+not add per-agent `azure.yaml` files, environment-suffixed agent manifests, or repository variables.
 
 ## Agent automation
 
 The supported PowerShell operations are:
 
+- `scripts/deploy-agent.ps1` — common local/workflow entry point
+- `scripts/deploy-agent.sh` — Bash shim for the PowerShell entry point
+- `scripts/publish-agent.ps1` — common Microsoft 365 publishing entry point
+- `scripts/publish-agent.sh` — Bash shim for the publishing entry point
 - `scripts/deploy-prompt-agent.ps1`
 - `scripts/deploy-code-agent.ps1`
 - `scripts/deploy-image-agent.ps1`
@@ -50,8 +54,8 @@ The supported PowerShell operations are:
 - `scripts/apply-mcp-policy.ps1`
 - `scripts/apply-teams-audiences.ps1`
 
-Keep these as explicit workflow steps. Do not introduce a common agent helper module or
-composite actions.
+Keep deployment and governance as explicit workflow steps. Do not introduce a common helper module
+or composite action; `deploy-agent.ps1` only dispatches to the three explicit deployment scripts.
 
 Reusable workflows are separated by operation:
 
@@ -78,7 +82,6 @@ Use unsuffixed outputs and repository variables. Important names include:
 - `AZURE_AI_PROJECT_ENDPOINT`
 - `AZURE_AI_PROJECT_NAME`
 - `MCP_GATEWAY_URL`
-- `MCP_SERVER_URL`, synchronized from `MCP_GATEWAY_URL`
 - `MCP_COMPLIANCE_AUDIENCE`
 - `MCP_WEBAPP_NAME`
 - `FOUNDRY_AGENTS_API_NAME`

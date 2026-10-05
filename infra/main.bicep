@@ -193,6 +193,8 @@ Vault via its managed identity. See docs/operations.md.
 ''')
 param githubRunnerRepoUrl string = ''
 
+@description('GitHub Actions runner version installed on fresh runner hosts. Existing runners auto-update themselves.')
+param githubRunnerVersion string = '2.337.0'
 
 @description('Name of the Key Vault secret holding the runner PAT (Administration: read & write). Seeded manually.')
 param githubRunnerPatSecretName string = 'gh-runner-pat'
@@ -436,11 +438,6 @@ module stage20 'stages/20-workload-mcp/20-workload-mcp.bicep' = {
   }
 }
 
-// URL of the sample MCP server (the first configured server) that the reusable deploy-agent
-// workflow injects as an agent's `server_url`. first() is safe: mcp/mcp.json always has >=1
-// server, and the sample 'mcp' server is the first entry by convention.
-var mcpSampleGatewayUrl = '${first(stage20.outputs.servers).url}/'
-
 // ==================== STAGE 30 — GOVERNANCE ====================
 // Post-platform governance: project MCP connections, APIM API/policy/connection + Teams API,
 // RAI guardrail (+ non-compliant demo), APIM lockdown (STRICTLY LAST), and cross-spoke gateway
@@ -497,6 +494,7 @@ module stage40 'stages/40-runner/40-runner.bicep' = {
     deployWindowsVm: deployWindowsVm
     deployBastion: deployBastion
     githubRunnerRepoUrl: githubRunnerRepoUrl
+    githubRunnerVersion: githubRunnerVersion
     githubRunnerPat: githubRunnerPat
     githubRunnerPatSecretName: githubRunnerPatSecretName
     githubRunnerLabels: githubRunnerLabels
@@ -574,8 +572,8 @@ output TEAMS_NAME_PREFIX string = uniqueSuffix
 @description('Log Analytics workspace resource ID — the Teams-publish path passes it to bot-service.bicep so the Bot Service diagnostic setting is codified (BotRequest logs -> workspace).')
 output TEAMS_LOG_ANALYTICS_ID string = stage00.outputs.logAnalyticsId
 
-@description('MCP server URL (the APIM MCP gateway) for the primary sample server. The reusable deploy-agent workflow injects this as the MCP tool `server_url`.')
-output MCP_GATEWAY_URL string = mcpSampleGatewayUrl
+@description('Base URL of the APIM gateway. Prompt-agent deployment appends each server name from mcp/mcp.json to produce its MCP tool server_url.')
+output MCP_GATEWAY_URL string = stage10.outputs.gatewayUrl
 
 // --- MCP compliance (deploy-agent-network workflow) ---------------------------------
 @description('APIM instance name — used by the deploy-agent-network workflow to re-apply the MCP rate-limit policies on demand.')

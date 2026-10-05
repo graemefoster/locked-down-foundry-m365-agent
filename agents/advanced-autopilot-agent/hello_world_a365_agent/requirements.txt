@@ -1,27 +1,32 @@
+# Pinned direct dependencies. Keep in sync with pyproject.toml.
+# Microsoft Agents SDK packages pin each other exactly — always upgrade all four together.
+# To upgrade: change the pins here and in pyproject.toml, run `uv lock`, test locally, then deploy.
+
 # Microsoft 365 Agents SDK — hosting + bot protocol
-microsoft-agents-hosting-aiohttp>=1.1.0.dev7
-microsoft-agents-hosting-core>=1.1.0.dev7
-microsoft-agents-authentication-msal>=1.1.0.dev7
-microsoft-agents-activity>=1.1.0.dev7
+microsoft-agents-hosting-aiohttp==1.7.0
+microsoft-agents-hosting-core==1.7.0
+microsoft-agents-authentication-msal==1.7.0
+microsoft-agents-activity==1.7.0
 
 # Microsoft Agent 365 SDK — notifications
-microsoft_agents_a365_notifications>=0.1.0
+microsoft-agents-a365-notifications==1.0.0
 
-# Azure SDK
+# Azure SDK / model client
 azure-ai-projects==2.4.0
-azure-core-tracing-opentelemetry>=1.0.0b12
-azure-identity>=1.17.0
-azure-keyvault-secrets>=4.8.0
-azure-monitor-opentelemetry>=1.6.0
-opentelemetry-api>=1.31.0
-opentelemetry-sdk>=1.31.0
-opentelemetry-instrumentation-httpx>=0.52b0
+openai==3.7.0
+azure-core-tracing-opentelemetry==1.0.0b13
+azure-identity==1.25.3
+azure-keyvault-secrets==4.11.2
+azure-monitor-opentelemetry==1.8.9
+opentelemetry-api==1.43.0
+opentelemetry-sdk==1.43.0
+opentelemetry-instrumentation-httpx==0.64b0
 
 # HTTP / web stack
-aiohttp>=3.10
-httpx>=0.24.0
-python-dotenv>=1.0.0
+aiohttp==3.14.3
+httpx==0.28.1
+python-dotenv==1.2.3
 
 # Utilities
-pydantic>=2.0.0
-typing-extensions>=4.0.0
+pydantic==2.13.5
+typing-extensions==4.16.0

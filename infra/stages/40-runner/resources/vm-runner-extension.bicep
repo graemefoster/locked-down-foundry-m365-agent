@@ -27,6 +27,9 @@ param location string = resourceGroup().location
 @description('GitHub repo URL, e.g. https://github.com/owner/repo.')
 param githubRunnerRepoUrl string
 
+@description('GitHub Actions runner version installed by the bootstrap.')
+param githubRunnerVersion string
+
 @description('Key Vault (DNS) name holding the runner PAT secret.')
 param keyVaultName string
 
@@ -62,6 +65,7 @@ var configPreamble = join(
     '#!/usr/bin/env bash'
     '# re-exec nonce: ${reExecuteNonce}'
     'export REPO_URL=\'${githubRunnerRepoUrl}\''
+    'export RUNNER_VERSION=\'${githubRunnerVersion}\''
     'export KEY_VAULT_NAME=\'${keyVaultName}\''
     'export PAT_SECRET_NAME=\'${githubRunnerPatSecretName}\''
     'export RUNNER_LABELS=\'${githubRunnerLabels}\''

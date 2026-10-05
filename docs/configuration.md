@@ -15,6 +15,22 @@ agents/<name>/
 agents. Deploy workflows normalize it to JSON with `yq` (`yq -o=json`) on the in-VNet runner before
 the REST deploy scripts consume it. An `agent.yaml` inside an application source project is source
 metadata for that application; workflows must not treat it as the deployment manifest.
+Per-agent `azure.yaml` files are not used; `azure.yaml` at the repository root remains the
+infrastructure and application deployment manifest.
+
+`scripts/deploy-agent.ps1` is the common entry point. It dispatches prompt manifests directly,
+runs `dotnet publish` for `dotnet_*` source agents, packages the source directory for `python_*`
+agents, and builds ACR images for manifests with `definition.image`.
+
+Python source agents use one of these layouts:
+
+- A root launcher such as `main.py` imports an adjacent package directory; the source ZIP preserves
+  both at its root.
+- A package with relative imports uses `entry_point: [python, -m, <package>]`; the wrapper preserves
+  the package directory and copies `requirements.txt` and `pyproject.toml` to the ZIP root.
+
+Do not flatten a package containing relative imports into the ZIP root and launch its internal
+`main.py` directly.
 
 Use unsuffixed values. There are no dev/test variants of agent files, routes, or repository
 variables.
@@ -47,10 +63,11 @@ definition:
       require_approval: "never"
 ```
 
-Do not commit a generated `server_url`. `scripts/deploy-prompt-agent.ps1` injects
-`MCP_SERVER_URL` into each MCP tool immediately before deployment. The
-`project_connection_id` remains in the file because it supplies the agentic identity
-connection.
+Do not commit a generated `server_url`. `scripts/deploy-prompt-agent.ps1` matches each MCP tool
+to `mcp/mcp.json` by `project_connection_id` (`connectionName`) or `server_label` (`name`), then
+builds its URL as `<MCP_GATEWAY_URL>/<server-name>/`. The `project_connection_id` remains in the
+file because it supplies the agentic identity connection. During migration, the deploy script also
+accepts the former primary-server URL and removes its configured server suffix before mapping tools.
 
 ### Agent endpoint (protocols and authorization)
 
@@ -249,8 +266,7 @@ Use unsuffixed repository variables for the single environment:
 |---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | Private Foundry project endpoint used by agent, governance, Teams, and eval workflows. |
 | `AZURE_AI_PROJECT_NAME` | Foundry project name. |
-| `MCP_GATEWAY_URL` | Deployed MCP gateway URL exported by infrastructure. |
-| `MCP_SERVER_URL` | Workflow-facing copy of `MCP_GATEWAY_URL`. |
+| `MCP_GATEWAY_URL` | APIM gateway base URL used to derive each configured MCP server URL. |
 | `MCP_COMPLIANCE_AUDIENCE` | Audience accepted by the MCP APIM policy. |
 | `MCP_WEBAPP_NAME` | MCP App Service name. |
 | `FOUNDRY_AGENTS_API_NAME` | APIM Foundry Agents API resource name. |

@@ -1,4 +1,4 @@
-name: Apply agent network governance
+name: "Internal: Apply agent network governance"
 
 on:
   workflow_call:

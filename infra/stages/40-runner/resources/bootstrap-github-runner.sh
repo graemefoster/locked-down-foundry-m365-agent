@@ -32,12 +32,11 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-RUNNER_VERSION="${RUNNER_VERSION:-2.328.0}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/actions-runner}"
 
 log() { echo "[bootstrap-runner] $(date -Is) $*"; }
 
-for var in REPO_URL KEY_VAULT_NAME PAT_SECRET_NAME RUNNER_USER; do
+for var in REPO_URL RUNNER_VERSION KEY_VAULT_NAME PAT_SECRET_NAME RUNNER_USER; do
   if [[ -z "${!var:-}" ]]; then
     echo "Required variable '$var' was not set." >&2
     exit 1

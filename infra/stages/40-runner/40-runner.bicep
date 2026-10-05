@@ -38,6 +38,7 @@ param deployBastion bool
 
 // ---- self-hosted GitHub runner (opt-in) ----
 param githubRunnerRepoUrl string
+param githubRunnerVersion string
 @secure()
 param githubRunnerPat string
 param githubRunnerPatSecretName string
@@ -95,13 +96,15 @@ module bastionModule './resources/bastion.bicep' = if (deployBastion) {
 // on the private LINUX VM (the only host that can reach the Foundry private endpoint — the Windows
 // dev VM is optional and intentionally has no such access). The Linux VM's system-assigned identity
 // needs Foundry User on the project so the on-VM scripts can acquire a token and call the
-// Agents API — that RBAC is provisioned here.
+// Agents API. An installed runner also gets constrained project-level role-assignment writes
+// for granting Foundry User to runtime agent identities.
 module vmFoundryRole './rbac/vm-foundry-role.bicep' = {
   name: 'vm-foundry-role-${uniqueSuffix}'
   params: {
     accountName: aiAccountName
     projectName: projectName
     vmPrincipalId: linuxVmModule.outputs.vmPrincipalId
+    allowAgentRoleAssignments: installGithubRunner
   }
 }
 
@@ -169,6 +172,7 @@ module vmRunnerExtension './resources/vm-runner-extension.bicep' = if (installGi
     vmName: linuxVmModule.outputs.vmName
     location: location
     githubRunnerRepoUrl: githubRunnerRepoUrl
+    githubRunnerVersion: githubRunnerVersion
     keyVaultName: keyVaultName
     githubRunnerPatSecretName: githubRunnerPatSecretName
     githubRunnerLabels: githubRunnerLabels

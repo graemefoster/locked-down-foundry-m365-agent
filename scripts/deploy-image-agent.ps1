@@ -24,6 +24,12 @@ $agentName = $agent.name
 if ([string]::IsNullOrWhiteSpace($agentName)) {
   throw "Agent JSON has no 'name': $AgentJsonPath"
 }
+if (
+  $null -ne $agent.definition.environment_variables -and
+  $agent.definition.environment_variables.PSObject.Properties.Name -contains 'FOUNDRY_PROJECT_ENDPOINT'
+) {
+  $agent.definition.environment_variables.FOUNDRY_PROJECT_ENDPOINT = $FoundryProjectEndpoint
+}
 Write-Host "Building the image for '$agentName'."
 
 $loginServer = az acr show --name $AcrName --query loginServer --output tsv

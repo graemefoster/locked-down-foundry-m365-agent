@@ -13,7 +13,7 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-agent.yml
     with:
-      agent-manifest: agents/grf-2026-teams-agent/agent.yaml
+      agent-directory: agents/grf-2026-teams-agent
 
   governance:
     needs: deploy

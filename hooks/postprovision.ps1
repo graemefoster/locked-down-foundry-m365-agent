@@ -11,10 +11,9 @@
   workflows) and it never touches the private VNet - so it does not reintroduce the old
   `az vm run-command` orchestration.
 
-  Variable mapping (repo variable  <-  azd output / env var):
-      Same-named Bicep outputs are copied 1:1. The only rename is MCP_SERVER_URL <- MCP_GATEWAY_URL
-      (the workflows read `vars.MCP_SERVER_URL`; the Bicep output is named MCP_GATEWAY_URL).
-      TEAMS_PUBLISH_SCOPE is a manual choice (no Bicep output) and is left for the operator to set.
+  Variable mapping (repo variable <- azd output / env var):
+      Same-named Bicep outputs are copied 1:1. TEAMS_PUBLISH_SCOPE is a manual choice
+      (no Bicep output) and is left for the operator to set.
 
   Idempotent: `gh variable set` creates-or-updates, so re-running just refreshes the values.
 
@@ -63,7 +62,7 @@ if (-not $repoSlug) {
 }
 
 # --- Repo-scoped variables -------------------------------------------------------------------
-# Repo variable name -> source env var (Bicep output). Same name unless noted.
+# Repo variable name -> source env var (Bicep output).
 $repoVariableMap = [ordered]@{
   AZURE_SUBSCRIPTION_ID            = 'AZURE_SUBSCRIPTION_ID'
   AZURE_LOCATION                   = 'AZURE_LOCATION'
@@ -73,7 +72,7 @@ $repoVariableMap = [ordered]@{
   AZURE_AI_PROJECT_ID            = 'AZURE_AI_PROJECT_ID'
   AZURE_AI_PROJECT_NAME          = 'AZURE_AI_PROJECT_NAME'
   AZURE_AI_MODEL_DEPLOYMENT_NAME = 'AZURE_AI_MODEL_DEPLOYMENT_NAME'
-  MCP_SERVER_URL                 = 'MCP_GATEWAY_URL'
+  MCP_GATEWAY_URL                = 'MCP_GATEWAY_URL'
   MCP_COMPLIANCE_APIM_NAME       = 'MCP_COMPLIANCE_APIM_NAME'
   MCP_COMPLIANCE_AUDIENCE        = 'MCP_COMPLIANCE_AUDIENCE'
   MCP_COMPLIANCE_SERVER_COUNT    = 'MCP_COMPLIANCE_SERVER_COUNT'

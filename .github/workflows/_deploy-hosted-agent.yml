@@ -1,20 +1,22 @@
-name: Deploy container-image agent
+name: "Internal: Deploy container-image agent"
 
 on:
   workflow_call:
     inputs:
-      agent-manifest:
-        description: Path to the image agent YAML manifest (agents/<name>/agent.yaml).
+      agent-directory:
+        description: Directory containing the image agent's agent.yaml.
         type: string
         required: true
-      build-context:
-        description: Docker build context.
+      source-directory:
+        description: Docker build context relative to the agent directory.
         type: string
-        required: true
+        required: false
+        default: ''
       image-repository:
-        description: ACR repository name.
+        description: ACR repository name. Defaults to the agent name.
         type: string
-        required: true
+        required: false
+        default: ''
       dockerfile:
         description: Dockerfile path relative to the build context.
         type: string
@@ -31,21 +33,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Normalize the manifest (yq)
-        shell: bash
-        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
-
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
 
-      - name: Build, deploy, and publish the image agent
+      - name: Build and deploy the image agent
         shell: pwsh
         run: |
-          ./scripts/deploy-image-agent.ps1 `
-            -AgentJsonPath agent.json `
+          ./scripts/deploy-agent.ps1 `
+            -AgentDirectory "${{ inputs.agent-directory }}" `
+            -SourceDirectory "${{ inputs.source-directory }}" `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -AcrName "${{ vars.AZURE_CONTAINER_REGISTRY_NAME }}" `
             -ImageRepository "${{ inputs.image-repository }}" `
-            -BuildContext "${{ inputs.build-context }}" `
             -Dockerfile "${{ inputs.dockerfile }}"

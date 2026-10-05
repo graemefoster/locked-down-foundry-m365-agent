@@ -77,6 +77,13 @@ failure, not as a supported steady state.
 - In repository settings, verify an idle runner with labels
   `self-hosted`, `vnet`, and `foundry-private`.
 
+### Runner registration requires a newer version
+
+Fresh runner installation uses the version pinned by `GITHUB_RUNNER_VERSION`. If GitHub rejects
+that version as obsolete, update the value and rerun `azd provision`. The existing Linux VM and
+completed cloud-init setup are reused; the changing Run Command nonce re-executes
+`install-github-runner`, which replaces any partial installation before registering the runner.
+
 ### Workflow is queued
 
 The requested labels must match the private runner. Confirm the runner service is active and the
@@ -161,8 +168,9 @@ stage regenerates routes, removes stale routes, and reapplies the token policy.
 - `403 agent_not_permitted`: the agent is absent from the server entry, its live identity could
   not be resolved, or governance has not been reapplied.
 - `429`: the configured `requestsPerMinute` limit was exceeded.
-- Agent run reports no MCP URL: `MCP_SERVER_URL` was not synced or the prompt agent was deployed
-  outside the supported workflow.
+- Agent deployment reports no MCP URL or mapping: `MCP_GATEWAY_URL` was not synchronized, or the
+  tool's `server_label` / `project_connection_id` does not match `name` / `connectionName` in
+  `mcp/mcp.json`.
 
 Run `azd hooks run postprovision`, then rerun the affected agent's lifecycle workflow.
 

@@ -1,21 +1,35 @@
 object: agent.version
 name: advanced-autopilot-agent
-description: Advanced Autopilot Agent — hosted container-image M365 digital worker adapted from the Foundry autopilot Python sample, calling the Foundry Responses API with the Word/Mail/OneDrive-SharePoint/Teams/Excel/Calendar (and optional Azure DevOps) MCP tool bundle.
+description: Advanced Autopilot Agent — hosted Python M365 digital worker adapted from the Foundry autopilot sample, calling the Foundry Responses API with the Word/Mail/OneDrive-SharePoint/Teams/Excel/Calendar (and optional Azure DevOps) MCP tool bundle.
 digital_worker_type: m365
 definition:
   kind: hosted
-  container_protocol_versions:
+  protocol_versions:
     - protocol: activity
       version: 2.0.0
-  cpu: "2"
-  memory: 4Gi
-  image: ""
+  cpu: "0.5"
+  memory: 1Gi
+  code_configuration:
+    runtime: python_3_13
+    entry_point:
+      - python
+      - -m
+      - hello_world_a365_agent
+    dependency_resolution: remote_build
   environment_variables:
     ModelDeployment: gpt-5-mini
     FOUNDRY_PROJECT_ENDPOINT: ""
-    # Azure DevOps organization name (e.g. "contoso"). Leave blank to keep the
-    # optional azure-devops MCP server disabled; agent.py skips it gracefully
-    # when this is unset.
+    MCP_PLATFORM_ENDPOINT: https://agent365.svc.cloud.microsoft
+    CONNECTIONS__SERVICE_CONNECTION__SETTINGS__AUTHTYPE: IdentityProxyManager
+    CONNECTIONS__SERVICE_CONNECTION__SETTINGS__SCOPES__0: 5a807f24-c9de-44ee-a3a7-329e88a00ffc/.default
+    CONNECTIONSMAP__0__SERVICEURL: "*"
+    CONNECTIONSMAP__0__CONNECTION: SERVICE_CONNECTION
+    AGENTAPPLICATION__STARTTYPINGTIMER: "false"
+    AGENTAPPLICATION__REMOVERECIPIENTMENTION: "false"
+    AGENTAPPLICATION__NORMALIZEMENTIONS: "false"
+    AGENTAPPLICATION__USERAUTHORIZATION__AUTOSIGNIN: "false"
+    AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__AGENTIC__TYPE: AgenticUserAuthorization
+    AGENTAPPLICATION__USERAUTHORIZATION__HANDLERS__AGENTIC__SETTINGS__SCOPES: 5a807f24-c9de-44ee-a3a7-329e88a00ffc/.default
     AZURE_DEVOPS_ORGANIZATION: ""
 agent_endpoint:
   protocol_configuration:

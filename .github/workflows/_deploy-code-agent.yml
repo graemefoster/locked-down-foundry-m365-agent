@@ -1,43 +1,19 @@
-name: Deploy source-zip agent
+name: "Internal: Deploy source-zip agent"
 
 on:
   workflow_call:
     inputs:
-      agent-manifest:
-        description: Path to the hosted agent YAML manifest (agents/<name>/agent.yaml).
+      agent-directory:
+        description: Directory containing the hosted agent's agent.yaml.
         type: string
         required: true
-      build-context:
-        description: Docker context, dotnet project directory, or Python source directory.
-        type: string
-        required: true
-      build-method:
-        description: docker, dotnet, or python.
-        type: string
-        required: false
-        default: docker
-      dockerfile:
-        description: Dockerfile path relative to the build context.
-        type: string
-        required: false
-        default: Dockerfile
-      build-target:
-        description: Docker build stage containing the publish output at /app.
-        type: string
-        required: false
-        default: build
-      entry-dll:
-        description: Entry DLL expected in the publish output.
+      source-directory:
+        description: Source directory relative to the agent directory.
         type: string
         required: false
         default: ''
-      entry-file:
-        description: Python entry file expected in the source archive.
-        type: string
-        required: false
-        default: ''
-      use-delegated-login:
-        description: Sign in with a delegated user (device-code) token instead of the VM managed identity. Required for m365 digital-worker agents so the created agent's identity blueprint is sponsored by the user (matches publish).
+      grant-agent-project-access:
+        description: Grant the runtime agent identity Foundry User on the project before serving it.
         type: boolean
         required: false
         default: false
@@ -52,103 +28,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Build with Docker
-        if: inputs.build-method == 'docker'
-        shell: pwsh
-        run: |
-          $dockerfile = Join-Path "${{ inputs.build-context }}" "${{ inputs.dockerfile }}"
-          $tag = "agent-code-build:$("${{ github.sha }}".Substring(0, 12))"
-
-          docker build `
-            --target "${{ inputs.build-target }}" `
-            --file $dockerfile `
-            --tag $tag `
-            "${{ inputs.build-context }}"
-
-          if ($LASTEXITCODE -ne 0) { throw "Docker build failed." }
-
-          $containerId = docker create $tag
-          try {
-            New-Item -ItemType Directory -Path publish | Out-Null
-            docker cp "${containerId}:/app/." publish
-            if ($LASTEXITCODE -ne 0) { throw "Could not copy /app from the build container." }
-          }
-          finally {
-            docker rm -f $containerId | Out-Null
-          }
-
-      - name: Build with dotnet
-        if: inputs.build-method == 'dotnet'
-        shell: pwsh
-        run: |
-          dotnet publish "${{ inputs.build-context }}" -c Release -o publish
-          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
-
-      - name: Create the compiled source zip
-        if: inputs.build-method != 'python'
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace("${{ inputs.entry-dll }}")) {
-            throw "entry-dll is required for '${{ inputs.build-method }}' builds."
-          }
-
-          $entryDll = Join-Path publish "${{ inputs.entry-dll }}"
-          if (-not (Test-Path -LiteralPath $entryDll)) {
-            throw "Publish output does not contain '${{ inputs.entry-dll }}'."
-          }
-
-          Push-Location publish
-          try {
-            zip --quiet --recurse-paths --symlinks ../agent.zip .
-            if ($LASTEXITCODE -ne 0) { throw "zip failed." }
-          }
-          finally {
-            Pop-Location
-          }
-
-      - name: Create the Python source zip
-        if: inputs.build-method == 'python'
-        shell: pwsh
-        run: |
-          $context = "${{ inputs.build-context }}"
-          $entryFile = "${{ inputs.entry-file }}"
-          if ([string]::IsNullOrWhiteSpace($entryFile)) {
-            throw "entry-file is required for Python builds."
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $context $entryFile))) {
-            throw "Python source does not contain '$entryFile'."
-          }
-
-          git archive `
-            --format=zip `
-            --output=agent.zip `
-            "HEAD:$context"
-
-          if ($LASTEXITCODE -ne 0) { throw "Could not create the Python source zip." }
-
-      - name: Normalize the manifest (yq)
-        shell: bash
-        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
-
       - name: Sign in with the VM managed identity
-        if: inputs.use-delegated-login == false
-        shell: pwsh
-        run: az login --identity --output none
-
-      - name: Sign in with a delegated user token
-        if: inputs.use-delegated-login == true
         shell: pwsh
         run: |
-          az login `
-            --use-device-code `
-            --tenant "${{ vars.TEAMS_TENANT_ID }}" `
-            --output none
-          if ($LASTEXITCODE -ne 0) { throw "Delegated user sign-in failed." }
+          az login --identity --output none
+          if ($LASTEXITCODE -ne 0) { throw "Managed-identity sign-in failed." }
+          az account set --subscription "${{ vars.AZURE_SUBSCRIPTION_ID }}"
+          if ($LASTEXITCODE -ne 0) { throw "Could not select the deployment subscription." }
 
-      - name: Deploy and publish the source-zip agent
+      - name: Package and deploy the source agent
         shell: pwsh
         run: |
-          ./scripts/deploy-code-agent.ps1 `
-            -AgentJsonPath agent.json `
-            -ZipPath agent.zip `
-            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}"
+          ./scripts/deploy-agent.ps1 `
+            -AgentDirectory "${{ inputs.agent-directory }}" `
+            -SourceDirectory "${{ inputs.source-directory }}" `
+            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -FoundryProjectId "${{ vars.AZURE_AI_PROJECT_ID }}" `
+            -GrantAgentProjectAccess:([bool]::Parse("${{ inputs.grant-agent-project-access }}"))

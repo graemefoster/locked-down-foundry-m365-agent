@@ -1,10 +1,10 @@
-name: Publish agent to Teams / M365
+name: "Internal: Publish agent to Teams / M365"
 
 on:
   workflow_call:
     inputs:
       agent-directory:
-        description: Directory containing agent.yaml, network.json, and teams.json.
+        description: Directory containing agent.yaml and teams.json or autopilot.json.
         type: string
         required: true
 
@@ -25,6 +25,7 @@ jobs:
             --use-device-code `
             --tenant "${{ vars.TEAMS_TENANT_ID }}" `
             --output none
+          if ($LASTEXITCODE -ne 0) { throw "Delegated user sign-in failed." }
 
           $token = az account get-access-token `
             --resource https://ai.azure.com `
@@ -40,12 +41,14 @@ jobs:
 
       - name: Restore the VM managed identity
         shell: pwsh
-        run: az login --identity --output none
+        run: |
+          az login --identity --output none
+          if ($LASTEXITCODE -ne 0) { throw "Managed-identity sign-in failed." }
 
       - name: Publish the agent
         shell: pwsh
         run: |
-          ./scripts/publish-teams.ps1 `
+          ./scripts/publish-agent.ps1 `
             -AgentDirectory "${{ inputs.agent-directory }}" `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `

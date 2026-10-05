@@ -13,9 +13,8 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-code-agent.yml
     with:
-      agent-manifest: agents/support-case-agent-ghcpsdk/agent.yaml
-      build-context: agents/support-case-agent-ghcpsdk/src/agent
-      entry-dll: support-case-agent-ghcpsdk.Agent.dll
+      agent-directory: agents/support-case-agent-ghcpsdk
+      source-directory: src/agent
 
   governance:
     needs: deploy

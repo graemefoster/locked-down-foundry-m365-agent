@@ -74,11 +74,16 @@ gateway, runner, and ingress design.
 | `azd` host | Operator's Azure CLI and GitHub CLI sessions | Provisioning, application deployment, repository-variable sync, runner deregistration, and teardown. |
 | Linux runner | VM managed identity | Foundry agent deployment, Azure control-plane changes, ACR access, governance, and evaluation. |
 | Foundry/project resources | Managed identities | Access to private state stores, Key Vault, model connections, and dependent services. |
+| Azure AI Search | System-assigned managed identity | Calls the primary Foundry account's embedding deployment for keyless vectorization. |
 | APIM | System-assigned managed identity | Keyless calls to the provider Foundry account and Azure control-plane discovery where configured. |
 | Teams publisher | VM managed identity plus a delegated user token | Managed identity for agent and Bot Service operations; delegated token only for the Microsoft 365 publish API. |
 
 Secrets are not embedded in agent configuration. The runner bootstrap reads its registration
 credential from Key Vault, and deployment workflows use managed identity.
+
+The installed runner's project-scoped RBAC administrator assignment is conditioned to allow only
+Foundry User grants to service principals and to deny role-assignment deletion. Deployment grants
+runtime access using the agent's principal object ID without Microsoft Graph lookup.
 
 ## Trust boundaries
 
@@ -142,7 +147,8 @@ deny-by-default for callers not listed in that agent's `network.json`.
 agent -> firewall -> private APIM MCP API -> private MCP App Service
 ```
 
-The workflow injects `MCP_SERVER_URL` into prompt-agent MCP tools at deployment time. APIM
+The workflow derives each prompt-agent MCP tool URL from `MCP_GATEWAY_URL` and `mcp/mcp.json` at
+deployment time. APIM
 validates the agent identity and applies the per-server allowlist and request rate from
 `mcp/mcp-policy.json`. The private MCP App Service Easy Auth configuration independently
 restricts access to the union of agent identities resolved from that policy.
@@ -192,8 +198,10 @@ These properties are intentional and should not be weakened:
 |---|---|
 | Azure resources and MCP/YARP application code | `azd up`, `azd provision`, and `azd deploy` |
 | Agent lifecycle | One dispatchable `deploy-<agent>.yml` workflow per agent |
+| Agent deployment dispatch | `scripts/deploy-agent.ps1` |
 | Prompt deployment | `_deploy-agent.yml` and `scripts/deploy-prompt-agent.ps1` |
 | Source-zip deployment | `_deploy-code-agent.yml` and `scripts/deploy-code-agent.ps1` |
-| Teams publishing | Internal `publish-teams.yml` and `scripts/publish-teams.ps1` |
-| Autopilot publishing | Per-agent lifecycle workflow and `scripts/publish-autopilot.ps1` |
-| Runtime governance | Internal `deploy-agent-network.yml` or the same four explicit `apply-*.ps1` steps in a hosted M365 lifecycle |
+| Container-image deployment | `_deploy-hosted-agent.yml` and `scripts/deploy-image-agent.ps1` |
+| Teams publishing | Internal `publish-teams.yml`, `scripts/publish-agent.ps1`, and `scripts/publish-teams.ps1` |
+| Autopilot publishing | Internal `publish-teams.yml`, `scripts/publish-agent.ps1`, and `scripts/publish-autopilot.ps1` |
+| Runtime governance | Internal `deploy-agent-network.yml` with four explicit, serialized `apply-*.ps1` steps |

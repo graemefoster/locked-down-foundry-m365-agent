@@ -28,6 +28,7 @@
     "vmAdminUsername": { "value": "${VM_ADMIN_USERNAME=graeme}" },
     "deployWindowsVm": { "value": "${DEPLOY_WINDOWS_VM=false}" },
     "githubRunnerRepoUrl": { "value": "${GITHUB_RUNNER_REPO_URL=}" },
+    "githubRunnerVersion": { "value": "${GITHUB_RUNNER_VERSION=2.337.0}" },
     "githubRunnerPat": { "value": "${GITHUB_RUNNER_PAT=}" },
     "githubRunnerPatSecretName": { "value": "${GITHUB_RUNNER_PAT_SECRET_NAME=gh-runner-pat}" },
     "githubRunnerLabels": { "value": "${GITHUB_RUNNER_LABELS=vnet,foundry-private}" },

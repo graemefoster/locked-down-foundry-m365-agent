@@ -1,10 +1,10 @@
-name: Deploy prompt agent
+name: "Internal: Deploy prompt agent"
 
 on:
   workflow_call:
     inputs:
-      agent-manifest:
-        description: Path to the prompt agent YAML manifest (agents/<name>/agent.yaml).
+      agent-directory:
+        description: Directory containing the prompt agent's agent.yaml.
         type: string
         required: true
 
@@ -18,18 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Normalize the manifest (yq)
-        shell: bash
-        run: yq -o=json '.' "${{ inputs.agent-manifest }}" > agent.json
-
       - name: Sign in with the VM managed identity
         shell: pwsh
         run: az login --identity --output none
 
-      - name: Deploy and publish the prompt agent
+      - name: Deploy and serve the prompt agent
         shell: pwsh
         run: |
-          ./scripts/deploy-prompt-agent.ps1 `
-            -AgentJsonPath agent.json `
+          ./scripts/deploy-agent.ps1 `
+            -AgentDirectory "${{ inputs.agent-directory }}" `
             -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
-            -McpServerUrl "${{ vars.MCP_SERVER_URL }}"
+            -McpGatewayUrl "${{ vars.MCP_GATEWAY_URL || vars.MCP_SERVER_URL }}" `
+            -McpConfigPath mcp/mcp.json

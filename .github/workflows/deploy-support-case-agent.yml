@@ -13,9 +13,8 @@ jobs:
   deploy:
     uses: ./.github/workflows/_deploy-code-agent.yml
     with:
-      agent-manifest: agents/support-case-agent/agent.yaml
-      build-context: agents/support-case-agent/support-case-agent.Agent
-      entry-dll: support-case-agent.Agent.dll
+      agent-directory: agents/support-case-agent
+      source-directory: support-case-agent.Agent
 
   governance:
     needs: deploy
