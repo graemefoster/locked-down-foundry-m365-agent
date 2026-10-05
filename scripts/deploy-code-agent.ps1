@@ -2,6 +2,8 @@ param(
   [Parameter(Mandatory = $true)] [string]$AgentJsonPath,
   [Parameter(Mandatory = $true)] [string]$ZipPath,
   [Parameter(Mandatory = $true)] [string]$FoundryProjectEndpoint,
+  [Parameter(Mandatory = $false)] [string]$FoundryProjectId = $env:AZURE_AI_PROJECT_ID,
+  [switch]$GrantAgentProjectAccess,
   [Parameter(Mandatory = $false)] [string]$ApiVersion = '2025-11-15-preview'
 )
 
@@ -24,6 +26,9 @@ if ([string]::IsNullOrWhiteSpace($agentName)) {
 if ($null -eq $agent.definition.code_configuration) {
   throw "Agent '$agentName' has no definition.code_configuration."
 }
+if ($GrantAgentProjectAccess -and $FoundryProjectId -notmatch '^/subscriptions/[0-9a-f-]{36}/resourceGroups/[^/]+/providers/Microsoft\.CognitiveServices/accounts/[^/]+/projects/[^/]+$') {
+  throw 'GrantAgentProjectAccess requires FoundryProjectId to be the full Foundry project ARM resource ID.'
+}
 if ($agent.definition.environment_variables.PSObject.Properties.Name -contains 'FOUNDRY_PROJECT_ENDPOINT') {
   $agent.definition.environment_variables.FOUNDRY_PROJECT_ENDPOINT = $FoundryProjectEndpoint
 }
@@ -36,7 +41,7 @@ $token = az account get-access-token `
   --output tsv
 
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($token)) {
-  throw "Could not acquire a Foundry token. Run 'az login --identity' first."
+  throw "Could not acquire a Foundry token. Sign in with Azure CLI using the intended deployment identity."
 }
 
 $headers = @{ Authorization = "Bearer $token" }
@@ -131,6 +136,63 @@ else {
 
 if ([string]::IsNullOrWhiteSpace($agentVersion)) {
   throw "Could not resolve the version created for '$agentName'."
+}
+
+if ($GrantAgentProjectAccess) {
+  $createdVersion = if ($response.version) { $response } else { $response.versions.latest }
+  $provisioningStatus = [string]$createdVersion.status
+  $instanceClientId = [string]$createdVersion.instance_identity.client_id
+  $versionUrl = "$FoundryProjectEndpoint/agents/$agentName/versions/$agentVersion`?api-version=$ApiVersion"
+  $maxRetries = 30
+  $delaySeconds = 10
+
+  for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+    if ($provisioningStatus -eq 'active' -and -not [string]::IsNullOrWhiteSpace($instanceClientId)) {
+      break
+    }
+    if ($provisioningStatus -eq 'failed') {
+      throw "Agent '$agentName' version $agentVersion provisioning failed."
+    }
+    if ($attempt -gt 1) {
+      Start-Sleep -Seconds $delaySeconds
+    }
+
+    $version = Invoke-RestMethod `
+      -Method Get `
+      -Uri $versionUrl `
+      -Headers $headers
+    $provisioningStatus = [string]$version.status
+    if ($version.instance_identity.client_id) {
+      $instanceClientId = [string]$version.instance_identity.client_id
+    }
+    Write-Host "Agent '$agentName' version $agentVersion provisioning status: $provisioningStatus"
+  }
+
+  if ($provisioningStatus -ne 'active') {
+    throw "Agent '$agentName' version $agentVersion provisioning status is '$provisioningStatus', expected 'active'."
+  }
+  if ([string]::IsNullOrWhiteSpace($instanceClientId)) {
+    throw "Agent '$agentName' version $agentVersion has no instance_identity.client_id."
+  }
+
+  Write-Host "Granting Foundry User to agent instance '$instanceClientId' on '$FoundryProjectId'."
+  # Inspect the CLI exit code ourselves so an existing assignment is not a terminating error.
+  $PSNativeCommandUseErrorActionPreference = $false
+  $roleAssignmentOutput = az role assignment create `
+    --assignee $instanceClientId `
+    --role 'Foundry User' `
+    --scope $FoundryProjectId `
+    --output none 2>&1 | Out-String
+
+  if ($LASTEXITCODE -eq 0) {
+    Write-Host "Foundry User role assignment created."
+  }
+  elseif ($roleAssignmentOutput -match 'RoleAssignmentExists') {
+    Write-Host "Foundry User role assignment already exists."
+  }
+  else {
+    throw "Failed to grant Foundry User to agent '$agentName'. The signed-in deployment identity needs Microsoft.Authorization/roleAssignments/write on '$FoundryProjectId'. CLI response: $roleAssignmentOutput"
+  }
 }
 
 # Serve the new version AND assert the endpoint protocol/authorization configuration from the
