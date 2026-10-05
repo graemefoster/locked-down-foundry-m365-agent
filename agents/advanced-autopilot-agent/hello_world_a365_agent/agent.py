@@ -153,12 +153,21 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 self._instance_client_id,
             )
             return ManagedIdentityCredential(client_id=self._instance_client_id)
-        try:
-            logger.info("Using DefaultAzureCredential for Foundry")
-            return DefaultAzureCredential()
-        except Exception:
-            logger.info("Falling back to AzureCliCredential for Foundry")
-            return AzureCliCredential()
+
+        subscription_id = os.getenv("FOUNDRY_SUBSCRIPTION_ID")
+        tenant_id = os.getenv("FOUNDRY_TENANT_ID")
+        if subscription_id:
+            logger.info(
+                "Using AzureCliCredential for Foundry subscription %s",
+                subscription_id,
+            )
+            return AzureCliCredential(subscription=subscription_id)
+        if tenant_id:
+            logger.info("Using AzureCliCredential for Foundry tenant %s", tenant_id)
+            return AzureCliCredential(tenant_id=tenant_id)
+
+        logger.info("Using DefaultAzureCredential for Foundry")
+        return DefaultAzureCredential()
 
     def _load_mcp_servers(self) -> list[dict[str, Any]]:
         manifest_path = Path(__file__).resolve().parent / "ToolingManifest.json"
@@ -881,6 +890,18 @@ Comment text: {comment_snippet}
         scope: str,
     ) -> Optional[str]:
         if not auth or not auth_handler_name:
+            # Local development only (e.g. Agents Playground with no agentic identity):
+            # use a delegated token supplied via BEARER_TOKEN, e.g. from
+            # `az account get-access-token --scope ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default`.
+            # Never set BEARER_TOKEN in a deployed environment.
+            dev_token = os.getenv("BEARER_TOKEN", "").strip()
+            if dev_token:
+                if self._instance_client_id:
+                    raise RuntimeError(
+                        "BEARER_TOKEN is only supported for local development without an agent identity."
+                    )
+                logger.info("Using BEARER_TOKEN from environment for MCP (scope=%s)", scope)
+                return dev_token
             return None
 
         try:

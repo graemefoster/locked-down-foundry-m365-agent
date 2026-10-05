@@ -122,6 +122,18 @@ sends at most four images, each no larger than 20 MiB, to the model. PNG, JPEG, 
 recognized by their file signatures; unsupported or failed downloads are logged and omitted.
 The Teams connector honors standard proxy environment variables.
 
+For local Advanced-agent testing, set `FOUNDRY_SUBSCRIPTION_ID` or `FOUNDRY_TENANT_ID` to
+select the Azure CLI credential. A deployed agent's instance identity always takes precedence.
+With authentication disabled in Agents Playground, leave `AUTH_HANDLER_NAME` empty and provide
+an optional `BEARER_TOKEN` for MCP calls. This fallback rejects use with a configured agent
+instance identity; never put developer tokens in deployment manifests or committed files.
+
+`scripts/get-mcp-dev-token.py` signs into your own public-client app using the delegated scopes
+from `ToolingManifest.json`. It supports browser or `--device-code` sign-in, writes the token only
+to stdout, and fails if required scopes are missing. Its local refresh-token cache is stored under
+`~/.cache/mcp-dev-token/` with owner-only file permissions. Run it with `uv run --with msal python`
+and supply `--client-id`, `--tenant`, and `--manifest`; see the script's `--help` for details.
+
 ### Hosted container-image agent
 
 ```yaml

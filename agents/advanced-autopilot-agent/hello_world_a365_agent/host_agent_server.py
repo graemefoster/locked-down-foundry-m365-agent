@@ -39,7 +39,6 @@ from microsoft_agents.hosting.aiohttp import (
 from microsoft_agents.hosting.core import (
     AgentApplication,
     AgentAuthConfiguration,
-    AuthenticationConstants,
     Authorization,
     ClaimsIdentity,
     MemoryStorage,
@@ -607,13 +606,11 @@ class GenericAgentHost:
         @web_middleware
         async def anonymous_claims(request, handler):
             if not auth_configuration:
+                # The SDK only treats an identity as anonymous when it has NO claims
+                # (ClaimsIdentity.allow_anonymous). Any claims here make the adapter try
+                # to acquire service-connection tokens for replies, which fails locally.
                 request["claims_identity"] = ClaimsIdentity(
-                    {
-                        AuthenticationConstants.AUDIENCE_CLAIM: "anonymous",
-                        AuthenticationConstants.APP_ID_CLAIM: "anonymous-app",
-                    },
-                    False,
-                    "Anonymous",
+                    {}, authentication_type="Anonymous"
                 )
             return await handler(request)
 
