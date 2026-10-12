@@ -284,7 +284,7 @@ pydantic==2.13.4
     #   openai
 pydantic-core==2.46.4
     # via pydantic
-pyjwt==2.13.0
+pyjwt==2.15.0
     # via
     #   microsoft-agents-hosting-core
     #   microsoft-opentelemetry
