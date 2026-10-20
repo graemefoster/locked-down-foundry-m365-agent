@@ -447,7 +447,7 @@ try {
   [System.IO.File]::WriteAllText((Join-Path $codePackageDirectory 'fixture.dll'), 'fixture')
   [System.IO.Compression.ZipFile]::CreateFromDirectory($codePackageDirectory, $zipPath)
 
-  $global:PromptScenario = 'version'
+  $global:PromptScenario = 'create'
   $global:CurlCalls.Clear()
   $global:RestCalls.Clear()
   $global:UploadedMetadata = ''
@@ -467,6 +467,7 @@ try {
   Assert-True (
     $global:UploadedMetadata -match '"digital_worker_type": "m365"'
   ) 'Code deploy omitted the M365 digital-worker type.'
+  Assert-True ($global:CurlCalls[0] -match '/agents\?') 'Code create did not use the agent creation endpoint.'
   Assert-True (
     $global:UploadedMetadata -match '"enable_m365_public_endpoint": true'
   ) 'Code deploy omitted the M365 public activity endpoint.'
@@ -483,6 +484,17 @@ try {
     @($global:RestCalls | Where-Object { $_.Uri -match '/versions/3\?' }).Count -eq 0
   ) 'M365 metadata must not trigger role assignment or identity polling without opt-in.'
   Write-Host 'PASS source-zip multipart upload and endpoint injection'
+
+  $global:PromptScenario = 'version'
+  $global:CurlCalls.Clear()
+  & "$repositoryRoot/scripts/deploy-code-agent.ps1" `
+    -AgentJsonPath $codeAgentPath `
+    -ZipPath $zipPath `
+    -FoundryProjectEndpoint 'https://fixture.services.ai.azure.com/api/projects/project'
+  Assert-True ($global:CurlCalls.Count -eq 1 -and $global:CurlCalls[0] -match '/versions\?') 'Code update did not upload a new version.'
+  Assert-True ($global:UploadedMetadata -notmatch 'digital_worker_type') 'Code update must omit the immutable digital-worker type.'
+  Assert-True ($global:CurlCalls[0] -match 'DigitalWorker=V1Preview') 'Code update must retain the digital-worker feature header.'
+  Write-Host 'PASS existing M365 agent version omits creation-only digital-worker type'
 
   $projectId = '/subscriptions/00000000-0000-0000-0000-000000000002/resourceGroups/fixture-rg/providers/Microsoft.CognitiveServices/accounts/fixture/projects/project'
   $codeDeployParameters = @{

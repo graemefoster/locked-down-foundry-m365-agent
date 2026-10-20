@@ -145,7 +145,9 @@ scripts/deploy-code-agent.ps1
 ```
 
 The script uploads the ZIP and the normalized `agent.json` metadata together, then publishes the
-created version.
+created version. It sends the immutable `digital_worker_type` only when creating an agent, not
+when uploading a new version. Runtime environment variables come from `agent.yaml`; changing
+them requires an agent deployment, not a Teams catalog republish.
 
 The two Autopilot workflows enable `grant-agent-project-access`; the reusable workflow passes
 `-GrantAgentProjectAccess` and `-FoundryProjectId` to the deployment wrapper because their runtime
