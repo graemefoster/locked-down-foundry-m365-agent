@@ -7,6 +7,11 @@ on:
         description: Directory containing agent.yaml and teams.json or autopilot.json.
         type: string
         required: true
+      foundry-project-endpoint:
+        description: Explicit publishing target; defaults to the configured project.
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -47,10 +52,12 @@ jobs:
 
       - name: Publish the agent
         shell: pwsh
+        env:
+          FOUNDRY_PUBLISH_ENDPOINT: ${{ inputs.foundry-project-endpoint || vars.AZURE_AI_PROJECT_ENDPOINT }}
         run: |
           ./scripts/publish-agent.ps1 `
             -AgentDirectory "${{ inputs.agent-directory }}" `
-            -FoundryProjectEndpoint "${{ vars.AZURE_AI_PROJECT_ENDPOINT }}" `
+            -FoundryProjectEndpoint $env:FOUNDRY_PUBLISH_ENDPOINT `
             -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}" `
             -YarpFqdn "${{ vars.TEAMS_YARP_FQDN }}" `
             -TenantId "${{ vars.TEAMS_TENANT_ID }}" `

@@ -1,6 +1,15 @@
 name: Deploy advanced-autopilot-agent
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Deploy to the configured project, or only republish the existing grfpublicfoundry agent.
+        type: choice
+        options:
+          - deploy-and-publish
+          - republish-grfpublicfoundry
+        default: deploy-and-publish
+        required: true
 
 permissions:
   contents: read
@@ -11,6 +20,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: inputs.operation != 'republish-grfpublicfoundry'
     uses: ./.github/workflows/_deploy-code-agent.yml
     with:
       agent-directory: agents/advanced-autopilot-agent
@@ -23,6 +33,8 @@ jobs:
 
   publish:
     needs: governance
+    if: ${{ !cancelled() && (inputs.operation == 'republish-grfpublicfoundry' || needs.governance.result == 'success') }}
     uses: ./.github/workflows/publish-teams.yml
     with:
       agent-directory: agents/advanced-autopilot-agent
+      foundry-project-endpoint: ${{ inputs.operation == 'republish-grfpublicfoundry' && 'https://grfpublicfoundry.services.ai.azure.com/api/projects/proj-default' || '' }}

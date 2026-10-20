@@ -1,7 +1,7 @@
 {
   "displayName": "advanced-autopilot-agent",
   "publishScope": "Tenant",
-  "appVersion": "1.0.1",
+  "appVersion": "1.0.2",
   "canRespondWithoutMention": true,
   "shortDescription": "Advanced Autopilot digital worker adapted from the Foundry autopilot sample.",
   "fullDescription": "Advanced Autopilot Agent is a Microsoft Foundry Autopilot digital worker adapted from the Foundry autopilot sample. It responds to Microsoft 365 messages and notifications (Outlook, Word, Excel, PowerPoint, Teams) through the Foundry Responses API and the Microsoft 365 MCP tool bundle, deployed from Python source through GitHub Actions into a locked-down virtual network.",

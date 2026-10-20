@@ -96,6 +96,14 @@ YARP, Easy Auth, or Teams audiences at a time. Re-run any agent lifecycle after 
 `network.json`, `mcp.json`, or `mcp-policy.json`; governance always reconciles the complete
 repository state.
 
+For `advanced-autopilot-agent`, select `republish-grfpublicfoundry` in the existing lifecycle
+workflow to publish the already-deployed agent in `grfpublicfoundry/proj-default` only. This
+skips deployment and governance, leaves shared repository variables unchanged, and still uses
+the private self-hosted runner and delegated publishing sign-in. Increment `appVersion` in
+`agents/advanced-autopilot-agent/autopilot.json` before republishing; an existing version is a
+no-op. This does not update agent code or model configuration. The default `deploy-and-publish`
+operation retains the configured project's full lifecycle.
+
 ## Agent deployment modes
 
 All agent workflows run on `[self-hosted, vnet, foundry-private]` and use
