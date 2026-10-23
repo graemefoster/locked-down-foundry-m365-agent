@@ -132,7 +132,7 @@ openai==3.19.2
     # via
     #   agent (pyproject.toml)
     #   azure-ai-projects
-opentelemetry-api==1.44.0
+opentelemetry-api==1.45.1
     # via
     #   azure-core-tracing-opentelemetry
     #   azure-monitor-opentelemetry-exporter
