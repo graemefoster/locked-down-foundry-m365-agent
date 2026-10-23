@@ -45,7 +45,7 @@ azure-monitor-opentelemetry-exporter==1.0.0b57
     # via microsoft-opentelemetry
 azure-storage-blob==12.30.0
     # via azure-ai-projects
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   httpcore
     #   httpx
