@@ -343,6 +343,7 @@ class GenericAgentHost:
             )
 
         self.agent_app.conversation_update("membersAdded", **handler_config)(help_handler)
+        chat_turn.register_approvals(self.agent_app)  # adaptiveCard/action invoke (approval cards)
         self.agent_app.message("/help", **handler_config)(help_handler)
 
         @self.agent_app.activity("installationUpdate")

@@ -23,7 +23,11 @@ def compute_totals() -> dict[str, Any]:
     today = d["generated_for"]
     evs = sorted((e for e in d["events"] if e["start"].startswith(today)), key=lambda e: e["start"])
     conflicts = [(a, b) for i, a in enumerate(evs) for b in evs[i + 1:] if b["start"] < a["end"]]
-    return {"messages_total": len(d["messages"]), "unread": len(unread),
+    by_cat: dict[str, int] = {}
+    for m in unread:
+        if m["receivedDateTime"].startswith(today):
+            by_cat[m["category"]] = by_cat.get(m["category"], 0) + 1
+    return {"messages_total": len(d["messages"]), "unread": len(unread), "unread_today_by_category": by_cat,
             "urgent": sum(1 for m in unread if m["importance"] == "high"),
             "meetings_today": len(evs), "conflicts": len(conflicts)}
 
@@ -34,6 +38,11 @@ def _fn(name: str, description: str, props: dict[str, Any]) -> dict[str, Any]:
 
 
 TOOL_SCHEMAS: list[dict[str, Any]] = [
+    _fn("propose_reply", "Propose a reply draft to an email. NOTHING is sent: the user gets an approval card with "
+        "the draft and Approve/Reject buttons. Call once per draft, then tell the user the draft awaits approval.",
+        {"ref": {"type": "string", "description": "ticket/subject reference, e.g. INC-5826"},
+         "to": {"type": "string", "description": "recipient email address or name"},
+         "subject": {"type": "string"}, "body": {"type": "string", "description": "the full draft reply text"}}),
     _fn("list_messages", "List inbox messages (newest first) with id, subject, sender, received time, importance, link.",
         {"top": {"type": "integer", "description": "max messages (default 30)"},
          "unread_only": {"type": "boolean"}}),

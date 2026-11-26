@@ -14,7 +14,8 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 try:  # local editable install, see LOCAL_RUN.md
-    from m365_activity_ui import TurnPresenter, citations, kpi_strip, present_responses
+    from m365_activity_ui import (ApprovalDesk, CardInfo, TurnPresenter, approval_card, citations, donut_chart,
+                                  kpi_strip, present_responses, prompt_actions, with_actions)
 
     _LIB = True
 except ImportError:  # pragma: no cover
@@ -26,6 +27,45 @@ def available() -> bool:
 
 
 MAX_CITES = 9
+PENDING_APPROVALS: dict[str, dict] = {}   # approval_id -> draft (in-memory, one process)
+SENT_LOG: list[dict] = []                 # mock sends; one entry per approved draft
+
+
+def _decide(approval_id: str, approved: bool, actor: str) -> "CardInfo | None":
+    """ApprovalDesk callback: called once per id. Approve logs a mock send; unknown id -> None (400)."""
+    d = PENDING_APPROVALS.get(approval_id)
+    if d is None:
+        return None
+    if approved:
+        SENT_LOG.append({"approval_id": approval_id, "to": d["to"], "subject": d["subject"], "by": actor})
+        logger.warning("MOCK SEND #%d: to=%s subject=%r approved_by=%s", len(SENT_LOG), d["to"], d["subject"], actor)
+    else:
+        logger.warning("MOCK SEND REJECTED: approval=%s by=%s (nothing sent)", approval_id, actor)
+    return CardInfo(title=d["title"], summary=d["body"], details={"To": d["to"], "Subject": d["subject"]})
+
+
+if _LIB:
+    DESK = ApprovalDesk(_decide)
+
+
+def register_approvals(app: Any) -> None:
+    """Register the adaptiveCard/action invoke on the AgentApplication."""
+    if not _LIB:
+        return
+    if hasattr(app, "invoke"):
+        DESK.register(app)
+        return
+    # microsoft-agents-hosting-core 1.7.0 has no AgentApplication.invoke (the library README assumes it):
+    # same wiring through add_route(is_invoke=True).
+    from microsoft_agents.activity import Activity, ActivityTypes
+
+    def _is_card_action(context: Any) -> bool:
+        return context.activity.type == ActivityTypes.invoke and context.activity.name == "adaptiveCard/action"
+
+    async def _on_card_action(context: Any, _state: Any) -> None:
+        await context.send_activity(Activity(type=ActivityTypes.invoke_response, value=await DESK.handle(context)))
+
+    app.add_route(_is_card_action, _on_card_action, is_invoke=True)
 STEP_LABELS = {
     "list_messages": "Reading your inbox…",
     "get_message": "Opening an email…",
@@ -41,6 +81,8 @@ CHAT_FORMAT_RULES = (
     "Whenever you state a count of emails, unread, urgent, meetings or conflicts, quote `totals` verbatim; never count "
     "the rows you received, never estimate, and never state a total that is not in `totals`. "
     "`value` may be only a page of the data.\n"
+    "- When asked to draft a reply, call propose_reply once with the full draft (fetch the email first if needed); "
+    "it shows the user an approval card. Say the draft awaits their approval; never claim it was sent.\n"
     "- To summarise the inbox and day, call list_messages (top=30) and list_events once each; to answer a count question "
     "one call is enough.\n"
 )
@@ -53,9 +95,15 @@ class MockSession:
         self.cite: dict[str, int] = {}
         self.messages: dict[str, dict] = {}
         self.events: list[dict] = []
-        self.totals: dict[str, int] | None = None
+        self.totals: dict[str, Any] | None = None
+        self.drafts: list[dict] = []
 
     def run(self, name: str, arguments: str | None) -> str:
+        if name == "propose_reply":
+            a = json.loads(arguments or "{}")
+            self.drafts.append({"to": a.get("to", ""), "subject": a.get("subject") or f"Re: {a.get('ref', '')}",
+                                "body": a.get("body", ""), "ref": a.get("ref", "")})
+            return json.dumps({"status": "shown_to_user_for_approval", "sent": False})
         from mock_m365 import call_tool
 
         data = json.loads(call_tool(name, arguments))
@@ -84,6 +132,25 @@ class MockSession:
         evs = sorted(self.events, key=lambda e: e["start"])
         conflicts = [(a, b) for i, a in enumerate(evs) for b in evs[i + 1:] if b["start"] < a["end"]]
         return {"unread": unread, "urgent": urgent, "events": evs, "conflicts": conflicts}
+
+    def chart(self) -> dict | None:
+        cats = (self.totals or {}).get("unread_today_by_category") or {}
+        if not cats:
+            return None
+        return donut_chart("Unread email by category, today, Alex's inbox",
+                           [{"label": k.title(), "value": v} for k, v in cats.items()])
+
+    def approval_cards(self) -> list[dict]:
+        import uuid
+
+        cards = []
+        for d in self.drafts:
+            aid = uuid.uuid4().hex
+            d["title"] = f"Draft reply: {d['ref'] or d['subject']}"
+            PENDING_APPROVALS[aid] = d
+            cards.append(approval_card(aid, d["title"], d["body"], {"To": d["to"], "Subject": d["subject"]}))
+        self.drafts = []
+        return cards
 
     def card(self) -> dict | None:
         if not self.totals:
@@ -176,15 +243,10 @@ async def run_chat_turn(agent: Any, message: str, auth: Any, auth_handler_name: 
             text = p._text
             p.add_citations(session.sources(text))
             card = session.card()
-            if card:
-                p.add_card(card)
-            p.suggest(session.follow_ups())
-    # The library sends suggested prompts only on card-less turns (Teams hides suggestedActions beside
-    # attachments). The pilot wants them next to the KPI card, so send them as a short follow-up message.
-    prompts = session.follow_ups() if session is not None and session.card() and streaming else []
-    if prompts:
-        from microsoft_agents.activity import Activity
-
-        await context.send_activity(Activity(
-            type="message", text="Try next:",
-            suggested_actions={"actions": [{"type": "imBack", "title": q[:100], "value": q} for q in prompts]}))
+            if card:  # follow-ups ride on the KPI card as imBack buttons (Teams hides suggestedActions beside cards)
+                p.add_card(with_actions(card, prompt_actions(session.follow_ups())))
+            chart = session.chart()
+            if chart:
+                p.add_card(chart)
+            for ac in session.approval_cards():
+                p.add_card(ac)
