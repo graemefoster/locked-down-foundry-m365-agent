@@ -351,11 +351,10 @@ class GenericAgentHost:
         tenant = os.getenv("TENANT_ID") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID") or ""
         secret = os.getenv("CLIENT_SECRET") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET") or ""
         authed = bool(app_id and tenant and secret)  # same condition as create_auth_configuration
-        inline = (os.getenv("PROMPT_RUN_MODE") or ("proactive" if authed else "inline")) == "inline"
+        mode = os.getenv("PROMPT_RUN_MODE") or ("proactive" if authed else "inline")
 
         async def _turn(ctx: TurnContext, prompt: str) -> None:
             try:
-                await ctx.send_activity(f"You asked: {prompt}")
                 await chat_turn.run_chat_turn(
                     self.agent_instance, prompt, self.agent_app.auth, self.auth_handler_name, ctx)
             except Exception as ex:
@@ -366,13 +365,9 @@ class GenericAgentHost:
             """Follow-up button click: same pipeline as a typed message."""
             if await self._validate_agent_and_setup_context(context) is None:
                 return
-            if inline:
-                await _turn(context, prompt)
-                return
-            continuation = context.activity.get_conversation_reference().get_continuation_activity()
-            await self.adapter.continue_conversation(app_id, continuation, lambda ctx: _turn(ctx, prompt))
+            await _turn(context, prompt)
 
-        chat_turn.register_approvals(self.agent_app, _run_prompt, inline=inline)  # prompt + adaptiveCard/action invokes
+        chat_turn.register_approvals(self.agent_app, _run_prompt, mode=mode, app_id=app_id)  # prompt + adaptiveCard/action invokes
         self.agent_app.message("/help", **handler_config)(help_handler)
 
         @self.agent_app.activity("installationUpdate")

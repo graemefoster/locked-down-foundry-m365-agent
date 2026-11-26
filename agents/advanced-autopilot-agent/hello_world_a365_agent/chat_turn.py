@@ -14,7 +14,6 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 try:  # local editable install, see LOCAL_RUN.md
-    from microsoft_agents.activity import InvokeResponse
     from m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, approval_card, citations, donut_chart,
                                   kpi_strip, present_responses, prompt_actions, with_actions)
 
@@ -49,41 +48,15 @@ if _LIB:
     DESK = ApprovalDesk(_decide)
 
 
-def register_approvals(app: Any, run_prompt: Any = None, inline: bool = False) -> None:
-    """Register the invokes: ``prompt`` follow-up buttons and ``adaptiveCard/action`` (ApprovalDesk).
-
-    ``run_prompt(context, prompt)`` runs the turn. Default (PromptDesk): it runs in a background task after the invoke
-    ack, so it must not use the invoke context (closed). ``inline=True``: the turn is awaited inside the invoke handler
-    on the live context (no ack until it finishes; fine locally, Teams invoke timeout is short)."""
+def register_approvals(app: Any, run_prompt: Any = None, mode: str = "inline", app_id: str = "") -> None:
+    """Register the invokes: ``prompt`` follow-up buttons (PromptDesk, ``inline`` or ``proactive``) and
+    ``adaptiveCard/action`` (ApprovalDesk). ``run_prompt(context, prompt)`` runs the turn; PromptDesk echoes
+    ``You asked: ...`` first."""
     if not _LIB:
         return
     DESK.register(app)
-    if run_prompt is None:
-        return
-    # Library-note: PromptDesk.register uses an `async def` selector; hosting-core 1.7 calls `route.selector(context)`
-    # without awaiting, so the registered route never matches. Same wiring here with the sync `matches`.
-    from microsoft_agents.activity import Activity, ActivityTypes
-    from microsoft_agents.hosting.core.app._routes import RouteRank
-
-    global PROMPTS
-    PROMPTS = PromptDesk(run_prompt, echo=False)  # echo is sent by run_prompt, from a live context
-
-    async def _on_prompt(context: Any, _state: Any) -> None:
-        if inline:
-            from m365_activity_ui.prompts import _prompt_of
-
-            prompt = _prompt_of(context)
-            if prompt is not None:
-                await run_prompt(context, prompt)
-                response = InvokeResponse(status=200, body={"statusCode": 200, "value": "OK",
-                                                            "type": "application/vnd.microsoft.activity.message"})
-            else:
-                response = await PROMPTS.handle(context)
-        else:
-            response = await PROMPTS.handle(context)
-        await context.send_activity(Activity(type=ActivityTypes.invoke_response, value=response))
-
-    app.add_route(PROMPTS.matches, _on_prompt, is_invoke=True, rank=RouteRank.FIRST)
+    if run_prompt is not None:
+        PromptDesk(run_prompt, mode=mode, app_id=app_id).register(app)
 
 
 STEP_LABELS = {
