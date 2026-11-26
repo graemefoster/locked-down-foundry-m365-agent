@@ -787,7 +787,13 @@ Comment text: {comment_snippet}
         Mirrors :meth:`ResponsesApiAgentLogicService.InvokeResponsesApiAsync`.
         """
 
-        mcp_tools = await self._build_mcp_tools(auth, auth_handler_name, context)
+        mock_m365 = os.getenv("MOCK_M365") == "1"  # local-only: mock function tools replace MCP
+        if mock_m365:
+            from mock_m365 import TOOL_SCHEMAS
+
+            mcp_tools = list(TOOL_SCHEMAS)
+        else:
+            mcp_tools = await self._build_mcp_tools(auth, auth_handler_name, context)
         logger.info(
             "Invoking Responses API with %d MCP tool server(s)", len(mcp_tools)
         )
@@ -811,6 +817,21 @@ Comment text: {comment_snippet}
 
         try:
             response = await self._openai_client.responses.create(**request_args)
+            if mock_m365:
+                from mock_m365 import call_tool
+
+                for _ in range(8):  # function-call loop (mock tools only)
+                    calls = [i for i in response.output if getattr(i, "type", "") == "function_call"]
+                    if not calls:
+                        break
+                    results = []
+                    for c in calls:
+                        logger.info("MOCK_M365 tool call: %s(%s)", c.name, c.arguments)
+                        results.append({"type": "function_call_output", "call_id": c.call_id,
+                                        "output": call_tool(c.name, c.arguments)})
+                    response = await self._openai_client.responses.create(
+                        model=self._deployment, instructions=instructions, tools=mcp_tools,
+                        input=results, previous_response_id=response.id)
         except APIStatusError as ex:
             logger.error(
                 "Responses API call failed with status %s: %s",

@@ -20,3 +20,10 @@ Reproduces today's turn experience locally. No secrets: values come from your gi
 4. Timestamped capture: `.agent-runs/activity-ui-pilot/baseline/inbound_proxy.py` (inbound, :8091 -> :8090)
    and `.agent-runs/activity-ui-pilot/playground/drive.cjs` (UI driver, records outbound frames + screenshot).
    See `.agent-runs/activity-ui-pilot/baseline/README.md`.
+
+## Mock Mail/Calendar (`MOCK_M365=1`)
+Replaces the MCP tools with local function tools (`list_messages`, `get_message`, `list_events`) over a
+generated, seeded fixture (25 messages incl. 3 threads, 6 events today/tomorrow, one overlap). Run as step 2
+with `MOCK_M365=1` instead of `LOCAL_NO_MCP=1`. Regenerate/inspect: from `agents/advanced-autopilot-agent/`
+`python -m mock_m365.generate --out fixture.json` (deterministic; dates relative to today, override `--today`).
+Default (unset) path is unchanged: `_build_mcp_tools`. Evidence: `.agent-runs/activity-ui-pilot/mock-data/`.
