@@ -27,3 +27,17 @@ generated, seeded fixture (25 messages incl. 3 threads, 6 events today/tomorrow,
 with `MOCK_M365=1` instead of `LOCAL_NO_MCP=1`. Regenerate/inspect: from `agents/advanced-autopilot-agent/`
 `python -m mock_m365.generate --out fixture.json` (deterministic; dates relative to today, override `--today`).
 Default (unset) path is unchanged: `_build_mcp_tools`. Evidence: `.agent-runs/activity-ui-pilot/mock-data/`.
+
+## Activity UI (`m365_activity_ui`, local editable install)
+Chat turns (non-email) use AgentCraft `libraries/m365-activity-ui` via `hello_world_a365_agent/chat_turn.py`:
+progress lines, streamed markdown, KPI strip card (computed from mock tool results), `[n]` citations, AI label,
+feedback buttons, follow-up prompts. Email and notification paths keep HTML. If the library is not importable the
+host falls back to the old ack + typing flow.
+- Install into the existing venv (uv only), path = your AgentCraft checkout, branch `feature/m365-activity-ui`:
+  `uv pip install --python hello_world_a365_agent/.venv-local/bin/python -e <agentcraft>/libraries/m365-activity-ui`
+- **remote_build gap:** the library is not pushed, so it is NOT in `requirements.txt`/`pyproject.toml`; a remote
+  build will not have it (chat then uses the legacy flow). Add a git URL pin once the branch is pushed.
+- `RESPONSE_STORE_DIR=<dir>` overrides `~/.a365agent` (fresh conversation state for repeatable runs; Playground
+  reuses one conversation id, so a stored previous_response_id makes the model skip tool calls).
+- Evidence: `.agent-runs/activity-ui-pilot/after/` (`activity_log.txt`, `mid_turn.png`, `final.png`,
+  `nonstream_slack.txt`, `nonstream_email.txt`).

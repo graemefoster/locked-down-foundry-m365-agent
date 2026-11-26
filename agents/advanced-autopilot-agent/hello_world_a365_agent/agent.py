@@ -140,7 +140,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         # previous_response_id lets the Foundry Responses API continue a thread. We persist it
         # per conversation on disk (mirrors C# behaviour) so a follow-up turn resumes context
         # even though the host itself is stateless (MemoryStorage).
-        self._response_store_dir = Path.home() / ".a365agent"
+        self._response_store_dir = Path(os.getenv("RESPONSE_STORE_DIR") or Path.home() / ".a365agent")
 
         logger.info(
             "✅ Foundry agent ready (project_endpoint=%s, deployment=%s, mcp_servers=%d)",

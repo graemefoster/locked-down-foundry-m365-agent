@@ -55,6 +55,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.sdk.trace import SpanProcessor
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
+from . import chat_turn
 from .agent_interface import AgentInterface, check_agent_inheritance
 from .email_channel_compat import (
     is_email_activity,
@@ -391,7 +392,17 @@ class GenericAgentHost:
                         await context.send_activity(response_activity)
                     return
 
-                # Multi-message pattern: immediate ack, typing indicator loop,
+                # Chat surfaces: progress lines, streamed markdown, KPI card, citations, follow-ups
+                # (m365_activity_ui). Non-streaming/agentic requests get one final message from the
+                # same presenter. Falls back to the legacy flow below when the library is absent.
+                if chat_turn.available() and not is_wpx_comment_activity(context.activity):
+                    await chat_turn.run_chat_turn(
+                        self.agent_instance, user_message,
+                        self.agent_app.auth, self.auth_handler_name, context,
+                    )
+                    return
+
+                # Legacy multi-message pattern: immediate ack, typing indicator loop,
                 # then the final LLM response. Mirrors the C# StreamingResponse
                 # flow (QueueInformativeUpdateAsync + QueueTextChunk).
                 if not is_wpx_comment_activity(context.activity):
