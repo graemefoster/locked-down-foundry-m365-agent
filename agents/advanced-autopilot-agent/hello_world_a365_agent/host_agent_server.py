@@ -378,19 +378,24 @@ class GenericAgentHost:
                 logger.info("📨 %s", user_message)
 
                 if is_email_activity(context.activity):
-                    await self.agent_instance.process_user_message(
+                    response = await self.agent_instance.process_user_message(
                         user_message,
                         self.agent_app.auth,
                         self.auth_handler_name,
                         context,
                     )
+                    if response:
+                        response_activity = EmailResponse.create_email_response_activity(
+                            response
+                        )
+                        await context.send_activity(response_activity)
                     return
 
                 # Multi-message pattern: immediate ack, typing indicator loop,
                 # then the final LLM response. Mirrors the C# StreamingResponse
                 # flow (QueueInformativeUpdateAsync + QueueTextChunk).
                 if not is_wpx_comment_activity(context.activity):
-                    await context.send_activity("Working on your request. I got you covered friend...")
+                    await context.send_activity("Working on your request.")
                 await context.send_activity(Activity(type="typing"))
 
                 async def _typing_loop() -> None:

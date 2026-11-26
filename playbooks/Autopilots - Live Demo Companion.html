@@ -1,0 +1,630 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Foundry Autopilots — Live Demo Companion</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#05071a;
+  --panel:rgba(12,16,40,.80);
+  --panel2:#0f1534;
+  --line:#1d2758;
+  --line2:#2f3c7d;
+  --fg:#eef2ff;
+  --mut:#9aa7d4;
+  --dim:#6471a3;
+  --cyan:#3ad6ff;
+  --blue:#5b8cff;
+  --violet:#a879ff;
+  --ok:#3ee8a4;
+  --deny:#ff5f86;
+  --amber:#ffd27a;
+  --grad:linear-gradient(90deg,#62e2ff 0%,#8fa2ff 48%,#c18bff 100%);
+  --sans:"Segoe UI Variable Text","Segoe UI",-apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif;
+  --disp:"Segoe UI Variable Display","Segoe UI",-apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif;
+  --mono:"Cascadia Code","SF Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:
+    radial-gradient(1100px 550px at 82% -10%,rgba(91,140,255,.16),transparent 60%),
+    radial-gradient(900px 550px at -10% 110%,rgba(168,121,255,.14),transparent 60%),
+    var(--bg);
+  color:var(--fg);
+  font:16px/1.5 var(--sans);
+  overflow:hidden;
+}
+body::before{
+  content:"";position:fixed;inset:0;pointer-events:none;opacity:.28;
+  background:repeating-linear-gradient(0deg,rgba(120,140,255,.035) 0 1px,transparent 1px 4px);
+}
+code,.mono{font-family:var(--mono);font-size:.86em;color:#8fe6ff}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:6px}
+
+.deck{
+  position:relative;height:100%;max-width:1540px;margin:0 auto;
+  display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;
+  padding:16px clamp(18px,3vw,36px) 14px;
+}
+
+/* Header */
+.topbar{display:flex;align-items:center;gap:16px;min-width:0}
+.brand{display:flex;align-items:center;gap:10px;white-space:nowrap;font-size:13.5px;color:var(--mut)}
+.brand b{
+  font-family:var(--disp);font-size:15.5px;font-weight:650;
+  background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.orb{
+  width:16px;height:16px;border-radius:50%;
+  background:conic-gradient(from 200deg,var(--cyan),var(--blue),var(--violet),var(--cyan));
+  box-shadow:0 0 14px rgba(91,140,255,.6);
+}
+.navpills{display:flex;gap:6px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
+.navpills button{
+  display:flex;align-items:center;gap:6px;border:1px solid transparent;background:none;
+  border-radius:999px;padding:5px 12px;font-size:12.5px;color:var(--dim);white-space:nowrap;
+  transition:color .2s,border-color .2s,background .2s;
+}
+.navpills button span{font-family:var(--mono);font-size:11px}
+.navpills button:hover{color:var(--mut)}
+.navpills button[aria-current="step"]{
+  color:var(--fg);border-color:var(--line2);
+  background:linear-gradient(90deg,rgba(58,214,255,.14),rgba(168,121,255,.14));
+}
+.navpills button[aria-current="step"] span{color:var(--cyan)}
+
+/* Stage */
+.stage{position:relative;min-height:0}
+.slide{
+  position:absolute;inset:0;
+  display:grid;grid-template-rows:auto minmax(0,1fr);gap:22px;
+  padding:clamp(22px,3vh,36px) clamp(24px,3.2vw,44px);
+  background:var(--panel);border:1px solid var(--line);border-radius:20px;
+  backdrop-filter:blur(10px);
+  box-shadow:0 24px 60px rgba(0,0,0,.38),inset 0 1px 0 rgba(255,255,255,.04);
+  opacity:0;transform:translateY(14px) scale(.992);pointer-events:none;
+  transition:opacity .38s ease,transform .42s cubic-bezier(.2,.8,.2,1);
+  overflow:auto;
+}
+.slide.active{opacity:1;transform:none;pointer-events:auto}
+
+.shead{display:flex;flex-direction:column;gap:8px}
+.eyebrow{
+  font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--cyan);
+}
+.shead h1{
+  margin:0;font-family:var(--disp);font-weight:650;
+  font-size:clamp(28px,3.1vw,44px);line-height:1.1;letter-spacing:-.02em;
+  background:linear-gradient(92deg,#ffffff 0%,#d2e3ff 48%,#bfaaff 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.sub{margin:0;font-size:clamp(15px,1.3vw,18px);color:var(--mut);max-width:78ch}
+
+/* Layouts */
+.two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:28px;align-items:center;min-height:0}
+.equal-col{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:stretch;min-height:0}
+.three-col{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:stretch;min-height:0}
+.stack{display:flex;flex-direction:column;gap:18px;min-height:0;justify-content:center}
+
+.card{
+  background:rgba(15,21,52,.72);border:1px solid var(--line);border-radius:16px;
+  padding:22px 24px;display:flex;flex-direction:column;gap:12px;
+}
+.card.accent-cyan{border-color:rgba(58,214,255,.35);background:linear-gradient(180deg,rgba(58,214,255,.08),rgba(15,21,52,.78))}
+.card.accent-violet{border-color:rgba(168,121,255,.38);background:linear-gradient(180deg,rgba(168,121,255,.09),rgba(15,21,52,.78))}
+.card.accent-ok{border-color:rgba(62,232,164,.35);background:linear-gradient(180deg,rgba(62,232,164,.07),rgba(15,21,52,.78))}
+.card.accent-deny{border-color:rgba(255,95,134,.35);background:linear-gradient(180deg,rgba(255,95,134,.07),rgba(15,21,52,.78))}
+
+.card h2{margin:0;font-family:var(--disp);font-size:20px;font-weight:620;color:var(--fg);display:flex;align-items:center;gap:10px}
+.card p{margin:0;color:var(--mut);font-size:15.5px;line-height:1.55}
+
+.pill{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--line2);color:var(--mut);width:fit-content;
+}
+.pill.ok{color:var(--ok);border-color:rgba(62,232,164,.45);background:rgba(62,232,164,.08)}
+.pill.cyan{color:var(--cyan);border-color:rgba(58,214,255,.45);background:rgba(58,214,255,.08)}
+.pill.violet{color:#c9a9ff;border-color:rgba(168,121,255,.45);background:rgba(168,121,255,.1)}
+.pill.deny{color:var(--deny);border-color:rgba(255,95,134,.45);background:rgba(255,95,134,.08)}
+.pill.amber{color:var(--amber);border-color:rgba(255,210,122,.45);background:rgba(255,210,122,.08)}
+
+.points{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+.points li{
+  display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;align-items:start;
+  font-size:16px;color:var(--fg);line-height:1.45;
+}
+.points .num{
+  width:26px;height:26px;border-radius:8px;display:grid;place-items:center;
+  font-family:var(--mono);font-size:12px;color:var(--cyan);
+  background:rgba(58,214,255,.1);border:1px solid rgba(58,214,255,.32);margin-top:1px;
+}
+.points small{display:block;color:var(--mut);font-size:14px;margin-top:2px}
+
+/* SVG Diagram Box */
+.vizbox{
+  background:rgba(8,11,30,.72);border:1px solid var(--line);border-radius:16px;
+  padding:18px;display:flex;align-items:center;justify-content:center;min-height:280px;
+  position:relative;overflow:hidden;
+}
+.vizbox svg{width:100%;height:auto;max-height:430px;display:block}
+
+/* Staggered calm entrance */
+.slide .reveal{opacity:0;transform:translateY(10px);transition:opacity .45s ease,transform .45s cubic-bezier(.2,.8,.2,1)}
+.slide.active .reveal{opacity:1;transform:none}
+.slide.active .reveal:nth-child(2){transition-delay:.07s}
+.slide.active .reveal:nth-child(3){transition-delay:.14s}
+.slide.active .reveal:nth-child(4){transition-delay:.21s}
+
+/* Gentle SVG flow animation */
+@keyframes flow{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
+@keyframes pulse{0%,100%{opacity:.55;transform:scale(1)}50%{opacity:1;transform:scale(1.04)}}
+.flow-line{stroke-dasharray:6 6;animation:flow 1.4s linear infinite}
+.flow-slow{stroke-dasharray:5 7;animation:flow 2.2s linear infinite}
+.pulse-dot{transform-box:fill-box;transform-origin:center;animation:pulse 2.4s ease-in-out infinite}
+
+/* Live demo hero */
+.demo-grid{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:stretch;
+}
+.demo-step{
+  background:rgba(15,21,52,.78);border:1px solid var(--line2);border-radius:16px;
+  padding:24px;display:flex;flex-direction:column;gap:12px;position:relative;
+}
+.demo-num{
+  font-family:var(--mono);font-size:13px;color:var(--cyan);
+  background:rgba(58,214,255,.1);border:1px solid rgba(58,214,255,.35);
+  width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+}
+.demo-step h2{margin:0;font-family:var(--disp);font-size:21px;font-weight:620}
+.demo-step p{margin:0;color:var(--mut);font-size:15.5px;line-height:1.5}
+.demo-banner{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:14px 20px;border-radius:14px;
+  background:linear-gradient(90deg,rgba(58,214,255,.12),rgba(168,121,255,.12));
+  border:1px solid rgba(91,140,255,.38);font-size:15px;color:var(--fg);
+}
+
+/* Comparison table */
+.cmp{width:100%;border-collapse:collapse;font-size:15px}
+.cmp th,.cmp td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line)}
+.cmp th{font-family:var(--mono);font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan)}
+.cmp td{color:var(--mut)}
+.cmp td:first-child{color:var(--fg);font-weight:550}
+.cmp tr:last-child td{border-bottom:none}
+
+/* Footer */
+.foot{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12.5px;color:var(--dim)}
+.controls{display:flex;align-items:center;gap:8px}
+.btn{
+  border:1px solid var(--line2);background:rgba(16,22,54,.8);border-radius:9px;
+  padding:6px 14px;font-size:13px;color:var(--fg);transition:border-color .2s,background .2s;
+}
+.btn:hover{border-color:var(--cyan);background:rgba(28,38,88,.85)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.progress{flex:1;max-width:260px;height:4px;background:var(--line);border-radius:999px;overflow:hidden}
+.progress i{display:block;height:100%;background:var(--grad);transition:width .35s ease}
+.hint{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+
+/* Reduced motion */
+body.no-motion *,body.no-motion *::before,body.no-motion *::after{
+  animation:none!important;transition:none!important;
+}
+@media (prefers-reduced-motion:reduce){
+  .flow-line,.flow-slow,.pulse-dot{animation:none}
+  .slide,.slide .reveal{transition:none}
+}
+@media (max-width:960px){
+  .two-col,.equal-col,.three-col,.demo-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="deck">
+  <header class="topbar">
+    <div class="brand"><span class="orb"></span><b>Foundry Autopilots</b> · Locked-Down Tenant</div>
+    <nav class="navpills" aria-label="Slides">
+      <button data-goto="0" aria-current="step"><span>01</span>What Changes</button>
+      <button data-goto="1"><span>02</span>Identity</button>
+      <button data-goto="2"><span>03</span>Networking</button>
+      <button data-goto="3"><span>04</span>Access</button>
+      <button data-goto="4"><span>05</span>Live Demo</button>
+      <button data-goto="5"><span>06</span>When &amp; Evals</button>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <!-- SLIDE 1 -->
+    <section class="slide active" data-slide="0">
+      <div class="shead">
+        <div class="eyebrow">01 · Core Shift</div>
+        <h1>From a Teams Chat Agent to a Digital Worker</h1>
+        <p class="sub">An autopilot is not a different LLM. It is a Foundry agent hired into Microsoft 365 with its own identity, mailbox, calendar, and accountability.</p>
+      </div>
+      <div class="equal-col">
+        <div class="card reveal">
+          <span class="pill">Today · Standard Teams Agent</span>
+          <h2>One-turn Q&amp;A in chat</h2>
+          <p>A user asks a question in Teams, the agent calls tools, and the reply lands in that chat. The interaction ends there.</p>
+          <div class="vizbox" style="min-height:185px">
+            <svg viewBox="0 0 460 150" aria-label="Standard Teams agent flow">
+              <defs>
+                <marker id="arr-dim" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#6471a3"/></marker>
+              </defs>
+              <rect x="14" y="44" width="110" height="62" rx="12" fill="#0f1534" stroke="#2f3c7d"/>
+              <text x="69" y="72" text-anchor="middle" fill="#eef2ff" font-size="13" font-weight="600">Teams User</text>
+              <text x="69" y="90" text-anchor="middle" fill="#9aa7d4" font-size="11">1 prompt</text>
+
+              <rect x="174" y="44" width="118" height="62" rx="12" fill="#0f1534" stroke="#2f3c7d"/>
+              <text x="233" y="72" text-anchor="middle" fill="#eef2ff" font-size="13" font-weight="600">Foundry Agent</text>
+              <text x="233" y="90" text-anchor="middle" fill="#9aa7d4" font-size="11">Stateless turn</text>
+
+              <rect x="342" y="44" width="104" height="62" rx="12" fill="#0f1534" stroke="#2f3c7d"/>
+              <text x="394" y="72" text-anchor="middle" fill="#eef2ff" font-size="13" font-weight="600">Tools / MCP</text>
+              <text x="394" y="90" text-anchor="middle" fill="#9aa7d4" font-size="11">Single call</text>
+
+              <line x1="124" y1="66" x2="170" y2="66" stroke="#6471a3" stroke-width="2" class="flow-slow" marker-end="url(#arr-dim)"/>
+              <line x1="174" y1="86" x2="128" y2="86" stroke="#6471a3" stroke-width="2" marker-end="url(#arr-dim)"/>
+              <line x1="292" y1="75" x2="338" y2="75" stroke="#6471a3" stroke-width="2" class="flow-slow" marker-end="url(#arr-dim)"/>
+            </svg>
+          </div>
+        </div>
+
+        <div class="card accent-cyan reveal">
+          <span class="pill cyan">Autopilot · Hired Team Member</span>
+          <h2>Multi-day work across M365</h2>
+          <p>Hired from the Agent Store as a member of the team — with its own Entra user, manager, sponsor, mailbox, and calendar.</p>
+          <div class="vizbox" style="min-height:185px">
+            <svg viewBox="0 0 460 150" aria-label="Autopilot digital worker flow">
+              <defs>
+                <marker id="arr-c" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#3ad6ff"/></marker>
+                <marker id="arr-ok" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#3ee8a4"/></marker>
+              </defs>
+              <rect x="12" y="16" width="118" height="34" rx="9" fill="#0f1534" stroke="#3ad6ff" stroke-opacity=".5"/>
+              <text x="71" y="37" text-anchor="middle" fill="#eef2ff" font-size="12">Teams / Outlook</text>
+
+              <rect x="12" y="58" width="118" height="34" rx="9" fill="#0f1534" stroke="#a879ff" stroke-opacity=".5"/>
+              <text x="71" y="79" text-anchor="middle" fill="#eef2ff" font-size="12">Calendar / Files</text>
+
+              <rect x="12" y="100" width="118" height="34" rx="9" fill="#0f1534" stroke="#ffd27a" stroke-opacity=".5"/>
+              <text x="71" y="121" text-anchor="middle" fill="#eef2ff" font-size="12">Background jobs</text>
+
+              <rect x="180" y="34" width="136" height="82" rx="14" fill="#101a42" stroke="#3ad6ff" stroke-width="1.6"/>
+              <circle cx="196" cy="52" r="5" fill="#3ee8a4" class="pulse-dot"/>
+              <text x="252" y="56" text-anchor="middle" fill="#eef2ff" font-size="13.5" font-weight="650">Autopilot</text>
+              <text x="248" y="76" text-anchor="middle" fill="#8fe6ff" font-size="11">Own Entra User</text>
+              <text x="248" y="94" text-anchor="middle" fill="#9aa7d4" font-size="10.5">Manager · Sponsor</text>
+
+              <rect x="358" y="38" width="90" height="74" rx="12" fill="#0f1534" stroke="#3ee8a4" stroke-opacity=".6"/>
+              <text x="403" y="68" text-anchor="middle" fill="#eef2ff" font-size="12.5" font-weight="600">M365 &amp;</text>
+              <text x="403" y="85" text-anchor="middle" fill="#eef2ff" font-size="12.5" font-weight="600">Enterprise</text>
+              <text x="403" y="101" text-anchor="middle" fill="#3ee8a4" font-size="10.5">Scoped ACLs</text>
+
+              <path d="M130 33 L176 58" stroke="#3ad6ff" stroke-width="2" class="flow-line" marker-end="url(#arr-c)"/>
+              <path d="M130 75 L176 75" stroke="#a879ff" stroke-width="2" class="flow-line" marker-end="url(#arr-c)"/>
+              <path d="M130 117 L176 92" stroke="#ffd27a" stroke-width="2" class="flow-line" marker-end="url(#arr-c)"/>
+              <line x1="316" y1="75" x2="354" y2="75" stroke="#3ee8a4" stroke-width="2" class="flow-line" marker-end="url(#arr-ok)"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 2 -->
+    <section class="slide" data-slide="1">
+      <div class="shead">
+        <div class="eyebrow">02 · Lifecycle &amp; Entra Identity</div>
+        <h1>Publish a Blueprint Once; Teams Hire Accountable Instances</h1>
+        <p class="sub">Every hired autopilot creates an Entra Agent Identity and Agent User linked to real human owners and sponsors.</p>
+      </div>
+      <div class="two-col">
+        <ul class="points reveal">
+          <li>
+            <span class="num">1</span>
+            <div><strong>Publish once</strong> with <code>publishAsAutopilot</code> + <code>useAgenticUserTemplate</code>.<small>Registers an Entra Blueprint. No Azure Bot Service required.</small></div>
+          </li>
+          <li>
+            <span class="num">2</span>
+            <div><strong>Admin approves → Store</strong>; people hire per person, team, or process.<small>Provisioning is async and can take hours to appear in Teams/Copilot.</small></div>
+          </li>
+          <li>
+            <span class="num">3</span>
+            <div><strong>Passwordless <code>idtyp=user</code> tokens</strong> minted via the parent Agent Identity.<small>The Agent User has no password or passkey of its own.</small></div>
+          </li>
+          <li>
+            <span class="num">4</span>
+            <div><strong>Built-in kill switch &amp; accountability</strong>: Manager, Sponsor, and Owner.<small>Disabling the Blueprint blocks new hires and token issuance for all instances.</small></div>
+          </li>
+        </ul>
+
+        <div class="vizbox reveal">
+          <svg viewBox="0 0 540 360" aria-label="Blueprint to Agent Identity to Agent User hierarchy">
+            <defs>
+              <marker id="arr-b" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#5b8cff"/></marker>
+              <marker id="arr-v" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#a879ff"/></marker>
+            </defs>
+
+            <!-- Blueprint -->
+            <rect x="130" y="18" width="280" height="74" rx="14" fill="#121a46" stroke="#5b8cff" stroke-width="1.8"/>
+            <text x="270" y="47" text-anchor="middle" fill="#eef2ff" font-size="16" font-weight="650">Agent Blueprint</text>
+            <text x="270" y="68" text-anchor="middle" fill="#8fe6ff" font-size="12">Published once · Global kill switch</text>
+
+            <!-- 1 -> many -->
+            <path d="M220 92 L150 148" stroke="#5b8cff" stroke-width="2" class="flow-line" marker-end="url(#arr-b)"/>
+            <path d="M320 92 L390 148" stroke="#5b8cff" stroke-width="2" class="flow-line" marker-end="url(#arr-b)"/>
+            <text x="270" y="128" text-anchor="middle" fill="#9aa7d4" font-size="11.5" font-family="var(--mono)">1 → MANY INSTANCES</text>
+
+            <!-- Agent Identity A & B -->
+            <rect x="34" y="152" width="212" height="66" rx="12" fill="#0f1534" stroke="#a879ff" stroke-width="1.5"/>
+            <text x="140" y="180" text-anchor="middle" fill="#eef2ff" font-size="14" font-weight="600">Agent Identity (Ops)</text>
+            <text x="140" y="200" text-anchor="middle" fill="#9aa7d4" font-size="11.5">Service Principal · Mints token</text>
+
+            <rect x="294" y="152" width="212" height="66" rx="12" fill="#0f1534" stroke="#2f3c7d" stroke-width="1.4"/>
+            <text x="400" y="180" text-anchor="middle" fill="#eef2ff" font-size="14" font-weight="600">Agent Identity (Finance)</text>
+            <text x="400" y="200" text-anchor="middle" fill="#9aa7d4" font-size="11.5">Separate instance &amp; grants</text>
+
+            <!-- 1 -> 1 fixed -->
+            <line x1="140" y1="218" x2="140" y2="256" stroke="#a879ff" stroke-width="2" class="flow-line" marker-end="url(#arr-v)"/>
+            <line x1="400" y1="218" x2="400" y2="256" stroke="#6471a3" stroke-width="1.8" stroke-dasharray="4 4"/>
+            <text x="184" y="242" fill="#c9a9ff" font-size="11" font-family="var(--mono)">1:1 FIXED</text>
+
+            <!-- Agent Users -->
+            <rect x="34" y="260" width="212" height="82" rx="12" fill="#101d3b" stroke="#3ee8a4" stroke-width="1.6"/>
+            <text x="140" y="286" text-anchor="middle" fill="#eef2ff" font-size="14" font-weight="600">Agent User (Mailbox)</text>
+            <text x="140" y="306" text-anchor="middle" fill="#3ee8a4" font-size="11.5">idtyp=user · No password</text>
+            <text x="140" y="325" text-anchor="middle" fill="#9aa7d4" font-size="11">Manager · Sponsor · Owner</text>
+
+            <rect x="294" y="260" width="212" height="82" rx="12" fill="#0f1534" stroke="#2f3c7d"/>
+            <text x="400" y="286" text-anchor="middle" fill="#eef2ff" font-size="14" font-weight="600">Agent User (Mailbox)</text>
+            <text x="400" y="306" text-anchor="middle" fill="#9aa7d4" font-size="11.5">Isolated calendar &amp; chats</text>
+            <text x="400" y="325" text-anchor="middle" fill="#6471a3" font-size="11">Independent lifecycle</text>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 3 -->
+    <section class="slide" data-slide="2">
+      <div class="shead">
+        <div class="eyebrow">03 · Locked-Down Networking</div>
+        <h1>Foundry Stays Private; Only Activity Protocol Is Reachable</h1>
+        <p class="sub">Microsoft 365 needs a public door for Activity Protocol. In both options, <code>publicNetworkAccess=Disabled</code> stays intact for everything else.</p>
+      </div>
+      <div class="stack">
+        <div class="vizbox reveal" style="min-height:255px">
+          <svg viewBox="0 0 980 245" aria-label="Two networking paths for locked-down Foundry">
+            <defs>
+              <marker id="arr-n1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#3ad6ff"/></marker>
+              <marker id="arr-n2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#a879ff"/></marker>
+              <marker id="arr-no" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#ff5f86"/></marker>
+            </defs>
+
+            <!-- M365 -->
+            <rect x="18" y="64" width="166" height="96" rx="14" fill="#10183c" stroke="#3ad6ff" stroke-width="1.6"/>
+            <text x="101" y="98" text-anchor="middle" fill="#eef2ff" font-size="15" font-weight="650">Microsoft 365</text>
+            <text x="101" y="119" text-anchor="middle" fill="#8fe6ff" font-size="12">Teams &amp; Outlook</text>
+            <text x="101" y="139" text-anchor="middle" fill="#9aa7d4" font-size="11">Activity Protocol + Entra JWT</text>
+
+            <!-- Path A -->
+            <rect x="256" y="18" width="356" height="72" rx="12" fill="#0f183d" stroke="#3ad6ff" stroke-opacity=".6"/>
+            <text x="274" y="44" fill="#3ad6ff" font-size="11.5" font-family="var(--mono)">OPTION A · MICROSOFT-MANAGED</text>
+            <text x="274" y="67" fill="#eef2ff" font-size="14" font-weight="600">enable_m365_public_endpoint = true</text>
+            <text x="274" y="82" fill="#9aa7d4" font-size="11">Activity route only · Microsoft IP allowlist + Entra token</text>
+
+            <!-- Path B -->
+            <rect x="256" y="116" width="356" height="72" rx="12" fill="#13153c" stroke="#a879ff" stroke-opacity=".65"/>
+            <text x="274" y="142" fill="#c9a9ff" font-size="11.5" font-family="var(--mono)">OPTION B · CUSTOMER-OWNED EDGE</text>
+            <text x="274" y="164" fill="#eef2ff" font-size="14" font-weight="600">YARP (/teams/&lt;agent&gt;) → APIM → Private Endpoint</text>
+            <text x="274" y="179" fill="#9aa7d4" font-size="11">Full telemetry, JWT validation &amp; deny-by-default routing</text>
+
+            <!-- Private VNet + Foundry -->
+            <rect x="684" y="18" width="276" height="208" rx="16" fill="#0b112c" stroke="#3ee8a4" stroke-dasharray="6 4" stroke-width="1.5"/>
+            <text x="702" y="42" fill="#3ee8a4" font-size="11.5" font-family="var(--mono)">PRIVATE VNET · PNA = DISABLED</text>
+            <rect x="704" y="56" width="236" height="74" rx="12" fill="#121c44" stroke="#3ee8a4" stroke-width="1.5"/>
+            <text x="822" y="85" text-anchor="middle" fill="#eef2ff" font-size="15" font-weight="650">Azure AI Foundry</text>
+            <text x="822" y="106" text-anchor="middle" fill="#8fe6ff" font-size="12">Hosted Autopilot Agent</text>
+
+            <rect x="704" y="144" width="236" height="62" rx="10" fill="#19112b" stroke="#ff5f86" stroke-opacity=".6"/>
+            <text x="822" y="170" text-anchor="middle" fill="#ff9bb3" font-size="13" font-weight="600">Responses · Mgmt · Invocations</text>
+            <text x="822" y="190" text-anchor="middle" fill="#9aa7d4" font-size="11.5">Blocked from internet (Private only)</text>
+
+            <!-- Arrows -->
+            <path d="M184 96 L252 54" stroke="#3ad6ff" stroke-width="2" class="flow-line" marker-end="url(#arr-n1)"/>
+            <path d="M612 54 L700 84" stroke="#3ad6ff" stroke-width="2" class="flow-line" marker-end="url(#arr-n1)"/>
+            <path d="M184 128 L252 152" stroke="#a879ff" stroke-width="2" class="flow-line" marker-end="url(#arr-n2)"/>
+            <path d="M612 152 L700 108" stroke="#a879ff" stroke-width="2" class="flow-line" marker-end="url(#arr-n2)"/>
+
+            <!-- Random IP blocked -->
+            <rect x="18" y="192" width="166" height="36" rx="9" fill="#1d1024" stroke="#ff5f86" stroke-opacity=".6"/>
+            <text x="101" y="214" text-anchor="middle" fill="#ff9bb3" font-size="12">Random Internet IP → 403</text>
+            <line x1="184" y1="210" x2="250" y2="210" stroke="#ff5f86" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arr-no)"/>
+          </svg>
+        </div>
+
+        <div class="equal-col reveal">
+          <div class="card accent-cyan">
+            <h2>When to choose Option A</h2>
+            <p>Simplest footprint: Microsoft filters source ranges and enforces Entra auth on the activity route only. No public proxy to operate.</p>
+          </div>
+          <div class="card accent-violet">
+            <h2>When to choose Option B</h2>
+            <p>Enterprise inspection &amp; governance: keep the flag off and terminate at your own YARP + APIM edge with custom policies and logging.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 4 -->
+    <section class="slide" data-slide="3">
+      <div class="shead">
+        <div class="eyebrow">04 · Access Control &amp; Blast Radius</div>
+        <h1>Effective Access = Admin Consent ∩ Resource Permissions</h1>
+        <p class="sub">Consenting to MCP scopes lets the autopilot try; SharePoint, Mail, and Teams ACLs decide what actually succeeds.</p>
+      </div>
+      <div class="three-col">
+        <div class="card accent-deny reveal">
+          <span class="pill deny">Trap to Fix First</span>
+          <h2>Exclude from "All Staff"</h2>
+          <p>Agent users are <code>userType = Member</code>, so dynamic "All Staff" groups match them automatically and inherit overshared write access.</p>
+          <p><strong>Fix:</strong> add <code>agentIdentityBlueprintId -eq null</code> to dynamic group rules and run an oversharing sweep before hiring.</p>
+        </div>
+
+        <div class="card accent-cyan reveal">
+          <span class="pill cyan">Time-Bound Grants</span>
+          <h2>Use Access Packages</h2>
+          <p>Grant only the specific sites, channels, or datasets the team workflow requires via Entra Access Packages with an expiry date.</p>
+          <p><strong>Result:</strong> the sponsor must renew access; if nobody renews, permissions lapse automatically without touching consent.</p>
+        </div>
+
+        <div class="card accent-ok reveal">
+          <span class="pill ok">Safe Rollout</span>
+          <h2>Start Draft-Only</h2>
+          <p>Separate <strong>reading</strong> from <strong>publishing</strong>. Let the autopilot read source data under its own grant and produce drafts.</p>
+          <p><strong>Result:</strong> a human reviews and sends or publishes the final artifact — zero accidental external emails or edits.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 5 -->
+    <section class="slide" data-slide="4">
+      <div class="shead">
+        <div class="eyebrow">05 · Live Demo</div>
+        <h1>Live Walkthrough: Hosted Autopilot End-to-End</h1>
+        <p class="sub">Switching out of slides to show the running agent in Microsoft 365 and its raw execution trace in Azure AI Foundry.</p>
+      </div>
+      <div class="stack">
+        <div class="demo-grid">
+          <div class="demo-step reveal">
+            <div class="demo-num">01</div>
+            <h2>Message the Autopilot in Teams</h2>
+            <p>Send a real multi-source request to the hired autopilot user in Teams and watch it respond as its own team member.</p>
+            <span class="pill cyan" style="margin-top:auto">Teams · Activity Protocol</span>
+          </div>
+
+          <div class="demo-step reveal">
+            <div class="demo-num">02</div>
+            <h2>Inspect Tools &amp; Draft Output</h2>
+            <p>Review the cited M365 sources (Mail, OneDrive/SharePoint, Teams, Calendar, Word/Excel MCP tools) and the draft it produces.</p>
+            <span class="pill ok" style="margin-top:auto">Agent 365 MCP Tools</span>
+          </div>
+
+          <div class="demo-step reveal">
+            <div class="demo-num">03</div>
+            <h2>Verify the Foundry Trace</h2>
+            <p>Open Azure AI Foundry to inspect the exact tool calls, token usage, latency, and grounding evidence behind the reply.</p>
+            <span class="pill violet" style="margin-top:auto">Foundry Traces · App Insights</span>
+          </div>
+        </div>
+
+        <div class="demo-banner reveal">
+          <div><strong>Demo checkpoint:</strong> Everything shown next is live against the deployed hosted agent — no mocked responses.</div>
+          <span class="pill amber">Switch to Teams / Foundry</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SLIDE 6 -->
+    <section class="slide" data-slide="5">
+      <div class="shead">
+        <div class="eyebrow">06 · Decision &amp; Evaluation</div>
+        <h1>When to Build a Foundry Autopilot — and How to Evaluate It</h1>
+        <p class="sub">Use stock personal assistants for individual productivity; build a Foundry Autopilot for team processes on private data and networks.</p>
+      </div>
+      <div class="two-col">
+        <div class="card reveal">
+          <span class="pill cyan">Build vs. Buy</span>
+          <table class="cmp">
+            <thead>
+              <tr><th>Dimension</th><th>Personal Assistant</th><th>Foundry Autopilot</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Best fit</td><td>Individual tasks</td><td>Team / business process</td></tr>
+              <tr><td>Identity</td><td>Acts for one user</td><td>Own Entra user &amp; grants</td></tr>
+              <tr><td>Data &amp; network</td><td>Standard M365</td><td>Private VNet + custom MCP</td></tr>
+              <tr><td>Control</td><td>Microsoft-managed</td><td>Your code, routing &amp; guardrails</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card accent-violet reveal">
+          <span class="pill violet">Observability &amp; Evals</span>
+          <h2>Evaluate Captured Traces, Not the Teams Endpoint</h2>
+          <ul class="points" style="margin-top:6px">
+            <li>
+              <span class="num">!</span>
+              <div><strong>No Responses API target evals</strong> on the interactive path.<small>Autopilots only accept Activity Protocol from Teams/Outlook — unit-test core logic separately.</small></div>
+            </li>
+            <li>
+              <span class="num">✓</span>
+              <div><strong>Run evals on App Insights traces</strong> (<code>AppGenAIContent</code>).<small>Lock that table to <em>Privileged Monitoring Data Reader</em> and grant the Foundry project's managed identity access.</small></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="controls">
+      <button class="btn" id="prevBtn" aria-label="Previous slide">← Back</button>
+      <button class="btn" id="nextBtn" aria-label="Next slide">Next →</button>
+      <span class="mono" id="counter" style="margin-left:6px;color:var(--mut)">1 / 6</span>
+    </div>
+    <div class="progress" aria-hidden="true"><i id="bar" style="width:16.66%"></i></div>
+    <div class="hint">← / → or Space · 1–6 jump · M motion</div>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('.slide')];
+  const pills  = [...document.querySelectorAll('.navpills button')];
+  const prevBtn = document.getElementById('prevBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const counter = document.getElementById('counter');
+  const bar     = document.getElementById('bar');
+  let idx = 0;
+
+  function go(n, pushHash = true) {
+    idx = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, i) => s.classList.toggle('active', i === idx));
+    pills.forEach((p, i) => {
+      if (i === idx) p.setAttribute('aria-current', 'step');
+      else p.removeAttribute('aria-current');
+    });
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx === slides.length - 1;
+    counter.textContent = `${idx + 1} / ${slides.length}`;
+    bar.style.width = `${((idx + 1) / slides.length) * 100}%`;
+    if (pushHash) history.replaceState(null, '', `#${idx + 1}`);
+  }
+
+  prevBtn.addEventListener('click', () => go(idx - 1));
+  nextBtn.addEventListener('click', () => go(idx + 1));
+  pills.forEach(p => p.addEventListener('click', () => go(Number(p.dataset.goto))));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+      e.preventDefault(); go(idx + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault(); go(idx - 1);
+    } else if (e.key >= '1' && e.key <= String(slides.length)) {
+      go(Number(e.key) - 1);
+    } else if (e.key === 'm' || e.key === 'M') {
+      document.body.classList.toggle('no-motion');
+    }
+  });
+
+  const initial = Number((location.hash || '').replace('#', ''));
+  go(initial >= 1 && initial <= slides.length ? initial - 1 : 0, false);
+})();
+</script>
+</body>
+</html>

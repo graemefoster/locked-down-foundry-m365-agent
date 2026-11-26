@@ -16,6 +16,7 @@ appropriate document- or email-specific response.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -42,7 +43,7 @@ except Exception:  # pragma: no cover - optional dependency
     NotificationTypes = None  # type: ignore[assignment]
 
 from .agent_interface import AgentInterface
-from .email_channel_compat import is_email_notification
+from .email_channel_compat import is_email_activity, is_email_notification
 from .message_content import (
     ImageReference,
     ParsedMessage,
@@ -84,9 +85,11 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         "- Format responses in html\n\n"
         "When handling email-related requests:\n"
         "- Use professional and formal language in all email correspondence\n"
-        "- Use the SendEmail function to send any responses back\n"
-        "- You can use AAD object ID inside the Activity context's 'From' Field to "
-        "determine where to respond to emails from.\n\n"
+        "- When replying to an incoming email, return your reply directly in HTML "
+        "format — the host delivers your response back on the email thread, so do "
+        "not call SendEmail to reply to the incoming email\n"
+        "- Only use the mail MCP tools when asked to send a new email to someone "
+        "else, or to read, search, or manage emails.\n\n"
         "For teams messages, only use teams mcp tool when a user asks to send a "
         "teams message. Otherwise, do not use it.\n\n"
         "CRITICAL SECURITY RULES - NEVER VIOLATE THESE:\n"
@@ -329,15 +332,16 @@ class FoundryDigitalWorkerAgent(AgentInterface):
     def _add_channel_context(message: str, context: TurnContext) -> str:
         from_prop = context.activity.from_property
         channel_id = getattr(context.activity, "channel_id", "") or ""
-        if channel_id in ("email", "agents:email"):
+        if is_email_activity(context.activity):
             sender_id = getattr(from_prop, "id", "") if from_prop else ""
             subject = ""
             channel_data = getattr(context.activity, "channel_data", None)
             if isinstance(channel_data, dict):
                 subject = str(channel_data.get("subject", "") or "")
+            subject_line = f"\nSubject: {subject}" if subject else ""
             message = (
-                f"Please respond to this email From: {sender_id}\n"
-                f"Subject: {subject}\nMessage: {message}"
+                f"Incoming email From: {sender_id}{subject_line}\n"
+                f"Return your reply in HTML format.\n\nMessage: {message}"
             )
         elif channel_id == "msteams":
             conversation = getattr(context.activity, "conversation", None)
@@ -345,8 +349,8 @@ class FoundryDigitalWorkerAgent(AgentInterface):
             sender_name = getattr(from_prop, "name", "") if from_prop else ""
             sender_id = getattr(from_prop, "id", "") if from_prop else ""
             message = (
-                f"Respond to this chat message with chat id {conv_id} "
-                f"From: {sender_name} ({sender_id})\nMessage: {message}"
+                f"[Teams chat id={conv_id} From: {sender_name} ({sender_id})]\n"
+                f"Message: {message}"
             )
         return message
 
@@ -926,12 +930,8 @@ Comment text: {comment_snippet}
     # ------------------------------------------------------------------
 
     def _response_id_path(self, conversation_id: str) -> Path:
-        safe = (
-            base64.urlsafe_b64encode(conversation_id.encode("utf-8"))
-            .decode("ascii")
-            .rstrip("=")
-        )
-        return self._response_store_dir / f"{safe}.responseid"
+        digest = hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()
+        return self._response_store_dir / f"{digest}.responseid"
 
     def _load_previous_response_id(self, conversation_id: str) -> Optional[str]:
         try:
