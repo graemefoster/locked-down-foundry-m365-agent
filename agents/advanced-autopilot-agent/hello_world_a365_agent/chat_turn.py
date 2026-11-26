@@ -36,7 +36,13 @@ CHAT_FORMAT_RULES = (
     "- Format responses in Markdown (short headings, bullets). Never use HTML tags.\n"
     "- Some email tool results carry a `cite` number. Cite only emails that have one; when you state a fact from an email, "
     "cite it as [n] with that number (e.g. [3]). Do not invent numbers.\n"
-    "- To summarise the inbox call list_messages once with top=30 (the whole inbox), never a smaller number.\n"
+    "- Every list_messages / list_events result has a `totals` object (messages_total, unread, urgent, meetings_today, "
+    "conflicts) computed exactly over the whole mailbox and calendar. The KPI card shows these same numbers. "
+    "Whenever you state a count of emails, unread, urgent, meetings or conflicts, quote `totals` verbatim; never count "
+    "the rows you received, never estimate, and never state a total that is not in `totals`. "
+    "`value` may be only a page of the data.\n"
+    "- To summarise the inbox and day, call list_messages (top=30) and list_events once each; to answer a count question "
+    "one call is enough.\n"
 )
 
 
@@ -47,11 +53,14 @@ class MockSession:
         self.cite: dict[str, int] = {}
         self.messages: dict[str, dict] = {}
         self.events: list[dict] = []
+        self.totals: dict[str, int] | None = None
 
     def run(self, name: str, arguments: str | None) -> str:
         from mock_m365 import call_tool
 
         data = json.loads(call_tool(name, arguments))
+        if "totals" in data:
+            self.totals = data["totals"]
         rows = data.get("value") if name == "list_messages" else ([data] if name == "get_message" else [])
         for m in rows or []:
             if "id" in m:
@@ -77,15 +86,15 @@ class MockSession:
         return {"unread": unread, "urgent": urgent, "events": evs, "conflicts": conflicts}
 
     def card(self) -> dict | None:
-        k = self.kpis()
-        if not self.messages and not self.events:
+        if not self.totals:
             return None
+        t = self.totals  # same compute_totals() the model was handed in tool results
         return kpi_strip(
             [
-                {"label": "Unread", "value": len(k["unread"]), "tone": "accent"},
-                {"label": "Urgent", "value": len(k["urgent"]), "tone": "bad" if k["urgent"] else "good"},
-                {"label": "Meetings today", "value": len(k["events"])},
-                {"label": "Conflicts", "value": len(k["conflicts"]), "tone": "warning" if k["conflicts"] else "good"},
+                {"label": "Unread", "value": t["unread"], "tone": "accent"},
+                {"label": "Urgent", "value": t["urgent"], "tone": "bad" if t["urgent"] else "good"},
+                {"label": "Meetings today", "value": t["meetings_today"]},
+                {"label": "Conflicts", "value": t["conflicts"], "tone": "warning" if t["conflicts"] else "good"},
             ],
             title="Inbox and calendar at a glance",
         )

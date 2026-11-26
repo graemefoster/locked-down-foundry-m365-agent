@@ -16,6 +16,18 @@ def _data() -> dict:
     return _DATA
 
 
+def compute_totals() -> dict[str, Any]:
+    """The single source of inbox/calendar counts: tool results and the KPI card both use this."""
+    d = _data()
+    unread = [m for m in d["messages"] if not m["isRead"]]
+    today = d["generated_for"]
+    evs = sorted((e for e in d["events"] if e["start"].startswith(today)), key=lambda e: e["start"])
+    conflicts = [(a, b) for i, a in enumerate(evs) for b in evs[i + 1:] if b["start"] < a["end"]]
+    return {"messages_total": len(d["messages"]), "unread": len(unread),
+            "urgent": sum(1 for m in unread if m["importance"] == "high"),
+            "meetings_today": len(evs), "conflicts": len(conflicts)}
+
+
 def _fn(name: str, description: str, props: dict[str, Any]) -> dict[str, Any]:
     return {"type": "function", "name": name, "description": description,
             "parameters": {"type": "object", "properties": props, "additionalProperties": False}}
@@ -38,7 +50,7 @@ def call_tool(name: str, arguments: str | dict | None) -> str:
         msgs = [m for m in d["messages"] if not (args.get("unread_only") and m["isRead"])]
         keys = ("id", "subject", "from", "receivedDateTime", "importance", "isRead", "conversationId", "bodyPreview", "webLink")
         out = [{k: m[k] for k in keys} for m in msgs[: int(args.get("top") or 30)]]
-        return json.dumps({"value": out})
+        return json.dumps({"totals": compute_totals(), "value": out})
     if name == "get_message":
         m = next((m for m in d["messages"] if m["id"] == args.get("id")), None)
         return json.dumps(m or {"error": f"message {args.get('id')} not found"})
@@ -50,5 +62,5 @@ def call_tool(name: str, arguments: str | dict | None) -> str:
             evs = [e for e in evs if e["start"].startswith(today)]
         elif day == "tomorrow":
             evs = [e for e in evs if not e["start"].startswith(today)]
-        return json.dumps({"today": today, "value": evs})
+        return json.dumps({"today": today, "totals": compute_totals(), "value": evs})
     return json.dumps({"error": f"unknown tool {name}"})

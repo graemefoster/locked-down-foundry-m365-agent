@@ -1,0 +1,88 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+08:00
+Send suggested actions
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+20:30
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+20:30
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+20:30
+how many urgent emails do I have?
+Test Bot
+20:30
+
+You have 4 urgent emails.
+
+Test Bot
+20:30
+
+Inbox and calendar at a glance
+
+17
+
+Unread
+
+4
+
+Urgent
+
+4
+
+Meetings today
+
+1
+
+Conflicts
+
+Draft a reply to INC-5826
+Show only unread emails
+Test Bot
+20:30
+Try next:
+Draft a reply to INC-5826
+Show only unread emails
+
+
+
+
+Type a message...
+Log Panel
+[20:30:53] Current version: 0.2.28
+[20:30:53] Connecting to your application at http://localhost:8090/api/messages...
+[20:30:53] Connected.
+[20:30:53] Events recording disabled.
+[20:30:53] Using default configuration file. Learn more about default configuration file.
+[20:30:53] You can read document about how to customize context information using configuration file.
+[20:30:53] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[20:30:53] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[20:30:53] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[20:30:53] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[20:30:55] Microsoft 365 Agents Playground -> User Application message 202 how many urgent emails do I have?
+[20:30:55] User Application -> Microsoft 365 Agents Playground typing 201 Looking at your request…
+[20:30:57] User Application -> Microsoft 365 Agents Playground typing 202 Reading your inbox…
+[20:30:58] User Application -> Microsoft 365 Agents Playground message 202 You have **4 urgent emails**.
+[20:30:59] User Application -> Microsoft 365 Agents Playground message 201 Try next:
+Click on a log item in the panel above to see log details.
