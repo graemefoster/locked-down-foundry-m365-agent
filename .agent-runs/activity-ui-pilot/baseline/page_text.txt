@@ -1,0 +1,68 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+19:40
+<html> <body> <ul> <li>Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.</li> <li>Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.</li> <li>Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actionable items.</li> </ul> </body> </html>
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+19:40
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+19:40
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+19:40
+Summarise what an inbox triage assistant should do, in 3 bullets.
+Test Bot
+19:40
+
+Working on your request.
+
+Test Bot
+19:40
+
+<html> <body>
+
+Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.
+Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.
+Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actionable items.
+</body> </html>
+
+
+
+
+Type a message...
+Log Panel
+[19:40:48] Current version: 0.2.30
+[19:40:48] Connecting to your application at http://localhost:8091/api/messages...
+[19:40:48] Connected.
+[19:40:48] Events recording disabled.
+[19:40:48] Using default configuration file. Learn more about default configuration file.
+[19:40:48] You can read document about how to customize context information using configuration file.
+[19:40:48] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[19:40:48] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[19:40:48] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[19:40:48] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[19:40:51] Microsoft 365 Agents Playground -> User Application message 202 Summarise what an inbox triage assistant should do, in 3 bullets.
+[19:40:51] User Application -> Microsoft 365 Agents Playground message 201 Working on your request.
+[19:40:51] User Application -> Microsoft 365 Agents Playground typing 202
+[19:40:54] User Application -> Microsoft 365 Agents Playground message 201 <html> <body> <ul> <li>Prioritize incoming messages by urgency, importance, and relevanc...
+Click on a log item in the panel above to see log details.

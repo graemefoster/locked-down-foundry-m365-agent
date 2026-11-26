@@ -1,0 +1,5 @@
+# Baseline turn: msteams channel, anonymous, LOCAL_NO_MCP=1, prompt below. Times are local (AWST).
+19:40:51.004 IN  message msteams text= Summarise what an inbox triage assistant should do, in 3 bullets. | recipient= {'id': '00000000-0000-0000-0000-00000000000011', 'name': 'Test Bot'} | from= {'id': 'user-id-0', 'name': 'Alex Wilber', 'aadObjectId': '00000000-0000-0000-0000-0000000000020'} | auth_header= False | handler_s= 3.81
+19:40:51.016 OUT message len=24: Working on your request.
+19:40:51.023 OUT typing
+19:40:54.820 OUT message len=445: <html> |   <body> |     <ul> |       <li>Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.</li> |       <li>Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.</li> |       <li>Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actio
