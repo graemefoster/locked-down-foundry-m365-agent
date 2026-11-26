@@ -1,0 +1,37 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+20:56
+Summarise my inbox and calendar for today
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+20:56
+Summarise my inbox and calendar for today
+
+
+
+
+Type a message...
+Log Panel
+[20:56:26] Current version: 0.2.28
+[20:56:26] Connecting to your application at http://localhost:8090/api/messages...
+[20:56:26] Connected.
+[20:56:26] Events recording disabled.
+[20:56:26] Using default configuration file. Learn more about default configuration file.
+[20:56:26] You can read document about how to customize context information using configuration file.
+[20:56:26] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[20:56:26] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[20:56:28] Microsoft 365 Agents Playground -> User Application message 202 Summarise my inbox and calendar for today
+Click on a log item in the panel above to see log details.

@@ -14,7 +14,8 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 try:  # local editable install, see LOCAL_RUN.md
-    from m365_activity_ui import (ApprovalDesk, CardInfo, TurnPresenter, approval_card, citations, donut_chart,
+    from microsoft_agents.activity import InvokeResponse
+    from m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, approval_card, citations, donut_chart,
                                   kpi_strip, present_responses, prompt_actions, with_actions)
 
     _LIB = True
@@ -48,24 +49,43 @@ if _LIB:
     DESK = ApprovalDesk(_decide)
 
 
-def register_approvals(app: Any) -> None:
-    """Register the adaptiveCard/action invoke on the AgentApplication."""
+def register_approvals(app: Any, run_prompt: Any = None, inline: bool = False) -> None:
+    """Register the invokes: ``prompt`` follow-up buttons and ``adaptiveCard/action`` (ApprovalDesk).
+
+    ``run_prompt(context, prompt)`` runs the turn. Default (PromptDesk): it runs in a background task after the invoke
+    ack, so it must not use the invoke context (closed). ``inline=True``: the turn is awaited inside the invoke handler
+    on the live context (no ack until it finishes; fine locally, Teams invoke timeout is short)."""
     if not _LIB:
         return
-    if hasattr(app, "invoke"):
-        DESK.register(app)
+    DESK.register(app)
+    if run_prompt is None:
         return
-    # microsoft-agents-hosting-core 1.7.0 has no AgentApplication.invoke (the library README assumes it):
-    # same wiring through add_route(is_invoke=True).
+    # Library-note: PromptDesk.register uses an `async def` selector; hosting-core 1.7 calls `route.selector(context)`
+    # without awaiting, so the registered route never matches. Same wiring here with the sync `matches`.
     from microsoft_agents.activity import Activity, ActivityTypes
+    from microsoft_agents.hosting.core.app._routes import RouteRank
 
-    def _is_card_action(context: Any) -> bool:
-        return context.activity.type == ActivityTypes.invoke and context.activity.name == "adaptiveCard/action"
+    global PROMPTS
+    PROMPTS = PromptDesk(run_prompt, echo=False)  # echo is sent by run_prompt, from a live context
 
-    async def _on_card_action(context: Any, _state: Any) -> None:
-        await context.send_activity(Activity(type=ActivityTypes.invoke_response, value=await DESK.handle(context)))
+    async def _on_prompt(context: Any, _state: Any) -> None:
+        if inline:
+            from m365_activity_ui.prompts import _prompt_of
 
-    app.add_route(_is_card_action, _on_card_action, is_invoke=True)
+            prompt = _prompt_of(context)
+            if prompt is not None:
+                await run_prompt(context, prompt)
+                response = InvokeResponse(status=200, body={"statusCode": 200, "value": "OK",
+                                                            "type": "application/vnd.microsoft.activity.message"})
+            else:
+                response = await PROMPTS.handle(context)
+        else:
+            response = await PROMPTS.handle(context)
+        await context.send_activity(Activity(type=ActivityTypes.invoke_response, value=response))
+
+    app.add_route(PROMPTS.matches, _on_prompt, is_invoke=True, rank=RouteRank.FIRST)
+
+
 STEP_LABELS = {
     "list_messages": "Reading your inbox…",
     "get_message": "Opening an email…",

@@ -14,8 +14,8 @@ Reproduces today's turn experience locally. No secrets: values come from your gi
    PORT=8090 LOCAL_NO_MCP=1 hello_world_a365_agent/.venv-local/bin/python local_run.py
    ```
    `LOCAL_NO_MCP=1` drops the 6 MCP servers (blocked locally, see below); omit it to reproduce the 400.
-3. Playground (set `-c msteams` to match Teams channel behaviour):
-   `npx @microsoft/m365agentsplayground -p 56170 -e http://localhost:8090/api/messages -c msteams`
+3. Playground (set `-c msteams` to match Teams channel behaviour; verified wave3, v0.2.28):
+   `npx -y @microsoft/m365agentsplayground -p 56170 -e http://localhost:8090/api/messages -c msteams`
    then open http://localhost:56170. (Port 8088/56150 may be taken by other local agents.)
 4. Timestamped capture: `.agent-runs/activity-ui-pilot/baseline/inbound_proxy.py` (inbound, :8091 -> :8090)
    and `.agent-runs/activity-ui-pilot/playground/drive.cjs` (UI driver, records outbound frames + screenshot).
@@ -41,3 +41,17 @@ host falls back to the old ack + typing flow.
   reuses one conversation id, so a stored previous_response_id makes the model skip tool calls).
 - Evidence: `.agent-runs/activity-ui-pilot/after/` (`activity_log.txt`, `mid_turn.png`, `final.png`,
   `nonstream_slack.txt`, `nonstream_email.txt`).
+
+## Follow-up buttons and approvals (wave3)
+`chat_turn.register_approvals(app, run_prompt, inline)` wires `ApprovalDesk.register(app)` (no manual add_route) and the
+`prompt` invoke (PromptDesk logic). Verified in Playground with `MOCK_M365=1`: click "Draft a reply to ..." -> "You asked: ..."
+echo -> real answer + approval card; Approve resolves the card in place ("Approved by ..."), `MOCK SEND #1` logged.
+- **Library finding 1:** `PromptDesk.register` uses an `async def` selector; hosting-core 1.7 calls `route.selector(ctx)`
+  unawaited, so the route never matches (`RuntimeWarning: coroutine ... _selector was never awaited`, button does nothing).
+  Host registers the same route with the sync `desk.matches`.
+- **Library finding 2:** PromptDesk runs `run_prompt` after the invoke ack; the invoke turn's connector client is closed
+  then: `send_activity` -> `AssertionError: assert self._connector is not None` (aiohttp). Evidence: `.agent-runs/activity-ui-pilot/wave3/try1/agent.log`.
+- Fallbacks in `host_agent_server.py`: with CLIENT_ID+TENANT_ID+CLIENT_SECRET set (deployed) the turn runs on a proactive
+  `continue_conversation` context (UNVERIFIED here: no credentials); locally (anonymous) `continue_conversation` fails with
+  `TENANT_ID is not set in the configuration` (try2), so the turn is awaited inline in the invoke handler and the 200 is
+  returned after the turn (~5 s; Teams' invoke timeout is short). Override with `PROMPT_RUN_MODE=inline|proactive`.
