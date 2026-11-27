@@ -55,6 +55,7 @@ from opentelemetry import propagate, trace
 from opentelemetry.sdk.trace import SpanProcessor
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
+from . import chat_turn
 from .agent_interface import AgentInterface, check_agent_inheritance
 from .email_channel_compat import (
     is_email_activity,
@@ -342,6 +343,31 @@ class GenericAgentHost:
             )
 
         self.agent_app.conversation_update("membersAdded", **handler_config)(help_handler)
+        app_id = os.getenv("CLIENT_ID") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTID") or ""
+        # Deployed (auth configured): PromptDesk acks, then the turn runs on a proactive context, because the invoke
+        # turn's connector client is closed after the ack (send_activity -> AssertionError in aiohttp).
+        # Local anonymous (no credentials): continue_conversation cannot mint a token ("TENANT_ID is not set"), so the
+        # turn is awaited inline in the invoke handler instead.
+        tenant = os.getenv("TENANT_ID") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__TENANTID") or ""
+        secret = os.getenv("CLIENT_SECRET") or os.getenv("CONNECTIONS__SERVICE_CONNECTION__SETTINGS__CLIENTSECRET") or ""
+        authed = bool(app_id and tenant and secret)  # same condition as create_auth_configuration
+        mode = os.getenv("PROMPT_RUN_MODE") or ("proactive" if authed else "inline")
+
+        async def _turn(ctx: TurnContext, prompt: str) -> None:
+            try:
+                await chat_turn.run_chat_turn(
+                    self.agent_instance, prompt, self.agent_app.auth, self.auth_handler_name, ctx)
+            except Exception as ex:
+                logger.exception("Error processing prompt click")
+                await ctx.send_activity(f"Sorry, something went wrong: {ex}")
+
+        async def _run_prompt(context: TurnContext, prompt: str) -> None:
+            """Follow-up button click: same pipeline as a typed message."""
+            if await self._validate_agent_and_setup_context(context) is None:
+                return
+            await _turn(context, prompt)
+
+        chat_turn.register_approvals(self.agent_app, _run_prompt, mode=mode, app_id=app_id)  # prompt + adaptiveCard/action invokes
         self.agent_app.message("/help", **handler_config)(help_handler)
 
         @self.agent_app.activity("installationUpdate")
@@ -378,19 +404,39 @@ class GenericAgentHost:
                 logger.info("📨 %s", user_message)
 
                 if is_email_activity(context.activity):
-                    await self.agent_instance.process_user_message(
+                    response = await self.agent_instance.process_user_message(
                         user_message,
                         self.agent_app.auth,
                         self.auth_handler_name,
                         context,
                     )
+                    if response:
+                        response_activity = EmailResponse.create_email_response_activity(
+                            response
+                        )
+                        await context.send_activity(response_activity)
                     return
 
-                # Multi-message pattern: immediate ack, typing indicator loop,
+                from . import demo_turn
+                if chat_turn.available() and (demo_sec := demo_turn.parse(user_message)):
+                    await demo_turn.run_demo(context, demo_sec)  # deterministic gallery, no model call
+                    return
+
+                # Chat surfaces: progress lines, streamed markdown, KPI card, citations, follow-ups
+                # (m365_activity_ui). Non-streaming/agentic requests get one final message from the
+                # same presenter. Falls back to the legacy flow below when the library is absent.
+                if chat_turn.available() and not is_wpx_comment_activity(context.activity):
+                    await chat_turn.run_chat_turn(
+                        self.agent_instance, user_message,
+                        self.agent_app.auth, self.auth_handler_name, context,
+                    )
+                    return
+
+                # Legacy multi-message pattern: immediate ack, typing indicator loop,
                 # then the final LLM response. Mirrors the C# StreamingResponse
                 # flow (QueueInformativeUpdateAsync + QueueTextChunk).
                 if not is_wpx_comment_activity(context.activity):
-                    await context.send_activity("Working on your request. I got you covered friend...")
+                    await context.send_activity("Working on your request.")
                 await context.send_activity(Activity(type="typing"))
 
                 async def _typing_loop() -> None:

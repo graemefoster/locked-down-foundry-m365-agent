@@ -1,0 +1,8 @@
+WARNING hello_world_a365_agent.chat_turn | MOCK SEND #1: to=['tom.becker@contoso.example'] subject='s'
+UNGROUNDED -> Error: value 99 for 'fyi' does not appear in any tool output this turn. Use only numbers from tool results (or call the data tool first); nothing was rendered.
+GROUNDED   -> queued; it will appear with your final answer. Continue; write the answer when ready.
+queued as a draft; the email has NOT been sent; it will appear with your final answer. Continue; write the answer when ready.
+decide 0 card
+decide 1 card
+decide 2 card
+SENT_LOG entries: 1

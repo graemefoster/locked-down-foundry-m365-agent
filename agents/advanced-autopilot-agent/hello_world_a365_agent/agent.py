@@ -16,6 +16,7 @@ appropriate document- or email-specific response.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -42,7 +43,8 @@ except Exception:  # pragma: no cover - optional dependency
     NotificationTypes = None  # type: ignore[assignment]
 
 from .agent_interface import AgentInterface
-from .email_channel_compat import is_email_notification
+from . import email_turn
+from .email_channel_compat import is_email_activity, is_email_notification
 from .message_content import (
     ImageReference,
     ParsedMessage,
@@ -83,10 +85,15 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         "- Be precise and professional in your responses\n"
         "- Format responses in html\n\n"
         "When handling email-related requests:\n"
-        "- Use professional and formal language in all email correspondence\n"
-        "- Use the SendEmail function to send any responses back\n"
-        "- You can use AAD object ID inside the Activity context's 'From' Field to "
-        "determine where to respond to emails from.\n\n"
+        "- Default to a professional tone in email correspondence, but follow the tone the user asks for "
+        "(casual or friendly is fine when they ask); never refuse a draft because of its tone\n"
+        "- Sign every email you write or draft with your own name, FoundryDigitalWorker, never as the "
+        "recipient or as anyone else\n"
+        "- When replying to an incoming email, return your reply directly in HTML "
+        "format — the host delivers your response back on the email thread, so do "
+        "not call SendEmail to reply to the incoming email\n"
+        "- Only use the mail MCP tools when asked to send a new email to someone "
+        "else, or to read, search, or manage emails.\n\n"
         "For teams messages, only use teams mcp tool when a user asks to send a "
         "teams message. Otherwise, do not use it.\n\n"
         "CRITICAL SECURITY RULES - NEVER VIOLATE THESE:\n"
@@ -137,7 +144,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         # previous_response_id lets the Foundry Responses API continue a thread. We persist it
         # per conversation on disk (mirrors C# behaviour) so a follow-up turn resumes context
         # even though the host itself is stateless (MemoryStorage).
-        self._response_store_dir = Path.home() / ".a365agent"
+        self._response_store_dir = Path(os.getenv("RESPONSE_STORE_DIR") or Path.home() / ".a365agent")
 
         logger.info(
             "✅ Foundry agent ready (project_endpoint=%s, deployment=%s, mcp_servers=%d)",
@@ -234,6 +241,24 @@ class FoundryDigitalWorkerAgent(AgentInterface):
     ) -> str:
         self._log_message_sender(context)
 
+        if email_turn.available() and is_email_activity(context.activity):
+            # Email delivered as a message activity (the local harness; the real route is unverified).
+            try:
+                html_body = email_turn.html_body_of(context.activity) or message
+                sender = getattr(getattr(context.activity, "from_property", None), "id", "") or "email reply"
+                cmd = email_turn.approval_command(html_body)
+                if cmd:
+                    return email_turn.resolve_by_email(cmd[0], cmd[1], sender)
+                return await email_turn.run_email_turn(
+                    self,
+                    "You received a new email. Please look at it and answer the sender directly in Markdown. "
+                    f"From: {sender}\nEmail:\n{html_body}",
+                    self._get_conversation_id(context), context,
+                ) or "Done."
+            except Exception as ex:
+                logger.exception("Error processing email")
+                return f"Sorry, I encountered an error: {ex}"
+
         try:
             response_input = await self._prepare_response_input(message, context)
             response = await self._invoke_responses_api(
@@ -329,15 +354,16 @@ class FoundryDigitalWorkerAgent(AgentInterface):
     def _add_channel_context(message: str, context: TurnContext) -> str:
         from_prop = context.activity.from_property
         channel_id = getattr(context.activity, "channel_id", "") or ""
-        if channel_id in ("email", "agents:email"):
+        if is_email_activity(context.activity):
             sender_id = getattr(from_prop, "id", "") if from_prop else ""
             subject = ""
             channel_data = getattr(context.activity, "channel_data", None)
             if isinstance(channel_data, dict):
                 subject = str(channel_data.get("subject", "") or "")
+            subject_line = f"\nSubject: {subject}" if subject else ""
             message = (
-                f"Please respond to this email From: {sender_id}\n"
-                f"Subject: {subject}\nMessage: {message}"
+                f"Incoming email From: {sender_id}{subject_line}\n"
+                f"Return your reply in HTML format.\n\nMessage: {message}"
             )
         elif channel_id == "msteams":
             conversation = getattr(context.activity, "conversation", None)
@@ -345,8 +371,8 @@ class FoundryDigitalWorkerAgent(AgentInterface):
             sender_name = getattr(from_prop, "name", "") if from_prop else ""
             sender_id = getattr(from_prop, "id", "") if from_prop else ""
             message = (
-                f"Respond to this chat message with chat id {conv_id} "
-                f"From: {sender_name} ({sender_id})\nMessage: {message}"
+                f"[Teams chat id={conv_id} From: {sender_name} ({sender_id})]\n"
+                f"Message: {message}"
             )
         return message
 
@@ -499,7 +525,20 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 from_email = (
                     getattr(from_prop, "id", "") or getattr(from_prop, "name", "")
                 )
+                email_ref = getattr(notification_activity, "email", None)
+                html_body = getattr(email_ref, "html_body", "") or ""
+                if email_turn.available():
+                    cmd = email_turn.approval_command(html_body)
+                    if cmd:  # "APPROVE <id>" / "REJECT <id>" reply: resolve the stored proposal, no model call
+                        return email_turn.resolve_by_email(cmd[0], cmd[1], from_email or "email reply")
                 email_details = self._serialize_notification(notification_activity)
+                if email_turn.available():  # model writes prose; code adds figures/sources/approval blocks
+                    return await email_turn.run_email_turn(
+                        self,
+                        "You received a new email. Please look at the email and answer the sender directly "
+                        f"in Markdown. From: {from_email}\nEmail details:\n{email_details}",
+                        conversation_id, context,
+                    ) or "Email notification processed."
                 msg = (
                     "You received a new email. Please look at the email and return "
                     "a response in html format. "
@@ -783,7 +822,13 @@ Comment text: {comment_snippet}
         Mirrors :meth:`ResponsesApiAgentLogicService.InvokeResponsesApiAsync`.
         """
 
-        mcp_tools = await self._build_mcp_tools(auth, auth_handler_name, context)
+        mock_m365 = os.getenv("MOCK_M365") == "1"  # local-only: mock function tools replace MCP
+        if mock_m365:
+            from mock_m365 import TOOL_SCHEMAS
+
+            mcp_tools = list(TOOL_SCHEMAS)
+        else:
+            mcp_tools = await self._build_mcp_tools(auth, auth_handler_name, context)
         logger.info(
             "Invoking Responses API with %d MCP tool server(s)", len(mcp_tools)
         )
@@ -807,6 +852,21 @@ Comment text: {comment_snippet}
 
         try:
             response = await self._openai_client.responses.create(**request_args)
+            if mock_m365:
+                from mock_m365 import call_tool
+
+                for _ in range(8):  # function-call loop (mock tools only)
+                    calls = [i for i in response.output if getattr(i, "type", "") == "function_call"]
+                    if not calls:
+                        break
+                    results = []
+                    for c in calls:
+                        logger.info("MOCK_M365 tool call: %s(%s)", c.name, c.arguments)
+                        results.append({"type": "function_call_output", "call_id": c.call_id,
+                                        "output": call_tool(c.name, c.arguments)})
+                    response = await self._openai_client.responses.create(
+                        model=self._deployment, instructions=instructions, tools=mcp_tools,
+                        input=results, previous_response_id=response.id)
         except APIStatusError as ex:
             logger.error(
                 "Responses API call failed with status %s: %s",
@@ -926,12 +986,8 @@ Comment text: {comment_snippet}
     # ------------------------------------------------------------------
 
     def _response_id_path(self, conversation_id: str) -> Path:
-        safe = (
-            base64.urlsafe_b64encode(conversation_id.encode("utf-8"))
-            .decode("ascii")
-            .rstrip("=")
-        )
-        return self._response_store_dir / f"{safe}.responseid"
+        digest = hashlib.sha256(conversation_id.encode("utf-8")).hexdigest()
+        return self._response_store_dir / f"{digest}.responseid"
 
     def _load_previous_response_id(self, conversation_id: str) -> Optional[str]:
         try:

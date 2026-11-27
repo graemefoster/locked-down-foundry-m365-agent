@@ -1,0 +1,3 @@
+second click (replay, same id): (200, '{"statusCode": 200, "type": "application/vnd.microsoft.card.adaptive", "value": {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard", "version": "1.5", "body": [{"type": "TextBlock", "text": "Draft reply: INC-5826", "weight": "Bolder", "size": "Medium", "wrap": tr')
+forged unknown id: (400, '{"statusCode": 400, "type": "application/vnd.microsoft.error", "value": {"code": "BadRequest", "message": "unknown approval id: deadbeefdeadbeefdeadbeefdeadbeef"}}')
+forged bad verb: (400, '{"statusCode": 400, "type": "application/vnd.microsoft.error", "value": {"code": "BadRequest", "message": "unknown verb: delete"}}')

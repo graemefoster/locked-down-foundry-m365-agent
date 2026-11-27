@@ -1,0 +1,100 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+20:01
+<html> <body> <p>Hi Alex, here is a concise summary of your inbox and today’s calendar.</p> <h3>Inbox summary</h3> <ul> <li><strong>Total recent messages shown:</strong> 10</li> <li><strong>Unread:</strong> 7</li> <li><strong>High-priority unread items:</strong> <ul> <li><strong>Production incident INC-5826: payments API latency</strong> — Tom Becker; needs an owner for the mitigation call.</li> <li><strong>URGENT: Contract renewal needs your sign-off by Friday</strong> — Sofia Alvarez; legal needs your signature.</li> <li><strong>Security: confirm unusual sign-in on your account</strong> — Marcus Lee; asks you to confirm a new-device sign-in.</li> <li><strong>Action required: Q4 budget variance explanation</strong> — Elena Petrova; finance flagged a 12% cloud spend variance.</li> </ul> </li> <li><strong>Other unread items:</strong> two “Quick question about the roadmap” emails, an Azure updates newsletter, and an office maintenance notice.</li> <li><strong>Notable read item:</strong> “The Tech Brief - Daily” newsletter.</li> </ul> <h3>Today’s calendar</h3> <ul> <li><strong>09:30–09:45</strong> — Team standup (Microsoft Teams)</li> <li><strong>11:00–12:00</strong> — Launch readiness review (Meeting Room Fremantle)</li> <li><strong>11:30–12:15</strong> — Customer call - Northwind expansion (Microsoft Teams)</li> <li><strong>15:00–15:30</strong> — 1:1 with Priya Nair (Microsoft Teams)</li> </ul> <h3>Potential conflicts</h3> <ul> <li>The <strong>11:00–12:00</strong> launch readiness review overlaps with the <strong>11:30–12:15</strong> customer call.</li> </ul> <p>If you would like, I can next help you prioritize the urgent emails or draft replies.</p> </body> </html>
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+20:00
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+20:00
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+20:00
+summarise my inbox and today's calendar
+Test Bot
+20:00
+
+Working on your request.
+
+Test Bot
+20:01
+
+<html> <body>
+
+Hi Alex, here is a concise summary of your inbox and today’s calendar.
+
+<h3>Inbox summary</h3>
+<ul>
+  <li><strong>Total recent messages shown:</strong> 10</li>
+  <li><strong>Unread:</strong> 7</li>
+  <li><strong>High-priority unread items:</strong>
+    <ul>
+      <li><strong>Production incident INC-5826: payments API latency</strong> — Tom Becker; needs an owner for the mitigation call.</li>
+      <li><strong>URGENT: Contract renewal needs your sign-off by Friday</strong> — Sofia Alvarez; legal needs your signature.</li>
+      <li><strong>Security: confirm unusual sign-in on your account</strong> — Marcus Lee; asks you to confirm a new-device sign-in.</li>
+      <li><strong>Action required: Q4 budget variance explanation</strong> — Elena Petrova; finance flagged a 12% cloud spend variance.</li>
+    </ul>
+  </li>
+  <li><strong>Other unread items:</strong> two “Quick question about the roadmap” emails, an Azure updates newsletter, and an office maintenance notice.</li>
+  <li><strong>Notable read item:</strong> “The Tech Brief - Daily” newsletter.</li>
+</ul>
+
+<h3>Today’s calendar</h3>
+<ul>
+  <li><strong>09:30–09:45</strong> — Team standup (Microsoft Teams)</li>
+  <li><strong>11:00–12:00</strong> — Launch readiness review (Meeting Room Fremantle)</li>
+  <li><strong>11:30–12:15</strong> — Customer call - Northwind expansion (Microsoft Teams)</li>
+  <li><strong>15:00–15:30</strong> — 1:1 with Priya Nair (Microsoft Teams)</li>
+</ul>
+
+<h3>Potential conflicts</h3>
+<ul>
+  <li>The <strong>11:00–12:00</strong> launch readiness review overlaps with the <strong>11:30–12:15</strong> customer call.</li>
+</ul>
+
+<p>If you would like, I can next help you prioritize the urgent emails or draft replies.</p>
+
+
+</body> </html>
+
+
+
+
+Type a message...
+Log Panel
+[20:00:53] Current version: 0.2.30
+[20:00:53] Connecting to your application at http://localhost:8090/api/messages...
+[20:00:53] Connected.
+[20:00:53] Events recording disabled.
+[20:00:53] Using default configuration file. Learn more about default configuration file.
+[20:00:53] You can read document about how to customize context information using configuration file.
+[20:00:54] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[20:00:54] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[20:00:54] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[20:00:54] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[20:00:56] Microsoft 365 Agents Playground -> User Application message 202 summarise my inbox and today's calendar
+[20:00:56] User Application -> Microsoft 365 Agents Playground message 201 Working on your request.
+[20:00:56] User Application -> Microsoft 365 Agents Playground typing 202
+[20:01:01] User Application -> Microsoft 365 Agents Playground typing 202
+[20:01:05] User Application -> Microsoft 365 Agents Playground message 201 <html> <body> <p>Hi Alex, here is a concise summary of your inbox and today’s calendar.</p> ...
+Click on a log item in the panel above to see log details.

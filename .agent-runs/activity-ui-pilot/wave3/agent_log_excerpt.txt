@@ -1,0 +1,8 @@
+35:2026-11-26 21:11:57,701 INFO aiohttp.access | 127.0.0.1 [26/Nov/2026:21:11:57 +0800] "GET /api/health HTTP/1.1" 200 264 "-" "Python-urllib/3.13"
+36:2026-11-26 21:12:02,341 INFO aiohttp.access | 127.0.0.1 [26/Nov/2026:21:12:02 +0800] "HEAD /api/messages HTTP/1.1" 200 92 "-" "axios/1.12.2"
+54:2026-11-26 21:12:04,390 INFO aiohttp.access | 127.0.0.1 [26/Nov/2026:21:12:04 +0800] "HEAD /api/messages HTTP/1.1" 200 92 "-" "axios/1.12.2"
+100:2026-11-26 21:12:25,556 INFO hello_world_a365_agent.host_agent_server | 📥 /api/messages request | method=POST | content-type=application/json | size=1005 bytes | body={"type":"invoke","id":"d36d3b
+134:2026-11-26 21:12:30,767 INFO aiohttp.access | 127.0.0.1 [26/Nov/2026:21:12:25 +0800] "POST /api/messages HTTP/1.1" 200 247 "-" "axios/1.12.2"
+135:2026-11-26 21:12:44,581 INFO hello_world_a365_agent.host_agent_server | 📥 /api/messages request | method=POST | content-type=application/json | size=1000 bytes | body={"type":"invoke","id":"064f7f
+138:2026-11-26 21:12:44,586 WARNING hello_world_a365_agent.chat_turn | MOCK SEND #1: to=Tom Becker <tom.becker@contoso.example> subject='Re: Production incident INC-5826: payments API latency' approve
+139:2026-11-26 21:12:44,588 INFO aiohttp.access | 127.0.0.1 [26/Nov/2026:21:12:44 +0800] "POST /api/messages HTTP/1.1" 200 1095 "-" "axios/1.12.2"

@@ -1,0 +1,97 @@
+[
+ {
+  "ts": "19:39:47.633",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693187583,\"id\":\"656c4c27-cfe4-4a4e-80d1-90d2e4e82c93\",\"displayText\":\"Connecting to your application at http://localhost:8091/api/messages...\"}}"
+ },
+ {
+  "ts": "19:39:47.642",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693187591,\"id\":\"22186dfd-902d-4341-8cb3-394cb1522371\",\"displayText\":\"Connected.\"}}"
+ },
+ {
+  "ts": "19:39:47.642",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693187592,\"id\":\"c5c49043-25c1-4675-b94d-dbd9adc29746\",\"displayText\":\"Events recording disabled.\"}}"
+ },
+ {
+  "ts": "19:39:47.642",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693187592,\"id\":\"da6a90b6-2abf-402b-8434-f5d8aad9ab17\",\"displayText\":\"Using default configuration file. Learn more about {link}.\",\"linkMap\":{\"link\":{\"url\":\"https://aka.ms/teams-app-test-tool-config-guide#default-config\",\"displayText\":\"default configuration file\"}}}}"
+ },
+ {
+  "ts": "19:39:47.642",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693187593,\"id\":\"e01cc5e3-bb21-4818-a7ab-e4006f6547f5\",\"displayText\":\"You can read {document} about how to customize context information using configuration file.\",\"linkMap\":{\"document\":{\"url\":\"https://aka.ms/teams-app-test-tool-config-guide\",\"displayText\":\"document\"}}}}"
+ },
+ {
+  "ts": "19:39:47.661",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693187649\",\"timestamp\":1795693187649,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:39:47.683",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693187649-d3aa835c\",\"timestamp\":1795693187649,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:39:47.683",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"71524072-a40d-4092-8d8c-59c4a8cbd13d\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693187649,\"activityName\":\"message\",\"messageId\":\"1795693187649\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"text\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"083ec6f8-825e-41c0-8a2a-8e324450e6d9\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693187649\"}},\"displayText\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:47.685",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"283314ee-6962-4a38-a55d-4a7dc36670f5\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693187649,\"activityName\":\"message\",\"messageId\":\"1795693187649-d3aa835c\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"cc2470b2-49d7-4420-b75f-eebab8cf098f\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693187649-d3aa835c\"}},\"displayText\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:47.686",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"b3614199-5612-470f-91da-ec613d841783\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693187629,\"activityName\":\"conversationUpdate\",\"messageId\":\"083ec6f8-825e-41c0-8a2a-8e324450e6d9\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"conversationUpdate\",\"id\":\"083ec6f8-825e-41c0-8a2a-8e324450e6d9\",\"from\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:39:47.629Z\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"membersAdded\":[{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},{\"id\":\"00000000-0000-0000-0000-00000000000011\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"}},\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:47.688",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"308bbef7-ebc9-440a-be47-d3e3852c3602\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693187629,\"activityName\":\"installationUpdate\",\"messageId\":\"cc2470b2-49d7-4420-b75f-eebab8cf098f\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"installationUpdate\",\"id\":\"cc2470b2-49d7-4420-b75f-eebab8cf098f\",\"from\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:39:47.628Z\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"locale\":\"en-US\",\"entities\":[{\"type\":\"clientInfo\",\"locale\":\"en-US\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"},\"source\":{\"name\":\"message\"},\"settings\":{\"selectedChannel\":{\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}},\"action\":\"add\",\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:50.325",
+  "dir": "ui",
+  "data": "SEND summarise my inbox"
+ },
+ {
+  "ts": "19:39:50.351",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693190346\",\"timestamp\":1795693190346,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"Working on your request.\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:39:50.352",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"791c4adc-da70-4f9f-8819-3826c7f372ee\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693190346,\"activityName\":\"message\",\"messageId\":\"1795693190346\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"Working on your request.\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"459f4ac0-4b86-4dc4-a271-4a0be5431ffe\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693190346\"}},\"displayText\":\"Working on your request.\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:50.356",
+  "dir": "recv",
+  "data": "{\"action\":\"typing\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}"
+ },
+ {
+  "ts": "19:39:50.359",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"b04d45cd-7748-4f60-a800-da63007cb46b\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693190347,\"activityName\":\"typing\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"typing\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"459f4ac0-4b86-4dc4-a271-4a0be5431ffe\"}},\"response\":{\"statusCode\":202},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:54.591",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693194556\",\"timestamp\":1795693194556,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"I encountered an error processing your request. Status: 400\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:39:54.619",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"38930a72-9c14-4551-be30-c2c254f3f4ac\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693194557,\"activityName\":\"message\",\"messageId\":\"1795693194556\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"I encountered an error processing your request. Status: 400\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"459f4ac0-4b86-4dc4-a271-4a0be5431ffe\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693194556\"}},\"displayText\":\"I encountered an error processing your request. Status: 400\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:39:54.659",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"435a87c0-4c23-4218-b64e-32216eb3c24a\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693190333,\"activityName\":\"message\",\"messageId\":\"459f4ac0-4b86-4dc4-a271-4a0be5431ffe\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"message\",\"text\":\"summarise my inbox\",\"id\":\"459f4ac0-4b86-4dc4-a271-4a0be5431ffe\",\"from\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:39:50.327Z\",\"localTimestamp\":\"2026-11-26T19:39:50.327+08:00\",\"localTimezone\":\"Australia/Perth\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"textFormat\":\"plain\",\"locale\":\"en-US\",\"entities\":[{\"type\":\"clientInfo\",\"locale\":\"en-US\",\"country\":\"US\",\"platform\":\"Web\",\"timezone\":\"Australia/Perth\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"}},\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"summarise my inbox\",\"type\":\"bot\"}}"
+ }
+]

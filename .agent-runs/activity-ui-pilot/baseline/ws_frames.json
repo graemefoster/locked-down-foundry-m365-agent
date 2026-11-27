@@ -1,0 +1,97 @@
+[
+ {
+  "ts": "19:40:48.197",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693248150,\"id\":\"f0eccf05-2104-4880-b373-c8aaf01f4d85\",\"displayText\":\"Connecting to your application at http://localhost:8091/api/messages...\"}}"
+ },
+ {
+  "ts": "19:40:48.202",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693248159,\"id\":\"99beac6e-f0c7-4d3a-87e3-e46326ae9994\",\"displayText\":\"Connected.\"}}"
+ },
+ {
+  "ts": "19:40:48.202",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693248160,\"id\":\"3bc325cc-c2d2-4272-b9f9-635e79104cd7\",\"displayText\":\"Events recording disabled.\"}}"
+ },
+ {
+  "ts": "19:40:48.202",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693248162,\"id\":\"faa7c68a-cb47-459b-89cc-5d9741405b9e\",\"displayText\":\"Using default configuration file. Learn more about {link}.\",\"linkMap\":{\"link\":{\"url\":\"https://aka.ms/teams-app-test-tool-config-guide#default-config\",\"displayText\":\"default configuration file\"}}}}"
+ },
+ {
+  "ts": "19:40:48.202",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"type\":\"text\",\"timestamp\":1795693248162,\"id\":\"1943f111-2aa1-4c63-a200-1a9784ad5457\",\"displayText\":\"You can read {document} about how to customize context information using configuration file.\",\"linkMap\":{\"document\":{\"url\":\"https://aka.ms/teams-app-test-tool-config-guide\",\"displayText\":\"document\"}}}}"
+ },
+ {
+  "ts": "19:40:48.264",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693248241\",\"timestamp\":1795693248241,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:40:48.290",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693248246\",\"timestamp\":1795693248246,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:40:48.317",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"4423ca26-2b54-4e47-b122-02a5aa001533\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693248242,\"activityName\":\"message\",\"messageId\":\"1795693248241\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"05fbaeb2-f4b7-4a6d-9165-4a0dfdd9904f\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693248241\"}},\"displayText\":\"Thank you for hiring me! Looking forward to assisting you in your professional journey!\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:48.318",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"d36abaa3-bd03-4961-94b5-9e78fac0087d\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693248246,\"activityName\":\"message\",\"messageId\":\"1795693248246\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"text\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"91d0dbe8-a69a-4084-8b73-e9c0e89947b6\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693248246\"}},\"displayText\":\"👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant.\\n\\nHow can I help you today?\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:48.320",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"fc5499fb-4295-4a7c-9a5b-4a4bda3f8372\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693248199,\"activityName\":\"installationUpdate\",\"messageId\":\"05fbaeb2-f4b7-4a6d-9165-4a0dfdd9904f\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"installationUpdate\",\"id\":\"05fbaeb2-f4b7-4a6d-9165-4a0dfdd9904f\",\"from\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:40:48.197Z\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"locale\":\"en-US\",\"entities\":[{\"type\":\"clientInfo\",\"locale\":\"en-US\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"},\"source\":{\"name\":\"message\"},\"settings\":{\"selectedChannel\":{\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}},\"action\":\"add\",\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:48.331",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"944f4fac-2be5-47bd-bf6c-d7752d4d5ffb\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693248199,\"activityName\":\"conversationUpdate\",\"messageId\":\"91d0dbe8-a69a-4084-8b73-e9c0e89947b6\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"conversationUpdate\",\"id\":\"91d0dbe8-a69a-4084-8b73-e9c0e89947b6\",\"from\":{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:40:48.198Z\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"membersAdded\":[{\"id\":\"user-id-0\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},{\"id\":\"00000000-0000-0000-0000-00000000000011\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"}},\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:50.993",
+  "dir": "ui",
+  "data": "SEND Summarise what an inbox triage assistant should do, in 3 bullets."
+ },
+ {
+  "ts": "19:40:51.016",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693251010\",\"timestamp\":1795693251010,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"Working on your request.\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:40:51.018",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"7e90160e-01c3-48d1-aa80-855a3bf4fc6e\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693251011,\"activityName\":\"message\",\"messageId\":\"1795693251010\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"Working on your request.\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"4f25fa11-0adb-4a05-8fc8-9a7cd245537a\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693251010\"}},\"displayText\":\"Working on your request.\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:51.023",
+  "dir": "recv",
+  "data": "{\"action\":\"typing\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}"
+ },
+ {
+  "ts": "19:40:51.031",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"85449765-060b-439d-a2c7-2caf90b84a09\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693251012,\"activityName\":\"typing\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"typing\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"4f25fa11-0adb-4a05-8fc8-9a7cd245537a\"}},\"response\":{\"statusCode\":202},\"displayText\":\"\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:54.820",
+  "dir": "recv",
+  "data": "{\"action\":\"createMessage\",\"actionConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"message\":{\"messageId\":\"1795693254809\",\"timestamp\":1795693254809,\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\"},\"text\":\"<html>\\n  <body>\\n    <ul>\\n      <li>Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.</li>\\n      <li>Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.</li>\\n      <li>Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actionable items.</li>\\n    </ul>\\n  </body>\\n</html>\",\"textFormat\":\"markdown\",\"attachments\":[],\"attachmentLayout\":\"list\",\"mentions\":[],\"directLineConversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"}}"
+ },
+ {
+  "ts": "19:40:54.830",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"19ca3c46-8fdf-4344-8451-18e2747608be\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693254809,\"activityName\":\"message\",\"messageId\":\"1795693254809\",\"from\":\"User Application\",\"to\":\"Microsoft 365 Agents Playground\",\"request\":{\"body\":{\"type\":\"message\",\"channelId\":\"msteams\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"from\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"conversation\":{\"conversationType\":\"personal\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\"},\"recipient\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"locale\":\"en-US\",\"text\":\"<html>\\n  <body>\\n    <ul>\\n      <li>Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.</li>\\n      <li>Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.</li>\\n      <li>Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actionable items.</li>\\n    </ul>\\n  </body>\\n</html>\",\"inputHint\":\"acceptingInput\",\"replyToId\":\"4f25fa11-0adb-4a05-8fc8-9a7cd245537a\"}},\"response\":{\"statusCode\":201,\"body\":{\"id\":\"1795693254809\"}},\"displayText\":\"<html>\\n  <body>\\n    <ul>\\n      <li>Prioritize incoming messages by urgency, importance, and relevance so the most critical items are surfaced first.</li>\\n      <li>Classify each message into clear next actions, such as reply, delegate, archive, follow up, or convert into a task.</li>\\n      <li>Reduce inbox clutter by filtering noise, grouping related messages, and keeping the user focused on actionable items.</li>\\n    </ul>\\n  </body>\\n</html>\",\"type\":\"bot\"}}"
+ },
+ {
+  "ts": "19:40:54.832",
+  "dir": "recv",
+  "data": "{\"logAction\":\"appendLog\",\"log\":{\"id\":\"409b336f-57ed-4fb6-a10a-a4d9de693d37\",\"conversationId\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\",\"timestamp\":1795693251002,\"activityName\":\"message\",\"messageId\":\"4f25fa11-0adb-4a05-8fc8-9a7cd245537a\",\"from\":\"Microsoft 365 Agents Playground\",\"to\":\"User Application\",\"request\":{\"body\":{\"type\":\"message\",\"text\":\"Summarise what an inbox triage assistant should do, in 3 bullets.\",\"id\":\"4f25fa11-0adb-4a05-8fc8-9a7cd245537a\",\"from\":{\"id\":\"user-id-0\",\"name\":\"Alex Wilber\",\"aadObjectId\":\"00000000-0000-0000-0000-0000000000020\"},\"timestamp\":\"2026-11-26T11:40:50.997Z\",\"localTimestamp\":\"2026-11-26T19:40:50.997+08:00\",\"localTimezone\":\"Australia/Perth\",\"serviceUrl\":\"http://localhost:56170/_connector\",\"conversation\":{\"conversationType\":\"personal\",\"tenantId\":\"00000000-0000-0000-0000-0000000000001\",\"id\":\"8468bac5-371a-4d82-9a90-7babeca42c9d\"},\"recipient\":{\"id\":\"00000000-0000-0000-0000-00000000000011\",\"name\":\"Test Bot\"},\"textFormat\":\"plain\",\"locale\":\"en-US\",\"entities\":[{\"type\":\"clientInfo\",\"locale\":\"en-US\",\"country\":\"US\",\"platform\":\"Web\",\"timezone\":\"Australia/Perth\"}],\"channelData\":{\"tenant\":{\"id\":\"00000000-0000-0000-0000-0000000000001\"}},\"channelId\":\"msteams\"}},\"response\":{\"statusCode\":202,\"body\":\"\"},\"displayText\":\"Summarise what an inbox triage assistant should do, in 3 bullets.\",\"type\":\"bot\"}}"
+ }
+]

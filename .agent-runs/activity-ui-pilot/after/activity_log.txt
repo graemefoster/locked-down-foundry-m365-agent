@@ -1,0 +1,9 @@
+# after: msteams, MOCK_M365=1, prompt 'summarise my inbox and today's calendar'. ms since SEND, Playground-side receive times
++  571ms create 'Looking at your request…","textFormat":"markdown","attachmen'  
++ 2613ms update 'Reading your inbox…","textFormat":"markdown","attachments":['  
++ 3620ms update 'Checking today\'s calendar…","textFormat":"markdown","attachm'  
++ 4634ms update '## Inbox summary\\n\\n- **Unread messages:** 13 of 30\\n- **Hig'  
++ 5642ms update '## Inbox summary\\n\\n- **Unread messages:** 13 of 30\\n- **Hig'  
++ 5676ms create 'Inbox and calendar at a glance","weight":"Bolder","wrap":tru' [ADAPTIVE CARD+aiEntity] 
++ 5695ms create '' [ADAPTIVE CARD+aiEntity] 
++ 6660ms create 'Try next:","textFormat":"markdown","attachments":[],"attachm'  [SUGGESTED ACTIONS]

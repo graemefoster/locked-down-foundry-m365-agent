@@ -1,0 +1,116 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+21:15
+Send a card
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+21:15
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+Test Bot
+21:15
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+21:15
+Summarise my inbox and calendar for today
+Test Bot
+AI generated
+21:15
+Today at a glance
+Inbox
+25 messages total, 17 unread, 4 urgent, 4 meetings today, 1 conflict
+Most important item: Production incident INC-5826: payments API latency from Tom Becker, asking you to join the mitigation call [1]
+Other urgent items include:
+Contract renewal needs your sign-off by Friday [2]
+Security: confirm unusual sign-in on your account [3]
+Q4 budget variance explanation [4]
+Calendar
+
+You have 4 meetings today:
+
+9:30–9:45 AM — Team standup
+11:00 AM–12:00 PM — Launch readiness review
+11:30 AM–12:15 PM — Customer call - Northwind expansion
+3:00–3:30 PM — 1:1 with Priya Nair
+Notes
+There is 1 calendar conflict, with overlap between the Launch readiness review and Customer call - Northwind expansion
+Your inbox also includes several unread follow-ups and FYIs, but the incident, security, finance, and contract items look most time-sensitive
+
+If you want, I can also rank your inbox by priority or summarise only the urgent items.
+
+Test Bot
+AI generated
+21:15
+
+Inbox and calendar at a glance
+
+17
+
+Unread
+
+4
+
+Urgent
+
+4
+
+Meetings today
+
+1
+
+Conflicts
+
+Draft a reply to INC-5826
+Resolve the 11:30 conflict
+Show only unread emails
+Test Bot
+AI generated
+21:15
+
+Unread email by category, today, Alex's inbox
+
+Urgent
+Newsletter
+
+Urgent 1 · Newsletter 1
+
+
+
+
+Type a message...
+Log Panel
+[21:15:25] Current version: 0.2.28
+[21:15:25] Connecting to your application at http://localhost:8090/api/messages...
+[21:15:25] Connected.
+[21:15:25] Events recording disabled.
+[21:15:25] Using default configuration file. Learn more about default configuration file.
+[21:15:25] You can read document about how to customize context information using configuration file.
+[21:15:25] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[21:15:25] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[21:15:25] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[21:15:25] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[21:15:28] Microsoft 365 Agents Playground -> User Application message 202 Summarise my inbox and calendar for today
+[21:15:29] User Application -> Microsoft 365 Agents Playground typing 201 Looking at your request…
+[21:15:32] User Application -> Microsoft 365 Agents Playground typing 202 Reading your inbox…
+[21:15:33] User Application -> Microsoft 365 Agents Playground typing 202 Checking today's calendar…
+[21:15:34] User Application -> Microsoft 365 Agents Playground typing 202 ## Today at a glance ### Inbox - **25 messages total**, **17 unread**, **4 urgent**, **4 meetings t...
+[21:15:35] User Application -> Microsoft 365 Agents Playground message 202 ## Today at a glance ### Inbox - **25 messages total**, **17 unread**, **4 urgent**, **4 meetings t...
+Click on a log item in the panel above to see log details.

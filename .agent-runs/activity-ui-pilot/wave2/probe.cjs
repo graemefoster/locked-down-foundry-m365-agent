@@ -1,0 +1,22 @@
+const { chromium } = require("../playground/node_modules/playwright-core");
+const fs=require("fs"),os=require("os"),path=require("path");
+const cache=path.join(os.homedir(),"Library/Caches/ms-playwright");let exe;
+for(const d of fs.readdirSync(cache).filter(d=>/^chromium-\d+$/.test(d)).sort().reverse())for(const s of fs.readdirSync(path.join(cache,d))){const p=path.join(cache,d,s,"Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing");if(!exe&&fs.existsSync(p))exe=p;}
+(async()=>{const b=await chromium.launch({executablePath:exe,headless:true});const pg=await b.newPage({viewport:{width:1200,height:1300}});
+pg.on("request",r=>{if(r.method()==="POST")console.log("REQ",r.url(),(r.postData()||"").slice(0,1500))});
+pg.on("console",m=>console.log("CON",m.text().slice(0,300)));
+pg.on("websocket",ws=>{ws.on("framesent",f=>console.log("WSS",String(f.payload).slice(0,1500)));});
+await pg.goto("http://localhost:56170/",{waitUntil:"networkidle"});await pg.waitForTimeout(2000);
+await pg.mouse.click(400,1262);await pg.keyboard.type("Summarise my inbox and calendar for today");await pg.keyboard.press("Enter");
+await pg.getByRole("button",{name:/Draft a reply to/i}).first().waitFor({timeout:100000});
+await pg.screenshot({path:"final.png",fullPage:true});
+console.log("CLICK followup");await pg.getByRole("button",{name:/Draft a reply to/i}).first().click();await pg.waitForTimeout(8000);
+await pg.screenshot({path:"followup_click_nothing.png",fullPage:true});
+await pg.mouse.click(400,1262);await pg.keyboard.type("draft a reply to INC-5826");await pg.keyboard.press("Enter");
+await pg.getByRole("button",{name:/^Approve$/}).first().waitFor({timeout:120000});
+await pg.waitForTimeout(2000);await pg.screenshot({path:"pending.png",fullPage:true});
+console.log("CLICK approve");await pg.getByRole("button",{name:/^Approve$/}).first().click();await pg.waitForTimeout(6000);
+await pg.screenshot({path:"approved.png",fullPage:true});
+fs.writeFileSync("page_text_after_approve.txt",await pg.innerText("body"));
+console.log("approve buttons left",await pg.getByRole("button",{name:/^Approve$/}).count());
+await b.close();})();

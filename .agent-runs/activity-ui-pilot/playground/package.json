@@ -1,0 +1,8 @@
+{
+  "name": "activity-ui-pilot-playground",
+  "private": true,
+  "dependencies": {
+    "@microsoft/m365agentsplayground": "0.2.30",
+    "playwright-core": "^1.50.0"
+  }
+}

@@ -1,0 +1,69 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+13:21
+Send a card
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+13:21
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+13:21
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+13:21
+demo approval
+Test Bot
+13:21
+
+Email: [DEMO, not sent] Quarterly update
+
+To: demo@example.invalid
+
+Body
+
+EDITED BODY v8: hello from the card editor. Second line.
+
+Approved (edited before sending) by Alex Wilber on 2026-11-27 05:21 UTC
+
+Your response was sent to the app
+User specific view is not supported yet in Microsoft 365 Agents playground, you can try it in real environment.
+
+
+
+
+Type a message...
+Log Panel
+[13:21:19] Current version: 0.2.28
+[13:21:19] Connecting to your application at http://localhost:8090/api/messages...
+[13:21:19] Connected.
+[13:21:19] Events recording disabled.
+[13:21:19] Using default configuration file. Learn more about default configuration file.
+[13:21:19] You can read document about how to customize context information using configuration file.
+[13:21:19] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[13:21:19] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[13:21:19] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[13:21:19] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[13:21:21] Microsoft 365 Agents Playground -> User Application message 202 demo approval
+[13:21:21] (!) Warning: User specific view is not supported yet in Microsoft 365 Agents playground, you can try it in real e...
+[13:21:21] User Application -> Microsoft 365 Agents Playground message 201
+[13:21:41] Microsoft 365 Agents Playground -> User Application invoke 200
+Click on a log item in the panel above to see log details.

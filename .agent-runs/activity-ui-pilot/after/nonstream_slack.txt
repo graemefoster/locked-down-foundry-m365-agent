@@ -1,0 +1,4 @@
+POST -> 202 after 6.5s
++0.95s type=typing textFormat=None len=0 attachments=0 text=''
++6.37s type=message textFormat=None len=1975 attachments=1 text='## Inbox summary\n\nYou have **26 messages** in total, with several item'
+messages: 1 | typing: 1

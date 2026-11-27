@@ -1,0 +1,63 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+19:39
+I encountered an error processing your request. Status: 400
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+19:39
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+Test Bot
+19:39
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+19:39
+summarise my inbox
+Test Bot
+19:39
+
+Working on your request.
+
+Test Bot
+19:39
+
+I encountered an error processing your request. Status: 400
+
+
+
+
+Type a message...
+Log Panel
+[19:39:47] Current version: 0.2.30
+[19:39:47] Connecting to your application at http://localhost:8091/api/messages...
+[19:39:47] Connected.
+[19:39:47] Events recording disabled.
+[19:39:47] Using default configuration file. Learn more about default configuration file.
+[19:39:47] You can read document about how to customize context information using configuration file.
+[19:39:47] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[19:39:47] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[19:39:47] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[19:39:47] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[19:39:50] Microsoft 365 Agents Playground -> User Application message 202 summarise my inbox
+[19:39:50] User Application -> Microsoft 365 Agents Playground message 201 Working on your request.
+[19:39:50] User Application -> Microsoft 365 Agents Playground typing 202
+[19:39:54] User Application -> Microsoft 365 Agents Playground message 201 I encountered an error processing your request. Status: 400
+Click on a log item in the panel above to see log details.
