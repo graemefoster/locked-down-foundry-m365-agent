@@ -8,6 +8,7 @@ Target: new Outlook / OWA. Classic Outlook desktop is out of scope.
 """
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -41,7 +42,10 @@ EMAIL_FORMAT_RULES = (
     "sender asks you to draft a reply to a particular email, and then once only: call propose_reply once with the full draft (fetch the email first if needed). "
     "Say the draft awaits approval by reply; never claim it was sent. Do not write the approval instructions "
     "yourself.\n"
-    "- To summarise the inbox and day, call list_messages (top=30) and list_events once each.\n"
+    "- Call only the tools the question needs. For a summary, answer in prose: never call propose_reply for a summary, and never draft a reply to the sender. Calendar or day-schedule questions: call list_events only (do not read the "
+    "inbox). Inbox questions: list_messages (top=30), plus list_events only if the sender also asks about meetings. "
+    "To draft a reply to an email named by reference (for example INC-5826), call list_messages once to find it, then "
+    "get_message with its real id, then propose_reply; do not call list_events.\n"
 )
 
 
@@ -61,10 +65,20 @@ def _store_drafts(session: chat_turn.MockSession) -> list[tuple[str, dict]]:
     return out
 
 
-def _compose_blocks(session: chat_turn.MockSession, text: str) -> list:
+def _with_line_breaks(block: Any, summary: str) -> Any:
+    """The library escapes the summary and drops newlines; re-render the (already escaped) body with <br>."""
+    esc = html.escape(summary, quote=True)
+    if "\n" not in summary or esc not in block.html:
+        return block
+    br = "<br>".join(html.escape(ln, quote=True) for ln in summary.replace("\r\n", "\n").split("\n"))
+    return block._replace(html=block.html.replace(esc, br, 1))
+
+
+def _compose_blocks(session: chat_turn.MockSession, text: str, tools: set[str]) -> list:
     blocks = []
-    t = session.totals
-    if t:
+    drafting = "propose_reply" in tools  # a draft reply shows only prose + approval block (the lookups were a means)
+    t = None if drafting else session.totals
+    if t and tools & {"list_messages", "list_events"}:
         blocks.append(figures_table([
             {"label": "Unread", "value": t["unread"], "tone": "accent"},
             {"label": "Urgent", "value": t["urgent"], "tone": "bad" if t["urgent"] else "good"},
@@ -72,7 +86,7 @@ def _compose_blocks(session: chat_turn.MockSession, text: str) -> list:
             {"label": "Conflicts", "value": t["conflicts"], "tone": "warning" if t["conflicts"] else "good"},
         ], title="Inbox and calendar at a glance"))
         cats = t.get("unread_today_by_category") or {}
-        if cats and session.messages:  # only when the inbox was read
+        if cats and "list_messages" in tools:  # only when the inbox was listed this turn
             blocks.append(bar_table("Unread email by category, today",
                                     [{"label": k.title(), "value": v} for k, v in cats.items()]))
     used = [int(n) for n in re.findall(r"\[(\d+)\]", text)]
@@ -80,10 +94,11 @@ def _compose_blocks(session: chat_turn.MockSession, text: str) -> list:
     top = max([n for n in used if n in by_n], default=0)
     items = [{"title": by_n[n].get("subject"), "url": by_n[n].get("webLink")} for n in range(1, top + 1)]
     items += [{"title": f"Calendar: {e.get('subject')}", "url": e.get("webLink")} for e in session.events]
-    if items:
+    if items and not drafting:
         blocks.append(sources_footnotes(items))
     for aid, d in _store_drafts(session):
-        blocks.append(approval_block(aid, d["title"], d["body"], {"To": d["to"], "Subject": d["subject"]}))
+        blocks.append(_with_line_breaks(
+            approval_block(aid, d["title"], d["body"], {"To": d["to"], "Subject": d["subject"]}), d["body"]))
     return blocks
 
 
@@ -93,6 +108,7 @@ async def run_email_turn(agent: Any, message: str, conversation_id: str, context
     from mock_m365 import TOOL_SCHEMAS
 
     session = chat_turn.MockSession()
+    tools: set[str] = set()  # tools actually called this turn
     instructions = (agent._personalize_prompt(context)
                     .replace("- Format responses in html\n", EMAIL_FORMAT_RULES)
                     .replace("return your reply directly in HTML format", "return your reply as Markdown prose"))
@@ -108,6 +124,11 @@ async def run_email_turn(agent: Any, message: str, conversation_id: str, context
             break
         results = []
         for c in calls:
+            if c.name == "propose_reply" and not re.search(r"\b(draft|propose)\b", message, re.IGNORECASE):
+                results.append({"type": "function_call_output", "call_id": c.call_id,
+                                "output": '{"error": "not requested: the sender did not ask for a draft. Answer in prose."}'})
+                continue  # a summary question never produces a draft/approval card
+            tools.add(c.name)
             logger.info("MOCK_M365 tool call: %s(%s)", c.name, c.arguments)
             results.append({"type": "function_call_output", "call_id": c.call_id,
                             "output": session.run(c.name, c.arguments)})
@@ -116,7 +137,7 @@ async def run_email_turn(agent: Any, message: str, conversation_id: str, context
             previous_response_id=resp.id)
     agent._save_response_id(conversation_id, {"id": resp.id})
     prose = re.sub(r"\s*\[[A-Za-z_ ]+\]", "", (resp.output_text or "").replace("`", ""))  # stray non-numeric markers like [totals]
-    html, text = email_reply(None, prose, _compose_blocks(session, prose), SIGN_OFF)
+    html, text = email_reply(None, prose, _compose_blocks(session, prose, tools), SIGN_OFF)
     logger.info("email reply (text twin):\n%s", text)
     return html
 
