@@ -71,4 +71,10 @@ Stdlib only (screenshot via `shot.cjs`, needs playwright-core from `.agent-runs/
 - Recipient must NOT have `role: agenticUser` locally (the SDK would then demand an agentic token -> 500).
 - `--mode plain` sends a Teams-style message through the same capture (negative check: not treated as email, goes to the chat turn).
 - The library's email entity has no subject; the harness puts `Subject: ...` at the top of `htmlBody`. Real Outlook payload content is unverified.
+- `--quote-from <earlier reply.html>` sends `--body` as a reply with quoted history (`<hr><blockquote>`), e.g. `--body "APPROVE AP-xxxxxx"`.
+- Email replies (MOCK_M365=1 only) use `hello_world_a365_agent/email_turn.py` over `m365_activity_ui.email`: the model writes markdown prose; code adds
+  figures (`compute_totals`), a category bar table (only if the inbox was read), sources (cited messages + events) and an approval block with id
+  `AP-xxxxxx` when `propose_reply` ran. An inbound `APPROVE|REJECT <id>` reply (`parse_approval_reply`) resolves the stored proposal once
+  (MOCK SEND logged; repeat -> "already decided", unknown -> "not found"). In-memory store, one process. Targets new Outlook/OWA; classic desktop out of scope.
+  Without MOCK_M365 the old model-written HTML path is unchanged (no computed data there). Evidence: `.agent-runs/activity-ui-pilot/email-after/`.
 - Baseline (pre-library) evidence: `.agent-runs/activity-ui-pilot/email-harness/`.

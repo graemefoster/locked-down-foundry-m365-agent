@@ -32,7 +32,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 
 
-def build_activity(mode: str, sender: str, subject: str, body: str, service_url: str) -> dict:
+def build_activity(mode: str, sender: str, subject: str, body: str, service_url: str, quote_html: str = "") -> dict:
     conv_id = f"email-harness-{uuid.uuid4().hex[:8]}"
     msg_id = f"AAMk-harness-{uuid.uuid4().hex[:12]}"
     base = {
@@ -56,6 +56,10 @@ def build_activity(mode: str, sender: str, subject: str, body: str, service_url:
     # The A365 EmailReference has only id, conversationId, htmlBody: no subject field. The subject is
     # put at the top of htmlBody so the model sees it (the real service's exact content is unverified).
     email_html = f"<html><body><p><b>Subject: {html.escape(subject)}</b></p><p>{html.escape(body)}</p></body></html>"
+    if quote_html:  # a reply: new text on top, then the quoted history as new Outlook/OWA sends it
+        email_html = (f"<html><body><p>{html.escape(body)}</p><div id=\"appendonsend\"></div><hr>"
+                      f"<div><b>From:</b> Agent<br><b>Subject:</b> {html.escape(subject)}</div>"
+                      f"<blockquote>{quote_html}</blockquote></body></html>")
     return {
         **base,
         "type": "message",
@@ -77,6 +81,7 @@ def main() -> int:
     ap.add_argument("--from", dest="sender", required=True)
     ap.add_argument("--subject", required=True)
     ap.add_argument("--body", default="")
+    ap.add_argument("--quote-from", default="", help="reply.html of an earlier run: send --body as a reply quoting it")
     ap.add_argument("--agent", default="http://localhost:8095", help="agent base URL")
     ap.add_argument("--mode", choices=["notification", "plain"], default="notification")
     ap.add_argument("--out", default=str(HERE / "out"))
@@ -107,7 +112,8 @@ def main() -> int:
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     service_url = f"http://127.0.0.1:{srv.server_address[1]}/"
 
-    activity = build_activity(args.mode, args.sender, args.subject, args.body, service_url)
+    activity = build_activity(args.mode, args.sender, args.subject, args.body, service_url,
+                              Path(args.quote_from).read_text() if args.quote_from else "")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "request.json").write_text(json.dumps(activity, indent=2))

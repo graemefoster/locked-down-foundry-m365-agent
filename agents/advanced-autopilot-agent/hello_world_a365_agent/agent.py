@@ -43,6 +43,7 @@ except Exception:  # pragma: no cover - optional dependency
     NotificationTypes = None  # type: ignore[assignment]
 
 from .agent_interface import AgentInterface
+from . import email_turn
 from .email_channel_compat import is_email_activity, is_email_notification
 from .message_content import (
     ImageReference,
@@ -236,6 +237,24 @@ class FoundryDigitalWorkerAgent(AgentInterface):
         context: TurnContext,
     ) -> str:
         self._log_message_sender(context)
+
+        if email_turn.available() and is_email_activity(context.activity):
+            # Email delivered as a message activity (the local harness; the real route is unverified).
+            try:
+                html_body = email_turn.html_body_of(context.activity) or message
+                sender = getattr(getattr(context.activity, "from_property", None), "id", "") or "email reply"
+                cmd = email_turn.approval_command(html_body)
+                if cmd:
+                    return email_turn.resolve_by_email(cmd[0], cmd[1], sender)
+                return await email_turn.run_email_turn(
+                    self,
+                    "You received a new email. Please look at it and write your reply in Markdown. "
+                    f"From: {sender}\nEmail:\n{html_body}",
+                    self._get_conversation_id(context), context,
+                ) or "Done."
+            except Exception as ex:
+                logger.exception("Error processing email")
+                return f"Sorry, I encountered an error: {ex}"
 
         try:
             response_input = await self._prepare_response_input(message, context)
@@ -503,7 +522,20 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 from_email = (
                     getattr(from_prop, "id", "") or getattr(from_prop, "name", "")
                 )
+                email_ref = getattr(notification_activity, "email", None)
+                html_body = getattr(email_ref, "html_body", "") or ""
+                if email_turn.available():
+                    cmd = email_turn.approval_command(html_body)
+                    if cmd:  # "APPROVE <id>" / "REJECT <id>" reply: resolve the stored proposal, no model call
+                        return email_turn.resolve_by_email(cmd[0], cmd[1], from_email or "email reply")
                 email_details = self._serialize_notification(notification_activity)
+                if email_turn.available():  # model writes prose; code adds figures/sources/approval blocks
+                    return await email_turn.run_email_turn(
+                        self,
+                        "You received a new email. Please look at the email and write your reply "
+                        f"in Markdown. From: {from_email}\nEmail details:\n{email_details}",
+                        conversation_id, context,
+                    ) or "Email notification processed."
                 msg = (
                     "You received a new email. Please look at the email and return "
                     "a response in html format. "
