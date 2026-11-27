@@ -248,7 +248,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                     return email_turn.resolve_by_email(cmd[0], cmd[1], sender)
                 return await email_turn.run_email_turn(
                     self,
-                    "You received a new email. Please look at it and write your reply in Markdown. "
+                    "You received a new email. Please look at it and answer the sender directly in Markdown. "
                     f"From: {sender}\nEmail:\n{html_body}",
                     self._get_conversation_id(context), context,
                 ) or "Done."
@@ -532,7 +532,7 @@ class FoundryDigitalWorkerAgent(AgentInterface):
                 if email_turn.available():  # model writes prose; code adds figures/sources/approval blocks
                     return await email_turn.run_email_turn(
                         self,
-                        "You received a new email. Please look at the email and write your reply "
+                        "You received a new email. Please look at the email and answer the sender directly "
                         f"in Markdown. From: {from_email}\nEmail details:\n{email_details}",
                         conversation_id, context,
                     ) or "Email notification processed."
