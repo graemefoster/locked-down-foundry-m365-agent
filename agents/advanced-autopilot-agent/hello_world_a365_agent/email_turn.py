@@ -19,13 +19,19 @@ from . import chat_turn
 
 logger = logging.getLogger(__name__)
 
-try:
-    from m365_activity_ui import (approval_block, bar_table, email_reply, figures_table, parse_approval_reply,
-                                  reply_top, sources_footnotes)
+try:  # vendored next to this module (deployed package, repo CI), else a top-level install
+    from .m365_activity_ui import (approval_block, bar_table, email_reply, figures_table, parse_approval_reply,
+                                   reply_top, sources_footnotes)
 
     _LIB = True
-except ImportError:  # pragma: no cover
-    _LIB = False
+except ImportError:
+    try:
+        from m365_activity_ui import (approval_block, bar_table, email_reply, figures_table, parse_approval_reply,
+                                      reply_top, sources_footnotes)
+
+        _LIB = True
+    except ImportError:  # pragma: no cover
+        _LIB = False
 
 SIGN_OFF = "Your inbox agent"
 DECIDED: dict[str, dict] = {}  # approval_id -> {"verdict", "by"}; first decision wins (same rule as ApprovalDesk)

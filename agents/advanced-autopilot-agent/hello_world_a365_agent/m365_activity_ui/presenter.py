@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from microsoft_agents.activity import Activity, Attachment
 from microsoft_agents.hosting.core.app.streaming import Citation
@@ -38,6 +38,8 @@ class TurnPresenter:
         self._feedback = feedback_loop
         self._max_citations = max_citations
         self._prompt_mode = prompt_mode
+        self._before_finish: list[Callable[[], None]] = []
+        self._email_blocks: list[Any] = []  # EmailBlock values, appended to the email body
         self._pending = ""  # text held back until the first chunk is worth sending
         self._started = False
 
@@ -85,6 +87,14 @@ class TurnPresenter:
         """Attach an Adaptive Card dict; sent with the final message only."""
         self._attachments.append(Attachment(content_type=ADAPTIVE_CARD_CONTENT_TYPE, content=dict(card)))
 
+    def before_finish(self, fn: Callable[[], None]) -> None:
+        """Run ``fn`` once at the start of ``finish`` (e.g. to queue cards that must go on the final message)."""
+        self._before_finish.append(fn)
+
+    def add_email_block(self, block: Any) -> None:
+        """Attach an email-safe ``EmailBlock`` (``.html``); rendered after the text on email turns only."""
+        self._email_blocks.append(block)
+
     def add_citations(self, items: Iterable[Citation]) -> None:
         """Numbered in call order; the text must contain ``[n]`` for a citation to show (see ``finish``).
         Only the first ``max_citations`` (default 10) are sent, so positions 1..cap still match the text."""
@@ -99,6 +109,8 @@ class TurnPresenter:
         if self._finished:
             raise RuntimeError("TurnPresenter.finish() already called")
         self._finished = True
+        for fn in self._before_finish:
+            fn()
         if self.surface == "email":
             await self._finish_email()
             return
@@ -130,6 +142,7 @@ class TurnPresenter:
             body += "<ol>" + "".join(
                 f'<li><a href="{c.url}">{c.title or c.url}</a></li>' if c.url else f"<li>{c.title or ''}</li>"
                 for c in self._citations) + "</ol>"
+        body += "".join(b.html for b in self._email_blocks)
         await self._ctx.send_activity(Activity(
             type="message", text=f"<html><body>{body}</body></html>", attachments=self._attachments))
 

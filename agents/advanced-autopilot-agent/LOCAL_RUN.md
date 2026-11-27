@@ -78,3 +78,15 @@ Stdlib only (screenshot via `shot.cjs`, needs playwright-core from `.agent-runs/
   (MOCK SEND logged; repeat -> "already decided", unknown -> "not found"). In-memory store, one process. Targets new Outlook/OWA; classic desktop out of scope.
   Without MOCK_M365 the old model-written HTML path is unchanged (no computed data there). Evidence: `.agent-runs/activity-ui-pilot/email-after/`.
 - Baseline (pre-library) evidence: `.agent-runs/activity-ui-pilot/email-harness/`.
+
+## Components as tools (ui-tools)
+Chat turns give the model `UiToolkit` tools (`show_chart`, `show_figures`, `show_sources`, `propose_email`, `clear_components`)
+plus `UI_INSTRUCTIONS`, on the real MCP path and on the mock path. No card is computed from tool data any more (the old
+KPI/donut/`propose_reply` cards in `chat_turn` are gone; `MockSession`/`propose_reply` remain for the email path only).
+Data-tool outputs are recorded for grounding (MCP `mcp_call` outputs by the adapter, mock outputs in `chat_turn.dispatch`);
+an ungrounded value returns `Error: ...` to the model and renders nothing.
+- `MOCK_M365_TEXT=1` (with `MOCK_M365=1`): mock tools return Work-IQ-like prose/markdown instead of JSON (chat path only).
+- Approve: mock -> `MOCK SEND #n` log; real -> a Responses call with only `mcp_MailTools` sends the draft as the agent user
+  (UNVERIFIED: tool name/deployed behaviour; logged as `MAIL SEND via mcp_MailTools`).
+- Import: `chat_turn`/`email_turn` try the vendored `.m365_activity_ui` first, then a top-level install.
+- Evidence: `.agent-runs/activity-ui-pilot/ui-tools/` (`drive.cjs`, screenshots a/b/c, `replay_ungrounded.txt`).

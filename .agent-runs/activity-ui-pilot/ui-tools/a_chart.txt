@@ -1,0 +1,89 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+12:24
+Send a card
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+12:24
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+12:24
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+12:24
+Chart my unread email by category
+Test Bot
+12:24
+Unread Email by Category
+
+I charted your unread email breakdown, Alex. The unread mail totals are:
+
+fyi: 6
+thread: 6
+urgent: 4
+newsletter: 1
+
+The chart above shows the distribution.
+
+Test Bot
+12:24
+
+Unread email by category
+
+0
+1.5
+3
+4.5
+6
+6
+fyi
+1
+newsletter
+6
+thread
+4
+urgent
+
+fyi 6 · newsletter 1 · thread 6 · urgent 4
+
+
+
+
+Type a message...
+Log Panel
+[12:24:33] Current version: 0.2.28
+[12:24:33] Connecting to your application at http://localhost:8123/api/messages...
+[12:24:34] Connected.
+[12:24:34] Events recording disabled.
+[12:24:34] Using default configuration file. Learn more about default configuration file.
+[12:24:34] You can read document about how to customize context information using configuration file.
+[12:24:34] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[12:24:34] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[12:24:34] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[12:24:34] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[12:24:35] Microsoft 365 Agents Playground -> User Application message 202 Chart my unread email by category
+[12:24:37] User Application -> Microsoft 365 Agents Playground typing 201 Looking at your request…
+[12:24:41] User Application -> Microsoft 365 Agents Playground typing 202 Reading your inbox…
+[12:24:42] User Application -> Microsoft 365 Agents Playground typing 202 Drawing a chart...
+[12:24:43] User Application -> Microsoft 365 Agents Playground typing 202 ## Unread Email by Category
+[12:24:44] User Application -> Microsoft 365 Agents Playground message 202 ## Unread Email by Category I charted your unread email breakdown, Alex. The unread mail totals are...
+Click on a log item in the panel above to see log details.

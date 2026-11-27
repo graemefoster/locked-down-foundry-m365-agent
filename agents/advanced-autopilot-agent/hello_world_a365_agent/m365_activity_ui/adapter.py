@@ -64,10 +64,11 @@ class ResponsesAdapter:
 
     def __init__(self, presenter: TurnPresenter, labels: Mapping[str, str | Callable[[str], str]] | None = None,
                  on_item_done: Callable[[Any], None] | None = None,
-                 tools: Mapping[str, Any] | Iterable[Any] | None = None) -> None:
+                 tools: Mapping[str, Any] | Iterable[Any] | None = None, ui: Any = None) -> None:
         self.p = presenter
+        self.ui = ui  # UiTurn: records tool outputs for grounding, adds its step labels
         self.tools = _catalogue(tools)
-        self.labels = dict(labels or {})
+        self.labels = {**(ui.labels if ui else {}), **(labels or {})}
         self.on_item_done = on_item_done
         self._sources: list[dict[str, str | None]] = []
         self._seen_urls: set[str] = set()
@@ -92,6 +93,8 @@ class ResponsesAdapter:
                 self.p.step(self.label_for(item))
         elif t == "response.output_item.done":
             item = _get(event, "item")
+            if self.ui is not None:
+                self.ui.observe(item)
             if self.on_item_done and _get(item, "type") in _KINDS:
                 self.on_item_done(item)
         elif t == "response.output_text.delta":
@@ -115,9 +118,9 @@ class ResponsesAdapter:
 async def present_responses(presenter: TurnPresenter, events: AsyncIterable[Any] | Iterable[Any],
                             labels: Mapping[str, str | Callable[[str], str]] | None = None,
                             on_item_done: Callable[[Any], None] | None = None,
-                            tools: Mapping[str, Any] | Iterable[Any] | None = None) -> ResponsesAdapter:
+                            tools: Mapping[str, Any] | Iterable[Any] | None = None, ui: Any = None) -> ResponsesAdapter:
     """Drive the presenter from a Responses event stream (async or plain iterable). Does not call ``finish``."""
-    ad = ResponsesAdapter(presenter, labels, on_item_done, tools)
+    ad = ResponsesAdapter(presenter, labels, on_item_done, tools, ui)
     if hasattr(events, "__aiter__"):
         async for e in events:  # type: ignore[union-attr]
             ad.handle(e)

@@ -1,0 +1,101 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+12:25
+Send a card
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+12:25
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+Test Bot
+12:25
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+12:25
+What's on today?
+Test Bot
+12:25
+Today at a Glance
+
+You have 4 meetings today and 1 scheduling conflict.
+
+The key figures above also show:
+
+17 unread emails
+4 high-importance unread emails
+Meetings Today
+9:30–9:45 AM — Team standup
+11:00 AM–12:00 PM — Launch readiness review
+11:30 AM–12:15 PM — Customer call - Northwind expansion
+3:00–3:30 PM — 1:1 with Priya Nair
+Conflict
+There’s a conflict between the 11:00 AM and 11:30 AM meetings.
+Notable unread items
+Production incident INC-5826: payments API latency — high importance
+Quick question about the roadmap — unread
+Azure Updates: what's new this week — newsletter
+
+If you want, I can also help you prioritize what to handle first today, Alex.
+
+Test Bot
+12:25
+
+Today at a glance
+
+4
+
+Meetings
+
+1
+
+Calendar conflicts
+
+17
+
+Unread emails
+
+4
+
+High-importance unread
+
+
+
+
+Type a message...
+Log Panel
+[12:25:12] Current version: 0.2.28
+[12:25:12] Connecting to your application at http://localhost:8123/api/messages...
+[12:25:12] Connected.
+[12:25:12] Events recording disabled.
+[12:25:12] Using default configuration file. Learn more about default configuration file.
+[12:25:12] You can read document about how to customize context information using configuration file.
+[12:25:12] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[12:25:12] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[12:25:12] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[12:25:12] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[12:25:14] Microsoft 365 Agents Playground -> User Application message 202 What's on today?
+[12:25:14] User Application -> Microsoft 365 Agents Playground typing 201 Looking at your request…
+[12:25:15] User Application -> Microsoft 365 Agents Playground typing 202 Reading your inbox…
+[12:25:16] User Application -> Microsoft 365 Agents Playground typing 202 Checking today's calendar…
+[12:25:17] User Application -> Microsoft 365 Agents Playground typing 202 Preparing key figures...
+[12:25:18] User Application -> Microsoft 365 Agents Playground typing 202 ## Today at a Glance You have **4 meetings** today and **1 scheduling conflict**. The key figures ...
+[12:25:20] User Application -> Microsoft 365 Agents Playground message 202 ## Today at a Glance You have **4 meetings** today and **1 scheduling conflict**. The key figures ...
+Click on a log item in the panel above to see log details.

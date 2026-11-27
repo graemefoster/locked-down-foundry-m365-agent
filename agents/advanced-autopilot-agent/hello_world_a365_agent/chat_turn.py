@@ -7,19 +7,28 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from datetime import datetime
 from typing import Any, AsyncIterator
 
 logger = logging.getLogger(__name__)
 
-try:  # local editable install, see LOCAL_RUN.md
-    from m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, approval_card, citations, donut_chart,
-                                  kpi_strip, present_responses, prompt_actions, with_actions)
+try:  # vendored next to this module (deployed package, repo CI), else a top-level install (LOCAL_RUN.md)
+    from .m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
+                                   approval_card, citations, donut_chart, kpi_strip, present_responses,
+                                   prompt_actions, with_actions)
 
     _LIB = True
-except ImportError:  # pragma: no cover
-    _LIB = False
+except ImportError:
+    try:
+        from m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
+                                      approval_card, citations, donut_chart, kpi_strip, present_responses,
+                                      prompt_actions, with_actions)
+
+        _LIB = True
+    except ImportError:  # pragma: no cover
+        _LIB = False
 
 
 def available() -> bool:
@@ -44,8 +53,32 @@ def _decide(approval_id: str, approved: bool, actor: str) -> "CardInfo | None":
     return CardInfo(title=d["title"], summary=d["body"], details={"To": d["to"], "Subject": d["subject"]})
 
 
-if _LIB:
-    DESK = ApprovalDesk(_decide)
+SEND_CTX: dict[str, Any] = {}   # proposal id -> (agent, auth, handler, context) of the turn that proposed it
+
+
+async def _send(prop: Any) -> None:
+    """UiToolkit send callback, awaited once per Approve. Real path: the agent user's Mail MCP tool; mock: MOCK SEND."""
+    if os.getenv("MOCK_M365") == "1":
+        SENT_LOG.append({"approval_id": prop["id"], "to": prop["to"], "subject": prop["subject"]})
+        logger.warning("MOCK SEND #%d: to=%s subject=%r", len(SENT_LOG), prop["to"], prop["subject"])
+        return
+    agent, auth, handler, context = SEND_CTX.pop(prop["id"])
+    mail = [t for t in await agent._build_mcp_tools(auth, handler, context) if t.get("server_label") == "mcp_MailTools"]
+    if not mail:
+        raise RuntimeError("Mail MCP tool unavailable; email not sent")
+    cc = f"\nCc: {', '.join(prop['cc'])}" if prop.get("cc") else ""
+    resp = await agent._openai_client.responses.create(
+        model=agent._deployment, tools=mail,
+        instructions="You send one email exactly as given, with the mail tool's send-email function, then reply 'sent'. "
+                     "Do not change the subject or body. Do not add anything.",
+        input=f"To: {', '.join(prop['to'])}{cc}\nSubject: {prop['subject']}\n\n{prop['body']}")
+    calls = [(getattr(i, "name", ""), getattr(i, "error", None)) for i in resp.output if getattr(i, "type", "") == "mcp_call"]
+    logger.warning("MAIL SEND via mcp_MailTools: to=%s subject=%r mcp_calls=%s", prop["to"], prop["subject"], calls)
+    if not calls or any(err for _, err in calls):
+        raise RuntimeError(f"Mail MCP send failed: {calls}")
+
+
+KIT: Any = UiToolkit(send=_send) if _LIB else None
 
 
 def register_approvals(app: Any, run_prompt: Any = None, mode: str = "inline", app_id: str = "") -> None:
@@ -54,7 +87,7 @@ def register_approvals(app: Any, run_prompt: Any = None, mode: str = "inline", a
     ``You asked: ...`` first."""
     if not _LIB:
         return
-    DESK.register(app)
+    KIT.register(app)  # adaptiveCard/action approvals: sends once, replays are no-ops
     if run_prompt is not None:
         PromptDesk(run_prompt, mode=mode, app_id=app_id).register(app)
 
@@ -66,19 +99,17 @@ STEP_LABELS = {
 }
 
 CHAT_FORMAT_RULES = (
-    "- Format responses in Markdown (short headings, bullets). Never use HTML tags.\n"
-    "- Some email tool results carry a `cite` number. Cite only emails that have one; when you state a fact from an email, "
-    "cite it as [n] with that number (e.g. [3]). Do not invent numbers.\n"
-    "- Every list_messages / list_events result has a `totals` object (messages_total, unread, urgent, meetings_today, "
-    "conflicts) computed exactly over the whole mailbox and calendar. The KPI card shows these same numbers. "
-    "Whenever you state a count of emails, unread, urgent, meetings or conflicts, quote `totals` verbatim; never count "
-    "the rows you received, never estimate, and never state a total that is not in `totals`. "
-    "`value` may be only a page of the data.\n"
-    "- When asked to draft a reply, call propose_reply once with the full draft (fetch the email first if needed); "
-    "it shows the user an approval card. Say the draft awaits their approval; never claim it was sent.\n"
-    "- To summarise the inbox and day, call list_messages (top=30) and list_events once each; to answer a count question "
-    "one call is enough.\n"
-)
+    "- Format responses in Markdown (short headings, bullets). Never use HTML tags. Do not draw charts or tables of "
+    "figures in text; use the component tools.\n"
+    "- Whenever the user asks you to draft, write or reply to an email, you MUST call propose_email once with the full "
+    "draft; never write the draft in your chat answer, never ask for confirmation first, and never lecture about tone: "
+    "write it in the tone the user asked for (casual is fine), signed with your own name, FoundryDigitalWorker. "
+    "Find the recipient's address in the mailbox (read it first if needed). The user approves it and the host sends "
+    "it; never send email yourself with the mail tools. Then say the draft awaits their approval; never claim it was "
+    "sent.\n"
+    "- To summarise the inbox and day, read the mailbox and the calendar once each; to answer a count question one read "
+    "is enough. State only counts that appear in tool results.\n"
+) + UI_INSTRUCTIONS + "\n" if _LIB else ""
 
 
 class MockSession:
@@ -181,9 +212,10 @@ class MockSession:
         )
 
 
-async def _event_stream(client: Any, request: dict, session: MockSession | None, state: dict) -> AsyncIterator[Any]:
-    """Chain streamed Responses rounds, running mock function tools between rounds."""
-    for _ in range(8):
+async def _event_stream(client: Any, request: dict, dispatch: Any, state: dict) -> AsyncIterator[Any]:
+    """Chain streamed Responses rounds. MCP tools run server-side; function calls (UI tools, mock data tools) are
+    dispatched here and their outputs fed back."""
+    for _ in range(10):
         calls: list[Any] = []
         resp_id = None
         async for ev in await client.responses.create(stream=True, **request):
@@ -194,30 +226,29 @@ async def _event_stream(client: Any, request: dict, session: MockSession | None,
                 resp_id = ev.response.id
                 state["response_id"] = resp_id
             yield ev
-        if not calls or session is None:
+        if not calls:
             return
         results = []
         for c in calls:
-            logger.info("MOCK_M365 tool call: %s(%s)", c.name, c.arguments)
-            results.append({"type": "function_call_output", "call_id": c.call_id,
-                            "output": session.run(c.name, c.arguments)})
+            out = await dispatch(c)
+            results.append({"type": "function_call_output", "call_id": c.call_id, "output": out})
         request = {**request, "input": results, "previous_response_id": resp_id}
 
 
 async def run_chat_turn(agent: Any, message: str, auth: Any, auth_handler_name: Any, context: Any) -> None:
-    """One rich chat turn. Raises on failure (the presenter finishes with an error note)."""
-    import os
-
+    """One rich chat turn. Raises on failure (the presenter finishes with an error note). The model draws the cards
+    by calling the UiToolkit tools on both paths (real MCP / mock); no card is computed from tool data."""
     agent._log_message_sender(context)
     response_input = await agent._prepare_response_input(message, context)
     conv = agent._get_conversation_id(context)
     mock = os.getenv("MOCK_M365") == "1"
     if mock:
-        from mock_m365 import TOOL_SCHEMAS
+        from mock_m365 import TOOL_SCHEMAS, call_tool
 
-        tools, session = list(TOOL_SCHEMAS), MockSession()
+        tools = [t for t in TOOL_SCHEMAS if t["name"] != "propose_reply"]  # propose_email replaces it
     else:
-        tools, session = await agent._build_mcp_tools(auth, auth_handler_name, context), None
+        tools = await agent._build_mcp_tools(auth, auth_handler_name, context)
+    tools = [*tools, *KIT.tools]
     instructions = agent._personalize_prompt(context).replace("- Format responses in html\n", CHAT_FORMAT_RULES)
     request: dict[str, Any] = {"model": agent._deployment, "instructions": instructions,
                                "input": response_input, "tools": tools}
@@ -227,19 +258,26 @@ async def run_chat_turn(agent: Any, message: str, auth: Any, auth_handler_name: 
 
     state: dict[str, Any] = {}
     async with TurnPresenter(context) as p:
+        ui = KIT.turn(p)
+        known = {id_ for id_ in KIT.proposals}
+
+        async def dispatch(c: Any) -> str:
+            if c.name in KIT.names:
+                out = await ui.call(c.name, c.arguments)
+                logger.info("UI_TOOL %s(%s) -> %s", c.name, c.arguments, out)
+                for aid in KIT.proposals.keys() - known:  # remember who proposed it, for the real send
+                    known.add(aid)
+                    SEND_CTX[aid] = (agent, auth, auth_handler_name, context)
+                return out
+            if not mock:
+                return f"Error: unknown tool {c.name!r}."
+            logger.info("MOCK_M365 tool call: %s(%s)", c.name, c.arguments)
+            out = call_tool(c.name, c.arguments)
+            ui.record_output(out)  # grounding evidence (function outputs are not in the stream)
+            return out
+
         p.step("Looking at your request…")  # visible at once; the model needs ~3s before its first tool call
-        streaming = p.streaming  # non-streaming channels (and agentic requests) get exactly one message
-        await present_responses(p, _event_stream(agent._openai_client, request, session, state), labels=STEP_LABELS)
+        await present_responses(p, _event_stream(agent._openai_client, request, dispatch, state),
+                                labels=STEP_LABELS, ui=ui)
         if state.get("response_id"):
             agent._save_response_id(conv, {"id": state["response_id"]})
-        if session is not None:
-            text = p._text
-            p.add_citations(session.sources(text))
-            card = session.card()
-            if card:  # follow-ups ride on the KPI card as imBack buttons (Teams hides suggestedActions beside cards)
-                p.add_card(with_actions(card, prompt_actions(session.follow_ups())))
-            chart = session.chart()
-            if chart:
-                p.add_card(chart)
-            for ac in session.approval_cards():
-                p.add_card(ac)

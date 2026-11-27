@@ -8,9 +8,10 @@ from .email import EmailBlock, approval_block, bar_table, email_reply, figures_t
 from .formatting import markdown_to_html
 from .presenter import TurnPresenter
 from .prompts import PromptDesk
+from .ui_tools import UI_INSTRUCTIONS, UiToolkit, UiTurn
 from .tool_cards import render_tool_card, tool_step_label
 
 __all__ = ["ADAPTIVE_CARD_CONTENT_TYPE", "ApprovalDesk", "CardInfo", "EmailBlock", "approval_block", "bar_table", "email_reply", "figures_table", "parse_approval_reply", "reply_top", "sources_footnotes", "PromptDesk", "ResponsesAdapter", "TurnPresenter",
            "adaptive_card", "approval_card", "bar_chart", "citations", "clip", "default_label", "donut_chart",
            "kpi_strip", "markdown_to_html", "present_responses", "prompt_actions", "render_tool_card",
-           "resolved_card", "tool_step_label", "with_actions"]
+           "resolved_card", "UI_INSTRUCTIONS", "UiToolkit", "UiTurn", "tool_step_label", "with_actions"]

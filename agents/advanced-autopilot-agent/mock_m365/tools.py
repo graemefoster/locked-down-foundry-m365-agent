@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from .generate import generate
@@ -52,7 +53,48 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+def _prose(name: str, out: dict[str, Any]) -> str:
+    """Work-IQ-like markdown/prose for a JSON tool result (MOCK_M365_TEXT=1): no JSON, no `totals` object."""
+    if "error" in out:
+        return f"Sorry, {out['error']}."
+    if name == "list_messages":
+        d = _data()
+        unread = [m for m in d["messages"] if not m["isRead"]]
+        cats: dict[str, int] = {}
+        for m in unread:
+            cats[m["category"]] = cats.get(m["category"], 0) + 1
+        t = out["totals"]
+        lines = [f"Your mailbox has {t['messages_total']} messages, {t['unread']} of them unread "
+                 f"({t['urgent']} high-importance).",
+                 "Unread messages by category: " + ", ".join(f"{k} {v}" for k, v in sorted(cats.items())) + ".", "",
+                 "Messages (newest first):"]
+        for m in out["value"]:
+            lines.append(f"- {'(unread) ' if not m['isRead'] else ''}**{m['subject']}** from {m['from']['name']} "
+                         f"<{m['from']['email']}>, {m['receivedDateTime'][:16].replace('T', ' ')}, "
+                         f"importance {m['importance']}: {m['bodyPreview']} ({m['webLink']})")
+        return "\n".join(lines)
+    if name == "list_events":
+        t = out["totals"]
+        lines = [f"Calendar for {out['today']}: {t['meetings_today']} meetings today, {t['conflicts']} scheduling conflict(s).", ""]
+        for e in out["value"]:
+            lines.append(f"- **{e['subject']}** {e['start'][5:16].replace('T', ' ')} to {e['end'][11:16]} at "
+                         f"{e['location']}, organiser {e['organizer']}, with {', '.join(e['attendees'])} ({e['webLink']})")
+        return "\n".join(lines)
+    if name == "get_message":
+        return (f"**{out['subject']}**\nFrom: {out['from']['name']} <{out['from']['email']}>\n"
+                f"Received: {out['receivedDateTime']}\n\n{out['body']}")
+    return json.dumps(out)
+
+
 def call_tool(name: str, arguments: str | dict | None) -> str:
+    """JSON result, or prose when MOCK_M365_TEXT=1 (chat path only; the email path parses JSON)."""
+    out = _call_json(name, arguments)
+    if os.getenv("MOCK_M365_TEXT") == "1":
+        return _prose(name, json.loads(out))
+    return out
+
+
+def _call_json(name: str, arguments: str | dict | None) -> str:
     args = json.loads(arguments) if isinstance(arguments, str) and arguments else (arguments or {})
     d = _data()
     if name == "list_messages":
