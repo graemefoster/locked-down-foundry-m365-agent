@@ -26,7 +26,17 @@ class TurnPresenter:
     """
 
     def __init__(self, context: Any, *, ai_label: bool = True, feedback_loop: bool = True,
-                 max_citations: int = MAX_CITATIONS, prompt_mode: str = "execute") -> None:
+                 max_citations: int = MAX_CITATIONS, prompt_mode: str = "execute",
+                 feedback: bool | None = None, feedback_type: str = "default", progress: Any = None) -> None:
+        """``feedback`` (alias of ``feedback_loop``; wins when not None) sets thumbs up/down on the final message
+        (``feedback_type`` ``default``|``custom``). ``progress`` is an optional ``ProgressTracker``: ``step`` also
+        advances it and ``finish`` closes it (default None: off)."""
+        if feedback is not None:
+            feedback_loop = feedback
+        self._feedback_type = feedback_type
+        self._progress = progress
+        if progress is not None:
+            progress.wrap(self)
         self._ctx = context
         self._sr = context.streaming_response
         self._attachments: list[Attachment] = []
@@ -109,6 +119,8 @@ class TurnPresenter:
         if self._finished:
             raise RuntimeError("TurnPresenter.finish() already called")
         self._finished = True
+        if self._progress is not None:
+            await self._progress.finish()
         for fn in self._before_finish:
             fn()
         if self.surface == "email":
@@ -129,6 +141,8 @@ class TurnPresenter:
             sr.add_attachment(a)
         sr.set_generated_by_ai_label(self._ai_label)
         sr.set_feedback_loop(self._feedback)
+        if self._feedback:
+            sr.set_feedback_loop_type(self._feedback_type)  # type: ignore[arg-type]
         await sr.end_stream()
         if self._prompts and not self._attachments:
             await self._ctx.send_activity(Activity(

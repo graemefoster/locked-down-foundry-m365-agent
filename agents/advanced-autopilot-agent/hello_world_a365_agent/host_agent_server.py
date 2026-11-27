@@ -417,6 +417,11 @@ class GenericAgentHost:
                         await context.send_activity(response_activity)
                     return
 
+                from . import demo_turn
+                if chat_turn.available() and (demo_sec := demo_turn.parse(user_message)):
+                    await demo_turn.run_demo(context, demo_sec)  # deterministic gallery, no model call
+                    return
+
                 # Chat surfaces: progress lines, streamed markdown, KPI card, citations, follow-ups
                 # (m365_activity_ui). Non-streaming/agentic requests get one final message from the
                 # same presenter. Falls back to the legacy flow below when the library is absent.

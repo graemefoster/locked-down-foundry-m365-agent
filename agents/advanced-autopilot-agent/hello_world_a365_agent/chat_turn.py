@@ -15,14 +15,14 @@ from typing import Any, AsyncIterator
 logger = logging.getLogger(__name__)
 
 try:  # vendored next to this module (deployed package, repo CI), else a top-level install (LOCAL_RUN.md)
-    from .m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
+    from .m365_activity_ui import (ApprovalDesk, CardInfo, FeedbackDesk, PromptDesk, ProgressTracker, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
                                    approval_card, citations, donut_chart, kpi_strip, present_responses,
                                    prompt_actions, with_actions)
 
     _LIB = True
 except ImportError:
     try:
-        from m365_activity_ui import (ApprovalDesk, CardInfo, PromptDesk, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
+        from m365_activity_ui import (ApprovalDesk, CardInfo, FeedbackDesk, PromptDesk, ProgressTracker, TurnPresenter, UI_INSTRUCTIONS, UiToolkit,
                                       approval_card, citations, donut_chart, kpi_strip, present_responses,
                                       prompt_actions, with_actions)
 
@@ -58,6 +58,9 @@ SEND_CTX: dict[str, Any] = {}   # proposal id -> (agent, auth, handler, context)
 
 async def _send(prop: Any) -> None:
     """UiToolkit send callback, awaited once per Approve. Real path: the agent user's Mail MCP tool; mock: MOCK SEND."""
+    if prop.get("demo"):
+        logger.warning("DEMO approval %s approved: demo, not sent", prop["id"])
+        return
     if os.getenv("MOCK_M365") == "1":
         SENT_LOG.append({"approval_id": prop["id"], "to": prop["to"], "subject": prop["subject"]})
         logger.warning("MOCK SEND #%d: to=%s subject=%r", len(SENT_LOG), prop["to"], prop["subject"])
@@ -78,7 +81,47 @@ async def _send(prop: Any) -> None:
         raise RuntimeError(f"Mail MCP send failed: {calls}")
 
 
-KIT: Any = UiToolkit(send=_send) if _LIB else None
+import contextvars
+
+RUN_PROMPT: Any = None                                   # set by register_approvals: run_prompt(context, prompt)
+_FORM_CTX: contextvars.ContextVar = contextvars.ContextVar("form_invoke_context", default=None)
+
+
+def _format_submission(values: dict, actor: str) -> str:
+    return "I submitted the form with these values: " + "; ".join(f"{k}={v}" for k, v in values.items()) + "."
+
+
+async def _on_form_submit(form_id: str, values: dict, actor: str) -> None:
+    """FormDesk hook (once per form). Choice: the submitted values start a NEW USER TURN (the agent continues the task,
+    e.g. proposes the invite email), run inline on the live invoke context captured by the wrapped ``handle`` below.
+    Teams' invoke timeout is short: deployed, prefer a proactive context (unverified here, as for PromptDesk)."""
+    ctx = _FORM_CTX.get()
+    if form_id.startswith("demo-"):  # gallery form: reply deterministically, no model turn
+        if ctx is not None:
+            await ctx.send_activity("Demo, not booked. You submitted: " + "; ".join(f"{k}={v}" for k, v in values.items()))
+        return
+    logger.warning("FORM_SUBMIT form=%s actor=%s values=%s", form_id, actor, dict(values))
+    if ctx is None or RUN_PROMPT is None:
+        logger.warning("FORM_SUBMIT: no live context; no follow-up turn")
+        return
+    try:
+        await RUN_PROMPT(ctx, _format_submission(values, actor))
+    except Exception:
+        logger.exception("form follow-up turn failed")
+
+
+KIT: Any = UiToolkit(send=_send, on_form_submit=_on_form_submit) if _LIB else None
+if _LIB:
+    _orig_form_handle = KIT.forms.handle
+
+    async def _form_handle(context: Any) -> Any:
+        tok = _FORM_CTX.set(context)
+        try:
+            return await _orig_form_handle(context)
+        finally:
+            _FORM_CTX.reset(tok)
+
+    KIT.forms.handle = _form_handle
 
 
 def register_approvals(app: Any, run_prompt: Any = None, mode: str = "inline", app_id: str = "") -> None:
@@ -87,7 +130,10 @@ def register_approvals(app: Any, run_prompt: Any = None, mode: str = "inline", a
     ``You asked: ...`` first."""
     if not _LIB:
         return
-    KIT.register(app)  # adaptiveCard/action approvals: sends once, replays are no-ops
+    global RUN_PROMPT
+    RUN_PROMPT = run_prompt
+    KIT.register(app)  # adaptiveCard/action: approvals (ApprovalDesk) + forms (FormDesk); sends once, replays no-ops
+    FeedbackDesk().register(app)  # thumbs up/down invoke -> log line (default log_feedback)
     if run_prompt is not None:
         PromptDesk(run_prompt, mode=mode, app_id=app_id).register(app)
 
@@ -107,6 +153,9 @@ CHAT_FORMAT_RULES = (
     "Find the recipient's address in the mailbox (read it first if needed). The user approves it and the host sends "
     "it; never send email yourself with the mail tools. Then say the draft awaits their approval; never claim it was "
     "sent.\n"
+    "- When the user asks to schedule/arrange a meeting (or needs several details from them), call show_form once "
+    "(title, attendees, date, duration, agenda fields) instead of asking in text; their submission arrives as a new message.\n"
+    "- For meeting attendees, call show_people with the people from the calendar tool results.\n"
     "- To summarise the inbox and day, read the mailbox and the calendar once each; to answer a count question one read "
     "is enough. State only counts that appear in tool results.\n"
 ) + UI_INSTRUCTIONS + "\n" if _LIB else ""
@@ -257,7 +306,9 @@ async def run_chat_turn(agent: Any, message: str, auth: Any, auth_handler_name: 
         request["previous_response_id"] = prev
 
     state: dict[str, Any] = {}
-    async with TurnPresenter(context) as p:
+    tracker = ProgressTracker(context, "Working on it…")
+    await tracker.start()
+    async with TurnPresenter(context, feedback=True, progress=tracker) as p:
         ui = KIT.turn(p)
         known = {id_ for id_ in KIT.proposals}
 

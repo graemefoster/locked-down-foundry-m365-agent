@@ -53,6 +53,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
+def _who(name: str) -> str:
+    """Attendee as `Name <email>` (the fixture derives addresses from names)."""
+    return f"{name} <{name.lower().replace(chr(39), '').replace(' ', '.')}@contoso.example>"
+
+
 def _prose(name: str, out: dict[str, Any]) -> str:
     """Work-IQ-like markdown/prose for a JSON tool result (MOCK_M365_TEXT=1): no JSON, no `totals` object."""
     if "error" in out:
@@ -63,10 +68,15 @@ def _prose(name: str, out: dict[str, Any]) -> str:
         cats: dict[str, int] = {}
         for m in unread:
             cats[m["category"]] = cats.get(m["category"], 0) + 1
+        by_sender: dict[str, int] = {}
+        for m in d["messages"]:
+            by_sender[m["from"]["name"]] = by_sender.get(m["from"]["name"], 0) + 1
         t = out["totals"]
         lines = [f"Your mailbox has {t['messages_total']} messages, {t['unread']} of them unread "
                  f"({t['urgent']} high-importance).",
-                 "Unread messages by category: " + ", ".join(f"{k} {v}" for k, v in sorted(cats.items())) + ".", "",
+                 "Unread messages by category: " + ", ".join(f"{k} {v}" for k, v in sorted(cats.items())) + ".",
+                 "Messages by sender (all " + str(len(d["messages"])) + "): " + ", ".join(
+                     f"{k} {v}" for k, v in sorted(by_sender.items(), key=lambda kv: (-kv[1], kv[0]))) + ".", "",
                  "Messages (newest first):"]
         for m in out["value"]:
             lines.append(f"- {'(unread) ' if not m['isRead'] else ''}**{m['subject']}** from {m['from']['name']} "
@@ -76,9 +86,11 @@ def _prose(name: str, out: dict[str, Any]) -> str:
     if name == "list_events":
         t = out["totals"]
         lines = [f"Calendar for {out['today']}: {t['meetings_today']} meetings today, {t['conflicts']} scheduling conflict(s).", ""]
+        from datetime import datetime
         for e in out["value"]:
-            lines.append(f"- **{e['subject']}** {e['start'][5:16].replace('T', ' ')} to {e['end'][11:16]} at "
-                         f"{e['location']}, organiser {e['organizer']}, with {', '.join(e['attendees'])} ({e['webLink']})")
+            lines.append(f"- **{e['subject']}** {datetime.fromisoformat(e['start']).strftime('%A %d %b %Y %H:%M')} to "
+                         f"{e['end'][11:16]} at {e['location']}, organiser {e['organizer']}, with "
+                         f"{', '.join(_who(a) for a in e['attendees'])} ({e['webLink']})")
         return "\n".join(lines)
     if name == "get_message":
         return (f"**{out['subject']}**\nFrom: {out['from']['name']} <{out['from']['email']}>\n"

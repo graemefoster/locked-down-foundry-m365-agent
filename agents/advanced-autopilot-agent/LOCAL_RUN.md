@@ -21,6 +21,14 @@ Reproduces today's turn experience locally. No secrets: values come from your gi
    and `.agent-runs/activity-ui-pilot/playground/drive.cjs` (UI driver, records outbound frames + screenshot).
    See `.agent-runs/activity-ui-pilot/baseline/README.md`.
 
+## v7 library + `demo` command
+Vendored `m365_activity_ui` refreshed from agentcraft 208baa130. Chat turns: ProgressTracker card updates in place, `TurnPresenter(feedback=True)`;
+`FormDesk` (via `UiToolkit(on_form_submit)`) and `FeedbackDesk` registered in `chat_turn.register_approvals`. A model-drawn form's submission starts a
+NEW USER TURN ("I submitted the form with these values: ..."), run inline on the invoke context.
+Type `demo` (`/demo`, `show me a demo`) for a deterministic sample-data gallery, no model call (`demo_turn.py`); `demo charts|figures|table|people|form|approval|sources|progress`
+for one section. Each card is its own message (no attachment cap hit); the demo approval never sends.
+Playground quirk: a persisted previous_response_id makes the model skip tool calls on repeat prompts; clear `RESPONSE_STORE_DIR` between runs.
+
 ## Mock Mail/Calendar (`MOCK_M365=1`)
 Replaces the MCP tools with local function tools (`list_messages`, `get_message`, `list_events`) over a
 generated, seeded fixture (25 messages incl. 3 threads, 6 events today/tomorrow, one overlap). Run as step 2

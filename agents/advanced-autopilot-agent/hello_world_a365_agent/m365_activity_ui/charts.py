@@ -168,3 +168,96 @@ def donut_chart(title: str, slices: Sequence[Mapping[str, Any]], *,
     chart["fallback"] = _fallback_rows(
         title, [(c, v, f"{_num(v)} · {100 * v / total:.0f}%") for c, v in pairs])
     return _chart_card(title, chart, [(c, _num(v)) for c, v in pairs])
+
+
+def pie_chart(title: str, slices: Sequence[Mapping[str, Any]], *,
+              max_categories: int = DEFAULT_MAX_CATEGORIES) -> dict[str, Any]:
+    """A pie chart card (``Chart.Pie``); same input, folding and "No data" rules as ``donut_chart``."""
+    card = donut_chart(title, slices, max_categories=max_categories)
+    for block in card["body"]:
+        if block.get("type") == "Chart.Donut":
+            block["type"] = "Chart.Pie"
+    return card
+
+
+def horizontal_bar_chart(title: str, series: Sequence[Mapping[str, Any]], *, stacked: bool = False,
+                         max_categories: int = DEFAULT_MAX_CATEGORIES,
+                         x_title: str | None = None, y_title: str | None = None) -> dict[str, Any]:
+    """``bar_chart(..., horizontal=True)``: ``Chart.HorizontalBar`` for single series, and
+    ``Chart.HorizontalBar.Stacked`` for multi-series (which is always stacked)."""
+    return bar_chart(title, series, stacked=stacked or _is_multi(series), horizontal=True,
+                     max_categories=max_categories, x_title=x_title, y_title=y_title)
+
+
+def line_chart(title: str, series: Sequence[Mapping[str, Any]], *,
+               x_title: str | None = None, y_title: str | None = None) -> dict[str, Any]:
+    """A line chart card (``Chart.Line``). ``series`` is single-series ``[{"label", "value"}, ...]``
+    (x labels in the given order) or multi-series ``[{"name", "values": {x: value}}, ...]``; x order is
+    first-seen and never folded (a line is ordered). Empty series → a "No data" card."""
+    if _is_multi(series):
+        named = [(str(s.get("name", "")), {str(k): float(v) for k, v in dict(s.get("values") or {}).items()})
+                 for s in series]
+    else:
+        pts: dict[str, float] = {}
+        for s in series:
+            pts[str(s["label"])] = pts.get(str(s["label"]), 0.0) + float(s["value"])
+        named = [("", pts)]
+    xs: list[str] = []
+    for _, vals in named:
+        xs += [x for x in vals if x not in xs]
+    if not xs:
+        return _no_data_card(title)
+    data = [{"legend": n or title, "values": [{"x": x, "y": vals[x]} for x in xs if x in vals]}
+            for n, vals in named if vals]
+    chart: dict[str, Any] = {"type": "Chart.Line", "title": title, "colorSet": "categorical", "data": data}
+    if x_title:
+        chart["xAxisTitle"] = x_title
+    if y_title:
+        chart["yAxisTitle"] = y_title
+    rows = []
+    for x in xs:
+        got = [(n, vals[x]) for n, vals in named if x in vals]
+        text = _num(got[0][1]) if len(got) == 1 and not got[0][0] else ", ".join(f"{n} {_num(v)}" for n, v in got)
+        rows.append((x, sum(v for _, v in got), text))
+    chart["fallback"] = _fallback_rows(title, rows)
+    return _chart_card(title, chart, [(r[0], r[2]) for r in rows])
+
+
+def gauge_chart(title: str, value: float | None, *, target: float | None = None, min_value: float = 0,
+                max_value: float = 100, segments: Sequence[Mapping[str, Any]] | None = None,
+                sub_label: str | None = None, unit: str = "") -> dict[str, Any]:
+    """A gauge card (``Chart.Gauge``) for one KPI. ``value`` is clamped to ``[min_value, max_value]``;
+    ``None`` → "No data" card. ``segments`` is optional ``[{"legend", "size", "color"?}, ...]`` (e.g.
+    low/medium/high bands); without it the gauge shows Achieved vs Remaining, and ``target`` (if given)
+    is stated in the sub-label ("Target 80%") and values line, with the achieved band ``good`` once met
+    and ``warning`` before. ``unit`` is appended to displayed numbers ("%", " ms")."""
+    if value is None:
+        return _no_data_card(title)
+    lo, hi = float(min_value), float(max_value)
+    if hi <= lo:
+        raise ValueError("max_value must be greater than min_value")
+    v = min(max(float(value), lo), hi)
+    shown = _num(value) + unit
+    if segments:
+        segs = [{"legend": str(s["legend"]), "size": float(s["size"]), "value": float(s["size"]),
+                 **({"color": s["color"]} if s.get("color") else {})} for s in segments]
+    else:
+        met = target is not None and v >= float(target)
+        achieved: dict[str, Any] = {"legend": "Achieved", "size": v - lo, "value": v - lo}
+        if target is not None:
+            achieved["color"] = "good" if met else "warning"
+        segs = [achieved, {"legend": "Remaining", "size": hi - v, "value": hi - v, "color": "neutral"}]
+    pairs = [("Value", shown)]
+    chart: dict[str, Any] = {"type": "Chart.Gauge", "title": title, "value": v, "min": lo, "max": hi,
+                             "valueFormat": "Fraction", "showMinMax": True, "segments": segs}
+    if target is not None:
+        pairs.append(("Target", _num(target) + unit))
+        sub_label = sub_label or f"Target {_num(target)}{unit}"
+    if sub_label:
+        chart["subLabel"] = sub_label
+    span = hi - lo
+    rows = [("Value", v - lo, f"{shown} · {100 * (v - lo) / span:.0f}% of range")]
+    if target is not None:
+        rows.append(("Target", float(target) - lo, _num(target) + unit))
+    chart["fallback"] = _fallback_rows(title, [(a, max(m, 0.0), t) for a, m, t in rows])
+    return _chart_card(title, chart, pairs)
