@@ -55,3 +55,20 @@ echo -> real answer + approval card; Approve resolves the card in place ("Approv
   `continue_conversation` context (UNVERIFIED here: no credentials); locally (anonymous) `continue_conversation` fails with
   `TENANT_ID is not set in the configuration` (try2), so the turn is awaited inline in the invoke handler and the 200 is
   returned after the turn (~5 s; Teams' invoke timeout is short). Override with `PROMPT_RUN_MODE=inline|proactive`.
+
+## Email locally (`email_harness/`)
+"Send the agent an email" with no Outlook/tenant. Start your own agent as in step 2 with `MOCK_M365=1` (and a spare
+`PORT`, `RESPONSE_STORE_DIR` for fresh state), then from `agents/advanced-autopilot-agent/`:
+```
+python3 email_harness/send_email.py --from Alex --subject "What does my day look like?" \
+  --body "Hi, what does my day look like today?" --agent http://localhost:8095 --out <dir>
+```
+Stdlib only (screenshot via `shot.cjs`, needs playwright-core from `.agent-runs/activity-ui-pilot/playground/node_modules`).
+- Posts an `agents:email` activity with an `emailNotification` entity (`id`, `conversationId`, `htmlBody`) to `/api/messages`;
+  the SDK's `AgentNotificationActivity` parses it and `is_email_notification` is true. `serviceUrl` points at a throwaway
+  local server that captures the agent's outbound `emailResponse` entity -> `reply.html`, `reply_600.png`, `summary.json`,
+  `request.json`, `captured_outbound.json`.
+- Recipient must NOT have `role: agenticUser` locally (the SDK would then demand an agentic token -> 500).
+- `--mode plain` sends a Teams-style message through the same capture (negative check: not treated as email, goes to the chat turn).
+- The library's email entity has no subject; the harness puts `Subject: ...` at the top of `htmlBody`. Real Outlook payload content is unverified.
+- Baseline (pre-library) evidence: `.agent-runs/activity-ui-pilot/email-harness/`.
