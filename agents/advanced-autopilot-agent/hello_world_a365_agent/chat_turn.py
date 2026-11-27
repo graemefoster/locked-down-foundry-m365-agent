@@ -62,8 +62,9 @@ async def _send(prop: Any) -> None:
         logger.warning("DEMO approval %s approved: demo, not sent", prop["id"])
         return
     if os.getenv("MOCK_M365") == "1":
-        SENT_LOG.append({"approval_id": prop["id"], "to": prop["to"], "subject": prop["subject"]})
-        logger.warning("MOCK SEND #%d: to=%s subject=%r", len(SENT_LOG), prop["to"], prop["subject"])
+        SENT_LOG.append({"approval_id": prop["id"], "to": prop["to"], "subject": prop["subject"], "body": prop["body"]})
+        logger.warning("MOCK SEND #%d: to=%s subject=%r edited=%s body=%r", len(SENT_LOG), prop["to"], prop["subject"],
+                       bool(prop.get("edited")), prop["body"])
         return
     agent, auth, handler, context = SEND_CTX.pop(prop["id"])
     mail = [t for t in await agent._build_mcp_tools(auth, handler, context) if t.get("server_label") == "mcp_MailTools"]

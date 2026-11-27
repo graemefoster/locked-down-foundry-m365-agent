@@ -1,0 +1,67 @@
+Microsoft 365 Agents Playground
+Mock an Activity
+Configure Authentication
+Debug Options
+Alex Wilber
+AW
+Chat
+Personal and Group Chat
+Personal Chat
+13:22
+Send a card
+MB
+AV
+Group Chat
+Teams Channel
+General
+My Team
+Announcements
+My Team
+Test Bot
+13:22
+
+👋 Hi there! I'm FoundryDigitalWorkerAgent, your AI assistant.
+
+How can I help you today?
+
+Test Bot
+13:22
+
+Thank you for hiring me! Looking forward to assisting you in your professional journey!
+
+13:22
+demo form
+Test Bot
+13:22
+
+Sample data · form (submit it: nothing is booked)
+
+Schedule a meeting (demo)
+
+Title *
+Attendees *
+Daniel Kim
+Tom Becker
+Priya Nair
+When *
+Duration (minutes)
+Schedule
+
+
+
+
+Type a message...
+Log Panel
+[13:22:37] Current version: 0.2.28
+[13:22:37] Connecting to your application at http://localhost:8090/api/messages...
+[13:22:37] Connected.
+[13:22:37] Events recording disabled.
+[13:22:37] Using default configuration file. Learn more about default configuration file.
+[13:22:37] You can read document about how to customize context information using configuration file.
+[13:22:37] Microsoft 365 Agents Playground -> User Application conversationUpdate 202
+[13:22:37] Microsoft 365 Agents Playground -> User Application installationUpdate 202
+[13:22:37] User Application -> Microsoft 365 Agents Playground message 201 👋 **Hi there!** I'm **FoundryDigitalWorkerAgent**, your AI assistant. How can I help you today?
+[13:22:37] User Application -> Microsoft 365 Agents Playground message 201 Thank you for hiring me! Looking forward to assisting you in your professional journey!
+[13:22:39] Microsoft 365 Agents Playground -> User Application message 202 demo form
+[13:22:39] User Application -> Microsoft 365 Agents Playground message 201
+Click on a log item in the panel above to see log details.

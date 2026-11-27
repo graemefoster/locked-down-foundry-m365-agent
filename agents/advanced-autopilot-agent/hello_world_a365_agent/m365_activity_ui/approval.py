@@ -22,9 +22,10 @@ wires it onto an ``AgentApplication`` and sends it::
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Awaitable, Callable, Mapping, Sequence
 
 from microsoft_agents.activity import Activity, ActivityTypes, InvokeResponse
 
@@ -41,6 +42,16 @@ class CardInfo:
     title: str
     summary: str = ""
     details: Mapping[str, Any] | None = None
+    edited: bool = False          # approver changed editable fields: the resolved card says so
+
+
+class ApprovalInputError(Exception):
+    """Raised by ``decide`` when submitted edits are invalid: the desk answers with ``card`` (the pending card plus an
+    error line, nothing decided) so the approver can fix the input and press Approve again."""
+
+    def __init__(self, message: str, card: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.card = card
 
 
 Decide = Callable[[str, bool, str], "CardInfo | None | Awaitable[CardInfo | None]"]
@@ -60,29 +71,47 @@ def _action(title: str, verb: str, approval_id: str, style: str | None = None) -
 
 
 def approval_card(id: str, title: str, summary: str, details: Mapping[str, Any] | None = None,
-                  approve_label: str = "Approve", reject_label: str = "Reject") -> dict[str, Any]:
-    """Pending card: title, summary, optional facts, Approve/Reject ``Action.Execute`` (verbs ``approve``/``reject``,
-    data ``{approval_id}``) and a ``refresh`` so clients re-fetch the current state (the resolved card once decided)."""
-    card = adaptive_card([
+                  approve_label: str = "Approve", reject_label: str = "Reject",
+                  editable: Sequence[Mapping[str, Any]] | None = None, error: str | None = None) -> dict[str, Any]:
+    """Pending card: title, summary, optional read-only facts, optional editable ``Input.Text`` fields, Approve/Reject
+    ``Action.Execute`` (verbs ``approve``/``reject``, data ``{approval_id}``; the client adds each input's value keyed
+    by its id) and a ``refresh`` so clients re-fetch the current state (the resolved card once decided).
+
+    ``editable``: ``[{"id", "label", "value", "multiline": bool, "max_length": int}]``; standard Adaptive Card
+    ``Input.Text`` + ``Action.Execute``, the same in Teams and M365 Copilot (no surface detection). Ids must not be
+    ``approval_id``. ``error`` adds a red line (used when re-rendering after invalid edits)."""
+    body: list[dict[str, Any]] = [
         {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True},
         {"type": "TextBlock", "text": summary, "wrap": True},
         *_facts(details),
-    ])
+    ]
+    if error:
+        body.append({"type": "TextBlock", "text": error, "color": "Attention", "wrap": True})
+    for f in editable or ():
+        if f["id"] == "approval_id":
+            raise ValueError("editable field id must not be approval_id")
+        inp: dict[str, Any] = {"type": "Input.Text", "id": f["id"], "label": f.get("label", f["id"]),
+                               "isMultiline": bool(f.get("multiline")), "value": str(f.get("value", ""))}
+        if f.get("max_length"):
+            inp["maxLength"] = int(f["max_length"])
+        body.append(inp)
+    card = adaptive_card(body)
     card["actions"] = [_action(approve_label, "approve", id, "positive"), _action(reject_label, "reject", id, "destructive")]
     card["refresh"] = {"action": _action("Refresh", "refresh", id), "userIds": []}
     return card
 
 
 def resolved_card(title: str, summary: str, details: Mapping[str, Any] | None, *, approved: bool, by: str,
-                  when: datetime | str) -> dict[str, Any]:
-    """Resolved card: same content, no actions, a coloured outcome line (who and when, UTC)."""
+                  when: datetime | str, edited: bool = False) -> dict[str, Any]:
+    """Resolved card: same content, no actions, a coloured outcome line (who and when, UTC); ``edited`` appends
+    "(edited before sending)" to an approval."""
     stamp = when.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC") if isinstance(when, datetime) else str(when)
     verdict = "Approved" if approved else "Rejected"
     return adaptive_card([
         {"type": "TextBlock", "text": title, "weight": "Bolder", "size": "Medium", "wrap": True},
         {"type": "TextBlock", "text": summary, "wrap": True},
         *_facts(details),
-        {"type": "TextBlock", "text": f"{verdict} by {by} on {stamp}", "weight": "Bolder",
+        {"type": "TextBlock", "text": f"{verdict}{' (edited before sending)' if edited and approved else ''} by {by} on {stamp}", "weight": "Bolder",
          "color": "Good" if approved else "Attention", "wrap": True},
     ])
 
@@ -96,11 +125,22 @@ def _error_response(message: str) -> InvokeResponse:
                                             "value": {"code": "BadRequest", "message": message}})
 
 
+def _takes_inputs(fn: Callable[..., Any]) -> bool:
+    """True when ``fn`` accepts a 4th positional argument (the card's submitted input values)."""
+    try:
+        ps = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind == p.VAR_POSITIONAL for p in ps) or \
+        sum(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) for p in ps) >= 4
+
+
 @dataclass
 class ApprovalDesk:
     """Handles ``adaptiveCard/action`` invokes for approval cards.
 
-    ``decide(approval_id, approved, actor)`` (sync or async) records the decision and returns ``CardInfo``, or
+    ``decide(approval_id, approved, actor[, inputs])`` (sync or async; ``inputs`` = the editable fields' submitted
+    values, only on Approve, only if ``decide`` takes a 4th argument; raise ``ApprovalInputError`` to refuse them) records the decision and returns ``CardInfo``, or
     ``None`` for an unknown approval id. It is called at most once per id: the first decision wins, later clicks
     (double click, other approver) get the resolved card back without calling it. Resolutions live in memory
     (one process); persist them in the callback's store if the agent scales out.
@@ -134,13 +174,20 @@ class ApprovalDesk:
                 return _error_response(f"approval {approval_id} is still pending")
             actor = getattr(getattr(activity, "from_property", None), "name", None) or \
                 getattr(getattr(activity, "from_property", None), "id", None) or "unknown"
-            info = self.decide(approval_id, verb == "approve", actor)
-            if asyncio.iscoroutine(info) or isinstance(info, asyncio.Future):
-                info = await info
+            try:
+                if _takes_inputs(self.decide):
+                    inputs = {k: v for k, v in data.items() if k != "approval_id"} if verb == "approve" else {}
+                    info = self.decide(approval_id, verb == "approve", actor, inputs)
+                else:
+                    info = self.decide(approval_id, verb == "approve", actor)
+                if asyncio.iscoroutine(info) or isinstance(info, asyncio.Future):
+                    info = await info
+            except ApprovalInputError as e:
+                return _card_response(e.card) if e.card is not None else _error_response(str(e))
             if info is None:
                 return _error_response(f"unknown approval id: {approval_id}")
             card = resolved_card(info.title, info.summary, info.details, approved=verb == "approve",
-                                 by=actor, when=self.clock())
+                                 by=actor, when=self.clock(), edited=info.edited)
             self._resolved[approval_id] = card
             return _card_response(card)
 

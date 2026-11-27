@@ -108,14 +108,11 @@ async def _form(context: Any) -> None:
 
 
 async def _approval(context: Any) -> None:
-    from .m365_activity_ui import approval_card
     aid = "demo-" + uuid.uuid4().hex[:8]
     prop = {"id": aid, "to": ["demo@example.invalid"], "cc": [], "demo": True,
             "subject": "[DEMO, not sent] Quarterly update", "body": "This is sample text. Approving it sends nothing."}
     ct.KIT.proposals[aid] = prop
-    await _send_card(context, approval_card(aid, f"Send email: {prop['subject']}",
-                                            "Demo approval card. Approve or Reject: no email is sent.",
-                                            {"To": "demo@example.invalid", "Body": prop["body"]}), "approval card")
+    await _send_card(context, ct.KIT.pending_card(prop), "approval card (edit the body; approving sends nothing)")
 
 
 async def _closing(context: Any, sources: bool = True) -> None:

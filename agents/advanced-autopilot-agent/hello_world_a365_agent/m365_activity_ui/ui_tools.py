@@ -23,7 +23,7 @@ import re
 import uuid
 from typing import Any, Awaitable, Callable, Mapping
 
-from .approval import ApprovalDesk, CardInfo, approval_card
+from .approval import ApprovalDesk, ApprovalInputError, CardInfo, approval_card
 from .cards import kpi_strip
 from .charts import bar_chart, donut_chart, gauge_chart, horizontal_bar_chart, line_chart, pie_chart
 from .citations import citations as make_citations
@@ -154,6 +154,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         {"id": {"type": "string"}}, []),
 ]
 
+MAX_SUBJECT, MAX_BODY = 200, 5000   # caps on an approver's edited subject/body (card stays well under client size limits)
+
 Send = Callable[[Mapping[str, Any]], Awaitable[Any]]
 
 
@@ -194,17 +196,43 @@ class UiToolkit:
         if self.on_form_submit is not None:
             self.forms.register(app)
 
-    async def decide(self, approval_id: str, approved: bool, actor: str) -> CardInfo | None:
+    def pending_card(self, prop: Mapping[str, Any], error: str | None = None, *, subject: Any = None, body: Any = None) -> dict[str, Any]:
+        """The editable approval card for a proposal: To (and Cc) read-only, Subject and Body prefilled inputs."""
+        details = {"To": ", ".join(prop["to"]), **({"Cc": ", ".join(prop["cc"])} if prop.get("cc") else {})}
+        subj = prop["subject"] if subject is None else str(subject)
+        return approval_card(
+            prop["id"], f"Send email: {prop['subject']}", "Awaiting your approval. Not sent yet. Edit the subject or body if you like.",
+            details, error=error,
+            editable=[{"id": "subject", "label": "Subject", "value": subj, "max_length": MAX_SUBJECT},
+                      {"id": "body", "label": "Body", "value": prop["body"] if body is None else str(body),
+                       "multiline": True, "max_length": MAX_BODY}])
+
+    async def decide(self, approval_id: str, approved: bool, actor: str,
+                     inputs: Mapping[str, Any] | None = None) -> CardInfo | None:
         """ApprovalDesk callback; also call it for an email-channel ``APPROVE <id>`` reply (then guard replays
-        yourself with ``approval_id in toolkit.decided``)."""
+        yourself with ``approval_id in toolkit.decided``). ``inputs`` are the card's edited ``subject`` / ``body``
+        (Approve only): validated (non-empty, length caps) and the sent proposal updated; any other key, notably
+        recipients, is ignored. Invalid edits raise ``ApprovalInputError`` carrying the card with an error line."""
         prop = self.proposals.get(approval_id)
         if prop is None:
             return None
+        edited = False
+        if approved and inputs and approval_id not in self.decided:
+            subject = str(inputs["subject"]).strip() if inputs.get("subject") is not None else prop["subject"]
+            body = str(inputs["body"]).strip() if inputs.get("body") is not None else prop["body"]
+            err = ("Subject must not be empty." if not subject else "Body must not be empty." if not body else
+                   f"Subject is over {MAX_SUBJECT} characters." if len(subject) > MAX_SUBJECT else
+                   f"Body is over {MAX_BODY} characters." if len(body) > MAX_BODY else None)
+            if err:
+                raise ApprovalInputError(err, self.pending_card(prop, err, subject=inputs.get("subject"), body=inputs.get("body")))
+            edited = (subject, body) != (prop["subject"], prop["body"])
+            prop["subject"], prop["body"], prop["edited"] = subject, body, edited
+        edited = edited or bool(prop.get("edited") and approved)
         if approved and self.send is not None and approval_id not in self.decided:
             self.decided.add(approval_id)
             await self.send(prop)
         self.decided.add(approval_id)
-        return CardInfo(f"Email: {prop['subject']}", f"To: {', '.join(prop['to'])}", {"Body": prop["body"][:500]})
+        return CardInfo(f"Email: {prop['subject']}", f"To: {', '.join(prop['to'])}", {"Body": prop["body"]}, edited=edited)
 
     def turn(self, presenter: TurnPresenter) -> "UiTurn":
         return UiTurn(self, presenter)
@@ -470,11 +498,12 @@ class UiTurn:
         aid = uuid.uuid4().hex[:12]
         self._email_ids[cid] = aid
         self.kit.proposals[aid] = {"id": aid, "to": to, "cc": cc, "subject": subject, "body": body}
+        prop = self.kit.proposals[aid]
         details = {"To": ", ".join(to), **({"Cc": ", ".join(cc)} if cc else {}), "Body": body[:500]}
         def render() -> None:
             if self.p.surface == "email":
                 self.p.add_email_block(approval_block(aid, f"Send email: {subject}", "Awaiting your approval.", details,
                                                       mode=self.kit.email_approval_mode))
             else:
-                self.p.add_card(approval_card(aid, f"Send email: {subject}", "Awaiting your approval. Not sent yet.", details))
+                self.p.add_card(self.kit.pending_card(prop))
         return self._enqueue(cid, render).replace("queued", "queued as a draft; the email has NOT been sent", 1)
